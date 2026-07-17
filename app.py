@@ -27,8 +27,32 @@ WORK_QUOTA = os.environ.get("MM_WORK_QUOTA", "300%")
 FREE_QUOTA = os.environ.get("MM_FREE_QUOTA", "600%")    # 6 threads on this box = unlimited
 
 
-def _current_quota():
-    a, b = (int(x) for x in WORK_HOURS.split("-"))
+def _get_setting(conn, key, default):
+    r = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return r["value"] if r else default
+
+
+def _set_setting(conn, key, value):
+    conn.execute("INSERT INTO settings (key, value) VALUES (?,?) "
+                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+
+
+def _power_state(conn):
+    return {
+        "mode": _get_setting(conn, "power_mode", "auto"),  # auto | full | throttle
+        "work_hours": _get_setting(conn, "work_hours", WORK_HOURS),
+        "work_quota": WORK_QUOTA,
+        "free_quota": FREE_QUOTA,
+    }
+
+
+def _current_quota(conn):
+    p = _power_state(conn)
+    if p["mode"] == "full":
+        return FREE_QUOTA
+    if p["mode"] == "throttle":
+        return WORK_QUOTA
+    a, b = (int(x) for x in p["work_hours"].split("-"))
     h = time.localtime().tm_hour
     in_work = (a <= h < b) if a <= b else (h >= a or h < b)
     return WORK_QUOTA if in_work else FREE_QUOTA
@@ -67,6 +91,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_tracks_movie ON tracks(movie_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_movie ON jobs(movie_id);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 """
 
 
@@ -143,8 +168,8 @@ def _job_ticker():
                 if not conn.execute("SELECT id FROM jobs WHERE status='running' LIMIT 1").fetchone():
                     nxt = conn.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
                     if nxt:
-                        jobs.launch_queued(conn, dict(nxt), LOG_DIR, cpu_quota=_current_quota())
-                quota = _current_quota()
+                        jobs.launch_queued(conn, dict(nxt), LOG_DIR, cpu_quota=_current_quota(conn))
+                quota = _current_quota(conn)
                 for r in conn.execute("SELECT id FROM jobs WHERE status='running'").fetchall():
                     if _applied_quota.get(r["id"]) != quota:
                         jobs.set_cpu_quota(r["id"], quota)
@@ -519,6 +544,47 @@ def delete_sample(movie_id: int, file: str):
     return {"ok": True}
 
 
+# ---------- power / throttle ----------
+
+@app.get("/api/power")
+def get_power():
+    conn = get_db()
+    try:
+        p = _power_state(conn)
+        p["effective_quota"] = _current_quota(conn)
+        return p
+    finally:
+        conn.close()
+
+
+@app.put("/api/power")
+def set_power(body: dict):
+    """body: {mode?: auto|full|throttle, work_hours?: "9-23"}. Applies the new
+    quota to running jobs immediately — no waiting for the 30s ticker."""
+    conn = get_db()
+    try:
+        mode = body.get("mode")
+        if mode is not None:
+            if mode not in ("auto", "full", "throttle"):
+                raise HTTPException(400, "mode must be auto|full|throttle")
+            _set_setting(conn, "power_mode", mode)
+        hours = body.get("work_hours")
+        if hours is not None:
+            if not re.fullmatch(r"([01]?\d|2[0-3])-([01]?\d|2[0-3])", hours):
+                raise HTTPException(400, 'work_hours must look like "9-23" (hours 0-23)')
+            _set_setting(conn, "work_hours", hours)
+        conn.commit()
+        quota = _current_quota(conn)
+        for r in conn.execute("SELECT id FROM jobs WHERE status='running'").fetchall():
+            jobs.set_cpu_quota(r["id"], quota)
+            _applied_quota[r["id"]] = quota
+        p = _power_state(conn)
+        p["effective_quota"] = quota
+        return p
+    finally:
+        conn.close()
+
+
 # ---------- commands / jobs ----------
 
 def _kept_tracks(conn, movie_id):
@@ -597,7 +663,7 @@ def launch_job(movie_id: int, body: dict):
         busy = conn.execute("SELECT id FROM jobs WHERE status='running' LIMIT 1").fetchone()
         cmd_str, out_path = _build_job_cmd(conn, m, kind, quality)
         job_id = jobs.start_job(conn, movie_id, kind, cmd_str, LOG_DIR,
-                                cpu_quota=_current_quota(), queued=bool(busy))
+                                cpu_quota=_current_quota(conn), queued=bool(busy))
         if kind != "sample":  # samples never touch movie state
             now = time.strftime("%Y-%m-%dT%H:%M:%S")
             status = "cleaning" if kind == "remux" else "encoding"

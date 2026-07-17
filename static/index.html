@@ -92,6 +92,14 @@
   <button onclick="doScan()">Scan library</button>
   <button onclick="doCleanupJunk()">Purge library junk</button>
   <span id="scanStatus" class="muted"></span>
+  <span style="margin-left:auto; display:flex; gap:6px; align-items:center;" title="CPU for encode jobs: auto follows work hours, full/throttle override manually">
+    <select id="powerMode" onchange="setPower()">
+      <option value="auto">⚡ auto</option>
+      <option value="full">⚡ full power</option>
+      <option value="throttle">🐢 throttle</option>
+    </select>
+    <input id="workHours" style="width:64px" title="throttled hours, start-end (end exclusive)" onchange="setPower()">
+  </span>
 </header>
 <main id="app"></main>
 
@@ -114,7 +122,25 @@ function fmtSize(bytes) {
 
 // ---------- routing ----------
 window.onhashchange = render;
-window.onload = () => { render(); pollJobs(); setInterval(pollJobs, 3000); };
+window.onload = () => { render(); pollJobs(); setInterval(pollJobs, 3000); loadPower(); };
+
+// ---------- power switch ----------
+async function loadPower() {
+  const p = await api('/api/power').catch(() => null);
+  if (!p) return;
+  document.getElementById('powerMode').value = p.mode;
+  const wh = document.getElementById('workHours');
+  wh.value = p.work_hours;
+  wh.style.display = p.mode === 'auto' ? '' : 'none';
+}
+
+async function setPower() {
+  const body = { mode: document.getElementById('powerMode').value,
+                 work_hours: document.getElementById('workHours').value };
+  await api('/api/power', { method: 'PUT', headers: {'Content-Type':'application/json'},
+                            body: JSON.stringify(body) }).catch(e => alert(e.message));
+  loadPower();
+}
 
 function render() {
   const h = location.hash;

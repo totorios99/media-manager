@@ -40,6 +40,8 @@
   .chip.status-clean { background: #1f5a35; }
   .chip.status-error { background: #6b1f1f; }
   .chip.dup { background: #6b3f1f; }
+  .chip.adv-encode { background: #6b3f1f; color: #ffd9b0; }
+  .chip.adv-keep { background: #1f5a35; color: #b9f0cd; }
   .chip.hdr { background: #3a2a5a; }
   a.back { color: #7aa2ff; cursor: pointer; text-decoration: none; font-size: 13px; }
   .detail-header { display: flex; gap: 20px; margin: 16px 0; }
@@ -89,6 +91,11 @@
     <option value="error">error</option>
   </select>
   <label class="muted"><input type="checkbox" id="dupFilter" onchange="loadGrid()"> duplicates only</label>
+  <select id="adviceFilter" onchange="loadGrid()">
+    <option value="">advice: all</option>
+    <option value="encode">needs shrink</option>
+    <option value="keep">fine as-is</option>
+  </select>
   <button onclick="doScan()">Scan library</button>
   <button onclick="doCleanupJunk()">Purge library junk</button>
   <span id="scanStatus" class="muted"></span>
@@ -158,7 +165,9 @@ async function loadGrid() {
   if (q) params.set('q', q);
   if (status) params.set('status', status);
   if (dup) params.set('dup', 'true');
-  const movies = await api('/api/movies?' + params.toString());
+  let movies = await api('/api/movies?' + params.toString());
+  const adv = document.getElementById('adviceFilter').value;
+  if (adv) movies = movies.filter(m => m.advice === adv && m.status !== 'clean');
   const app = document.getElementById('app');
   app.innerHTML = `<div class="grid">${movies.map(cardHtml).join('')}</div>`;
 }
@@ -175,6 +184,7 @@ function cardHtml(m) {
       <div class="chips">
         <span class="chip status-${m.status}">${m.status}</span>
         ${m.dup ? '<span class="chip dup">DUP</span>' : ''}
+        ${m.advice && m.status !== 'clean' ? `<span class="chip adv-${m.advice}">${m.advice === 'encode' ? 'SHRINK' : 'FINE'}</span>` : ''}
         ${res ? `<span class="chip">${res}</span>` : ''}
         ${m.video_codec ? `<span class="chip">${m.video_codec}</span>` : ''}
         ${m.hdr && m.hdr !== 'SDR' ? `<span class="chip hdr">${m.hdr}</span>` : ''}
@@ -306,11 +316,15 @@ async function renderDetail(id) {
     <div class="step ${s3}">
       <div class="step-head"><span class="num">${s3 === 'done' ? '✓' : '3'}</span>
         <span class="step-title">Process</span>
-        <span class="hint">${m.status === 'clean' ? 'output verified' : running ? 'job running...' : 'quick remux for most files; heavy encode to shrink size'}</span></div>
+        <span class="hint">${m.status === 'clean' ? 'output verified' : running ? 'job running...'
+          : m.advice === 'encode' ? `advice: shrink — ${(m.bitrate/1e6).toFixed(0)} Mbps is above the ${m.height >= 2000 ? 25 : m.height >= 1000 ? 15 : 8} Mbps bar for this resolution`
+          : m.advice === 'keep' ? 'advice: bitrate already reasonable — accept as-is or quick remux'
+          : 'quick remux for most files; heavy encode to shrink size'}</span></div>
       <div class="step-body">
         <div class="actions" style="margin:0 0 8px">
           <button class="primary" onclick="runJob(${id}, 'remux')" ${dis(s3)}>Run Quick Remux (minutes)</button>
           <button onclick="runJob(${id}, 'encode')" ${dis(s3)}>Run Heavy Encode (hours-days)</button>
+          <button onclick="acceptAsIs(${id})" ${dis(s3)}>Accept as-is (no job)</button>
           <button onclick="previewCmd(${id}, 'remux')" ${dis(s3)}>Preview remux cmd</button>
           <button onclick="previewCmd(${id}, 'encode')" ${dis(s3)}>Preview encode cmd</button>
         </div>
@@ -427,6 +441,12 @@ async function saveConfig(id) {
 
 async function callSuggest(id) { await api(`/api/movies/${id}/suggest`, { method: 'POST' }); renderDetail(id); }
 async function callStrip(id) { await api(`/api/movies/${id}/strip-names`, { method: 'POST' }); renderDetail(id); }
+
+async function acceptAsIs(id) {
+  if (!confirm('Mark this file as final? No re-encode — current quality/size is kept.')) return;
+  await api(`/api/movies/${id}/accept`, { method: 'POST' }).catch(e => alert(e.message));
+  renderDetail(id);
+}
 
 async function previewCmd(id, kind) {
   const r = await api(`/api/movies/${id}/command?kind=${kind}`).catch(e => { alert(e.message); throw e; });

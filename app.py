@@ -275,9 +275,25 @@ def junk_apply():
 
 # ---------- movies ----------
 
+# bitrate above this (Mbps, by resolution class) → worth a heavy encode;
+# at/below it the storage win doesn't justify a lossy re-encode
+# ponytail: fixed thresholds; make settings if they ever need tuning
+ADVICE_MBPS_UHD, ADVICE_MBPS_FHD, ADVICE_MBPS_SD = 25, 15, 8
+
+
+def _advice(d):
+    """'encode' | 'keep' | None (no data). Advisory only — never blocks a job."""
+    br, h = d.get("bitrate"), d.get("height") or 0
+    if not br:
+        return None
+    cap = ADVICE_MBPS_UHD if h >= 2000 else ADVICE_MBPS_FHD if h >= 1000 else ADVICE_MBPS_SD
+    return "encode" if br > cap * 1e6 else "keep"
+
+
 def _movie_summary(row, dup_ids):
     d = dict(row)
     d["dup"] = d["id"] in dup_ids
+    d["advice"] = _advice(d)
     return d
 
 
@@ -328,7 +344,9 @@ def get_movie(movie_id: int):
                 "SELECT id, folder, title, year, status FROM movies WHERE tmdb_id=? AND id!=?",
                 (movie["tmdb_id"], movie_id),
             ).fetchall()]
-        return {"movie": dict(movie), "tracks": [dict(t) for t in tracks], "duplicates": siblings}
+        m = dict(movie)
+        m["advice"] = _advice(m)
+        return {"movie": m, "tracks": [dict(t) for t in tracks], "duplicates": siblings}
     finally:
         conn.close()
 
@@ -542,6 +560,26 @@ def delete_sample(movie_id: int, file: str):
     except FileNotFoundError:
         pass
     return {"ok": True}
+
+
+@app.post("/api/movies/{movie_id}/accept")
+def accept_as_is(movie_id: int):
+    """Mark the current file as final — quality already fine, no job needed."""
+    conn = get_db()
+    try:
+        m = _movie_or_404(conn, movie_id)
+        if not m["file"]:
+            raise HTTPException(400, "no source file")
+        busy = conn.execute("SELECT id FROM jobs WHERE movie_id=? AND status IN ('running','queued')",
+                            (movie_id,)).fetchone()
+        if busy:
+            raise HTTPException(409, "a job is running or queued for this movie")
+        conn.execute("UPDATE movies SET status='clean', updated_at=? WHERE id=?",
+                     (time.strftime("%Y-%m-%dT%H:%M:%S"), movie_id))
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
 
 
 # ---------- power / throttle ----------

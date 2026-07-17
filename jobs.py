@@ -15,10 +15,17 @@ EXIT_RE = re.compile(r"EXIT:(\d+)")
 TYPE_RANK = {"video": 0, "audio": 1, "subtitle": 2}
 
 
+# In Docker there is no user systemd; jobs run bare and CPU limits come from
+# the container (compose `cpus:`). Live per-job quota control is host-only.
+NO_SYSTEMD = bool(os.environ.get("MM_NO_SYSTEMD"))
+
+
 def _systemd_wrap(cmd_str, unit, cpu_quota):
     """Run cmd inside a named user scope so its CPU quota can be changed live:
     systemctl --user set-property --runtime <unit>.scope CPUQuota=N%.
     Env vars are set explicitly because the tmux server may predate the session bus vars."""
+    if NO_SYSTEMD:
+        return cmd_str
     uid = os.getuid()
     env = f"XDG_RUNTIME_DIR=/run/user/{uid} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus"
     quota = f"-p CPUQuota={cpu_quota} " if cpu_quota else ""
@@ -57,6 +64,8 @@ def launch_queued(conn, job, log_dir, cpu_quota=None):
 
 
 def set_cpu_quota(job_id, quota):
+    if NO_SYSTEMD:
+        return
     subprocess.run(["systemctl", "--user", "set-property", "--runtime",
                     f"mm-job-{job_id}.scope", f"CPUQuota={quota}"], capture_output=True)
 
@@ -73,6 +82,9 @@ def tail(path, n=4096):
 
 
 def scope_active(job_id):
+    if NO_SYSTEMD:
+        # container tmux has no session-restore plugin, so has-session is honest here
+        return session_alive(f"{TMUX_PREFIX}{job_id}")
     r = subprocess.run(["systemctl", "--user", "is-active", f"mm-job-{job_id}.scope"],
                        capture_output=True, text=True)
     return r.stdout.strip() == "active"

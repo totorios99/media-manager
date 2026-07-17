@@ -1,0 +1,32 @@
+name: media-manager
+services:
+  media-manager:
+    build: .
+    image: media-manager:latest
+    container_name: media-manager
+    restart: unless-stopped
+    ports:
+      - "8500:8500"
+    environment:
+      TMDB_API_KEY: ${TMDB_API_KEY}
+      # ponytail: no live work-hours throttle in docker; cap total CPU below instead
+    volumes:
+      # same path inside and out — DB stores absolute paths
+      - /media/hdd1/Movies:/media/hdd1/Movies
+      - /DATA/AppData/media-manager:/app/data
+    cpus: 5.0
+
+x-casaos:
+  architectures:
+    - amd64
+  main: media-manager
+  author: antonio
+  category: Media
+  title:
+    en_us: Media Manager
+  description:
+    en_us: Movie library cleaner — TMDB matching, track selection, remux and HEVC encode jobs with verification.
+  icon: http://localhost:8500/static/apple-touch-icon.png
+  port_map: "8500"
+  scheme: http
+  index: /

@@ -1,0 +1,13 @@
+#!/bin/sh
+# Copy to run.sh, fill in your TMDB key, chmod 700 run.sh
+cd "$(dirname "$0")"
+export TMDB_API_KEY=YOUR_TMDB_API_KEY
+export MEDIA_ROOT=/media/hdd1/Movies
+# DV-capable HandBrake (Arch pkg strips Dolby Vision — no libdovi).
+# CLI ships inside the ghb flatpak; verified to keep DV (profile 7 -> 8.1).
+export HANDBRAKE_CLI="flatpak run --filesystem=/media/hdd1/Movies --command=HandBrakeCLI fr.handbrake.ghb"
+# CPU schedule: throttle jobs during these local hours (end exclusive), full speed outside
+export MM_WORK_HOURS="9-23"
+export MM_WORK_QUOTA="300%"
+export MM_FREE_QUOTA="600%"
+exec uv run uvicorn app:app --host 0.0.0.0 --port 8500

@@ -1,0 +1,7 @@
+run.sh
+media.db
+media.db-*
+logs/
+__pycache__/
+.venv/
+data/

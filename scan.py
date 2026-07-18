@@ -171,8 +171,8 @@ def tmdb_get_movie(tmdb_id, api_key):
 
 
 PREMIUM_AUDIO_ORDER = ["dts-hd", "dts", "e-ac-3", "eac3", "ac-3", "ac3", "aac"]
-# never auto-picked as the default: some clients can't play these and Jellyfin
-# transcodes; user re-enables manually when the Atmos experience is wanted
+# kept in the file but never auto-picked as default/first: some clients can't
+# play these and Jellyfin transcodes — the compatible pick leads instead
 AVOID_DEFAULT_AUDIO = ("truehd", "atmos")
 
 
@@ -202,7 +202,7 @@ def _sub_class(t):
 
 def suggest_tracks(conn, movie_id):
     """One audio track per language (orig lang first + default), best codec that
-    isn't TrueHD/Atmos (client compat — re-enable manually for the Atmos file).
+    isn't TrueHD/Atmos; TrueHD/Atmos kept after the compatible picks, never default.
     Subs: forced first (orig lang default), then PGS, then SRT fallback, one per
     (class, lang). Sets status='ready'; overwrites any prior config."""
     movie = conn.execute("SELECT * FROM movies WHERE id=?", (movie_id,)).fetchone()
@@ -241,6 +241,13 @@ def suggest_tracks(conn, movie_id):
         pick = next((t for t in cands if not _audio_avoided(t["codec"])), cands[0])
         mark(pick, lang, default=first_audio, forced=False)
         first_audio = False
+    # TrueHD/Atmos stays in the file for the premium experience — kept after the
+    # compatible picks, never default (one per language)
+    for lang in wanted:
+        t = next((t for t in audio if t["lang"] == lang and _audio_avoided(t["codec"])
+                  and t["id"] not in plan), None)
+        if t:
+            mark(t, lang, default=False, forced=False)
 
     # subs, output order: forced (movie language first, that one default),
     # then one image sub (PGS, VobSub fallback) per language, then one SRT
@@ -577,7 +584,8 @@ if __name__ == "__main__":
     """)
     suggest_tracks(c, 1)
     got = {r["id"]: dict(r) for r in c.execute("SELECT * FROM tracks")}
-    assert got[2]["keep"] == 0, "TrueHD must stay unchecked"
+    assert got[2]["keep"] == 1 and got[2]["out_default"] == 0 and got[2]["out_order"] == 2, \
+        "TrueHD kept, never default, after the compatible picks"
     assert got[3]["keep"] == 1 and got[3]["out_default"] == 1 and got[3]["out_order"] == 0
     assert got[4]["keep"] == 1 and got[4]["out_default"] == 0 and got[4]["out_order"] == 1
     assert got[5]["keep"] == 1 and got[5]["out_forced"] == 1 and got[5]["out_default"] == 1 and got[5]["out_order"] == 0

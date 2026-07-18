@@ -170,8 +170,10 @@ def tmdb_get_movie(tmdb_id, api_key):
     }
 
 
-PREMIUM_AUDIO_ORDER = ["truehd", "dts-hd", "dts", "e-ac-3", "eac3", "ac-3", "ac3", "aac"]
-COMPAT_AUDIO = ("ac-3", "ac3", "aac")
+PREMIUM_AUDIO_ORDER = ["dts-hd", "dts", "e-ac-3", "eac3", "ac-3", "ac3", "aac"]
+# never auto-picked as the default: some clients can't play these and Jellyfin
+# transcodes; user re-enables manually when the Atmos experience is wanted
+AVOID_DEFAULT_AUDIO = ("truehd", "atmos")
 
 
 def _audio_rank(codec):
@@ -182,9 +184,27 @@ def _audio_rank(codec):
     return len(PREMIUM_AUDIO_ORDER)
 
 
+def _audio_avoided(codec):
+    c = (codec or "").lower()
+    return any(a in c for a in AVOID_DEFAULT_AUDIO)
+
+
+def _sub_class(t):
+    c = (t["codec"] or "").lower()
+    if "pgs" in c:
+        return "pgs"
+    if "vobsub" in c:
+        return "vob"
+    if t.get("ext_path") or "subrip" in c or "srt" in c:
+        return "srt"
+    return "other"
+
+
 def suggest_tracks(conn, movie_id):
-    """Applies the premium+compatibility keep/order/lang/flag strategy (spec section 2)
-    to all tracks of a movie and sets status='ready'. Overwrites any prior config."""
+    """One audio track per language (orig lang first + default), best codec that
+    isn't TrueHD/Atmos (client compat — re-enable manually for the Atmos file).
+    Subs: forced first (orig lang default), then PGS, then SRT fallback, one per
+    (class, lang). Sets status='ready'; overwrites any prior config."""
     movie = conn.execute("SELECT * FROM movies WHERE id=?", (movie_id,)).fetchone()
     if not movie:
         return
@@ -211,35 +231,38 @@ def suggest_tracks(conn, movie_id):
                           "out_default": 1 if default else 0, "out_forced": 1 if forced else 0}
         order[t["type"]] += 1
 
+    # audio: one track per language, best codec that isn't TrueHD/Atmos;
+    # avoided codecs only win when they're the sole option for that language
     first_audio = True
     for lang in wanted:
         cands = sorted([t for t in audio if t["lang"] == lang], key=lambda t: _audio_rank(t["codec"]))
         if not cands:
             continue
-        premium = cands[0]
-        mark(premium, lang, default=first_audio, forced=False)
+        pick = next((t for t in cands if not _audio_avoided(t["codec"])), cands[0])
+        mark(pick, lang, default=first_audio, forced=False)
         first_audio = False
-        compat = next((t for t in cands[1:]
-                        if any(c in (t["codec"] or "").lower() for c in COMPAT_AUDIO)
-                        and _audio_rank(t["codec"]) != _audio_rank(premium["codec"])), None)
-        if compat:
-            mark(compat, lang, default=False, forced=False)
 
+    # subs, output order: forced (movie language first, that one default),
+    # then one image sub (PGS, VobSub fallback) per language, then one SRT
+    # per language. One track per (class, lang) — extras stay unchecked.
+    first_forced = True
     for lang in wanted:
-        if lang == orig3 and lang not in ("eng", "spa"):
-            continue  # premium/compat sub strategy targets eng+spa specifically
-        cands = [t for t in subs if t["lang"] == lang and not t["forced_flag"]]
-        pgs = next((t for t in cands if "pgs" in (t["codec"] or "").lower()), None)
-        srt = next((t for t in cands if t.get("ext_path")
-                     or "subrip" in (t["codec"] or "").lower() or t["codec"] == "SRT"), None)
-        if pgs:
-            mark(pgs, lang, default=False, forced=False)
-        if srt and srt is not pgs:
+        f = next((t for t in subs if t["forced_flag"]
+                  and (t["lang"] == lang or (t["lang"] == "und" and lang == (orig3 or "eng")))), None)
+        if f:
+            mark(f, lang, default=first_forced, forced=True)
+            first_forced = False
+    for lang in wanted:
+        cands = [t for t in subs if t["lang"] == lang and not t["forced_flag"] and t["id"] not in plan]
+        img = next((t for t in cands if _sub_class(t) == "pgs"), None) \
+            or next((t for t in cands if _sub_class(t) == "vob"), None)
+        if img:
+            mark(img, lang, default=False, forced=False)
+    for lang in wanted:
+        cands = [t for t in subs if t["lang"] == lang and not t["forced_flag"] and t["id"] not in plan]
+        srt = next((t for t in cands if _sub_class(t) == "srt"), None)
+        if srt:
             mark(srt, lang, default=False, forced=False)
-
-    for t in subs:
-        if t["forced_flag"] and t["id"] not in plan:
-            mark(t, t["lang"] if t["lang"] != "und" else (orig3 or "eng"), default=True, forced=True)
 
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     for t in tracks:
@@ -530,4 +553,35 @@ if __name__ == "__main__":
             open(os.path.join(d, n), "w").close()
         junk = set(find_movie_junk(d, {"Movie (2016).mkv", "Movie.eng.srt"}))
         assert junk == {"www.YTS.MX.jpg", "YIFYStatus.com.txt", "RARBG.txt", "._Movie (2016)"}, junk
+
+    # suggest_tracks: TrueHD skipped for default, forced sub first+default, dup PGS unchecked
+    import sqlite3 as _sq
+    c = _sq.connect(":memory:")
+    c.row_factory = _sq.Row
+    c.executescript("""
+      CREATE TABLE movies (id INTEGER PRIMARY KEY, original_language TEXT, status TEXT, updated_at TEXT);
+      CREATE TABLE tracks (id INTEGER PRIMARY KEY, movie_id INT, mkv_id INT, type TEXT, codec TEXT,
+        lang TEXT, name TEXT, channels INT, default_flag INT DEFAULT 0, forced_flag INT DEFAULT 0,
+        ext_path TEXT, keep INT DEFAULT 1, out_order INT DEFAULT 0, out_lang TEXT DEFAULT '',
+        out_default INT DEFAULT 0, out_forced INT DEFAULT 0, out_name TEXT DEFAULT '');
+      INSERT INTO movies VALUES (1, 'en', 'unprocessed', NULL);
+      INSERT INTO tracks (id, movie_id, mkv_id, type, codec, lang, forced_flag) VALUES
+        (1,1,0,'video','HEVC','und',0),
+        (2,1,1,'audio','TrueHD Atmos','eng',0),
+        (3,1,2,'audio','DTS-HD Master Audio','eng',0),
+        (4,1,3,'audio','AC-3','spa',0),
+        (5,1,4,'subtitle','HDMV PGS','spa',1),
+        (6,1,5,'subtitle','HDMV PGS','spa',0),
+        (7,1,6,'subtitle','HDMV PGS','spa',0),
+        (8,1,7,'subtitle','SubRip/SRT','eng',0);
+    """)
+    suggest_tracks(c, 1)
+    got = {r["id"]: dict(r) for r in c.execute("SELECT * FROM tracks")}
+    assert got[2]["keep"] == 0, "TrueHD must stay unchecked"
+    assert got[3]["keep"] == 1 and got[3]["out_default"] == 1 and got[3]["out_order"] == 0
+    assert got[4]["keep"] == 1 and got[4]["out_default"] == 0 and got[4]["out_order"] == 1
+    assert got[5]["keep"] == 1 and got[5]["out_forced"] == 1 and got[5]["out_default"] == 1 and got[5]["out_order"] == 0
+    assert got[6]["keep"] == 1 and got[6]["out_order"] == 1
+    assert got[7]["keep"] == 0, "duplicate PGS must stay unchecked"
+    assert got[8]["keep"] == 1 and got[8]["out_order"] == 2
     print("scan.py self-check OK")

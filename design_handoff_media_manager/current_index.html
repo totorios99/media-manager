@@ -1,0 +1,537 @@
+<title>Media Manager</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="/static/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Media Manager">
+<meta name="theme-color" content="#1b1e24">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #14161a; color: #e6e6e6; margin: 0; }
+  header { position: sticky; top: 0; background: #1b1e24; padding: 10px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid #2a2e37; z-index: 5; }
+  header h1 { font-size: 16px; margin: 0 12px 0 0; cursor: pointer; }
+  header input, header select, button { background: #22262e; color: #e6e6e6; border: 1px solid #363b46; border-radius: 6px; padding: 6px 10px; font-size: 13px; }
+  button { cursor: pointer; }
+  button:hover { background: #2a2f39; }
+  button.primary { background: #2f6fed; border-color: #2f6fed; }
+  button.primary:hover { background: #3a7bff; }
+  button.danger { background: #7a2b2b; border-color: #7a2b2b; }
+  main { padding: 16px; }
+  #jobs-strip { display: flex; flex-direction: column; gap: 6px; padding: 8px 16px; background: #1b1e24; border-bottom: 1px solid #2a2e37; }
+  .job-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .job-row .bar { flex: 1; height: 6px; background: #2a2e37; border-radius: 3px; overflow: hidden; }
+  .job-row .bar > div { height: 100%; background: #2f6fed; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; }
+  .card { background: #1b1e24; border: 1px solid #262a33; border-radius: 8px; overflow: hidden; cursor: pointer; }
+  .card:hover { border-color: #3a7bff; }
+  .card img { width: 100%; aspect-ratio: 2/3; object-fit: cover; background: #0e1013; display: block; }
+  .card .noposter { width: 100%; aspect-ratio: 2/3; display: flex; align-items: center; justify-content: center; color: #555; font-size: 12px; text-align: center; padding: 8px; }
+  .card .body { padding: 8px; }
+  .card .title { font-size: 13px; font-weight: 600; line-height: 1.3; }
+  .card .meta { font-size: 11px; color: #999; margin-top: 4px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .chip { font-size: 10px; padding: 2px 6px; border-radius: 10px; background: #2a2e37; color: #ccc; }
+  .chip.status-unprocessed { background: #444; }
+  .chip.status-ready { background: #4a5d2a; }
+  .chip.status-cleaning, .chip.status-encoding, .chip.status-working { background: #5a4a1f; }
+  .chip.status-clean { background: #1f5a35; }
+  .chip.status-error { background: #6b1f1f; }
+  .chip.dup { background: #6b3f1f; }
+  .chip.adv-encode { background: #6b3f1f; color: #ffd9b0; }
+  .chip.adv-keep { background: #1f5a35; color: #b9f0cd; }
+  .chip.hdr { background: #3a2a5a; }
+  a.back { color: #7aa2ff; cursor: pointer; text-decoration: none; font-size: 13px; }
+  .detail-header { display: flex; gap: 20px; margin: 16px 0; }
+  .detail-header img { width: 180px; border-radius: 8px; }
+  .detail-header .info h2 { margin: 0 0 6px; }
+  table.tracks { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  table.tracks th, table.tracks td { padding: 6px 8px; border-bottom: 1px solid #262a33; font-size: 12px; text-align: left; }
+  table.tracks tr[draggable="true"] { cursor: grab; }
+  table.tracks tr.dragging { opacity: 0.4; }
+  table.tracks input[type=text], table.tracks select { background: #22262e; color: #e6e6e6; border: 1px solid #363b46; border-radius: 4px; padding: 3px 5px; font-size: 12px; width: 100%; }
+  .section-title { margin: 18px 0 6px; font-size: 13px; color: #999; text-transform: uppercase; letter-spacing: .05em; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+  pre.cmd { background: #0e1013; border: 1px solid #262a33; border-radius: 6px; padding: 10px; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  .muted { color: #888; font-size: 12px; }
+  .tmdb-cand { display: flex; gap: 8px; align-items: center; padding: 6px; border: 1px solid #262a33; border-radius: 6px; margin-bottom: 6px; cursor: pointer; }
+  .tmdb-cand:hover { border-color: #3a7bff; }
+  .tmdb-cand img { width: 40px; border-radius: 4px; }
+  .step { border: 1px solid #262a33; border-radius: 8px; margin: 12px 0; overflow: hidden; }
+  .step-head { display: flex; gap: 10px; align-items: center; padding: 10px 12px; background: #1b1e24; }
+  .num { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; background: #2a2e37; color: #aaa; flex: none; }
+  .step.done .num { background: #1f5a35; color: #fff; }
+  .step.active .num { background: #2f6fed; color: #fff; }
+  .step.active { border-color: #2f6fed; }
+  .step-title { font-weight: 600; font-size: 13px; }
+  .step .hint { color: #888; font-size: 12px; margin-left: auto; text-align: right; }
+  .step-body { padding: 12px; }
+  .step.pending { opacity: .55; }
+  .step.done .step-body { display: none; }
+  .step.done.open .step-body { display: block; }
+  .step.done .step-head { cursor: pointer; }
+  tr.dropped { opacity: .45; }
+</style>
+<body>
+<div id="jobs-strip" style="display:none"></div>
+<header>
+  <h1 onclick="location.hash=''">Media Manager</h1>
+  <input id="q" placeholder="search..." oninput="debounceLoad()">
+  <select id="statusFilter" onchange="loadGrid()">
+    <option value="">all statuses</option>
+    <option value="unprocessed">unprocessed</option>
+    <option value="ready">ready</option>
+    <option value="cleaning">cleaning</option>
+    <option value="encoding">encoding</option>
+    <option value="working">working</option>
+    <option value="clean">clean</option>
+    <option value="stub">stub</option>
+    <option value="error">error</option>
+  </select>
+  <label class="muted"><input type="checkbox" id="dupFilter" onchange="loadGrid()"> duplicates only</label>
+  <select id="adviceFilter" onchange="loadGrid()">
+    <option value="">advice: all</option>
+    <option value="encode">needs shrink</option>
+    <option value="keep">fine as-is</option>
+  </select>
+  <button onclick="doScan()">Scan library</button>
+  <button onclick="doCleanupJunk()">Purge library junk</button>
+  <span id="scanStatus" class="muted"></span>
+  <span style="margin-left:auto; display:flex; gap:6px; align-items:center;" title="CPU for encode jobs: auto follows work hours, full/throttle override manually">
+    <select id="powerMode" onchange="setPower()">
+      <option value="auto">⚡ auto</option>
+      <option value="full">⚡ full power</option>
+      <option value="throttle">🐢 throttle</option>
+    </select>
+    <input id="workHours" style="width:64px" title="throttled hours, start-end (end exclusive)" onchange="setPower()">
+  </span>
+</header>
+<main id="app"></main>
+
+<script>
+const api = (path, opts) => fetch(path, opts).then(async r => {
+  if (!r.ok) { const t = await r.text(); throw new Error(t || r.statusText); }
+  return r.status === 204 ? null : r.json();
+});
+
+let debounceTimer;
+function debounceLoad() { clearTimeout(debounceTimer); debounceTimer = setTimeout(loadGrid, 250); }
+
+function posterUrl(p) { return p ? `https://image.tmdb.org/t/p/w342${p}` : null; }
+
+function fmtSize(bytes) {
+  if (!bytes) return '';
+  const gb = bytes / 1e9;
+  return gb >= 1 ? gb.toFixed(1) + 'G' : (bytes / 1e6).toFixed(0) + 'M';
+}
+
+// ---------- routing ----------
+window.onhashchange = render;
+window.onload = () => { render(); pollJobs(); setInterval(pollJobs, 3000); loadPower(); };
+
+// ---------- power switch ----------
+async function loadPower() {
+  const p = await api('/api/power').catch(() => null);
+  if (!p) return;
+  document.getElementById('powerMode').value = p.mode;
+  const wh = document.getElementById('workHours');
+  wh.value = p.work_hours;
+  wh.style.display = p.mode === 'auto' ? '' : 'none';
+}
+
+async function setPower() {
+  const body = { mode: document.getElementById('powerMode').value,
+                 work_hours: document.getElementById('workHours').value };
+  await api('/api/power', { method: 'PUT', headers: {'Content-Type':'application/json'},
+                            body: JSON.stringify(body) }).catch(e => alert(e.message));
+  loadPower();
+}
+
+function render() {
+  const h = location.hash;
+  const m = h.match(/^#\/movie\/(\d+)/);
+  if (m) renderDetail(parseInt(m[1]));
+  else loadGrid();
+}
+
+// ---------- grid ----------
+async function loadGrid() {
+  const q = document.getElementById('q').value;
+  const status = document.getElementById('statusFilter').value;
+  const dup = document.getElementById('dupFilter').checked;
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (status) params.set('status', status);
+  if (dup) params.set('dup', 'true');
+  let movies = await api('/api/movies?' + params.toString());
+  const adv = document.getElementById('adviceFilter').value;
+  if (adv) movies = movies.filter(m => m.advice === adv && m.status !== 'clean');
+  const app = document.getElementById('app');
+  app.innerHTML = `<div class="grid">${movies.map(cardHtml).join('')}</div>`;
+}
+
+function cardHtml(m) {
+  const title = m.title || m.clean_title || m.folder;
+  const year = m.year || m.guess_year || '';
+  const poster = posterUrl(m.poster_path);
+  const res = m.height ? (m.height >= 2000 ? '4K' : m.height >= 1000 ? '1080p' : m.height + 'p') : '';
+  return `<div class="card" onclick="location.hash='#/movie/${m.id}'">
+    ${poster ? `<img src="${poster}" loading="lazy">` : `<div class="noposter">${escapeHtml(title)}</div>`}
+    <div class="body">
+      <div class="title">${escapeHtml(title)} ${year ? `(${year})` : ''}</div>
+      <div class="chips">
+        <span class="chip status-${m.status}">${m.status}</span>
+        ${m.dup ? '<span class="chip dup">DUP</span>' : ''}
+        ${m.advice && m.status !== 'clean' ? `<span class="chip adv-${m.advice}">${m.advice === 'encode' ? 'SHRINK' : 'FINE'}</span>` : ''}
+        ${res ? `<span class="chip">${res}</span>` : ''}
+        ${m.video_codec ? `<span class="chip">${m.video_codec}</span>` : ''}
+        ${m.hdr && m.hdr !== 'SDR' ? `<span class="chip hdr">${m.hdr}</span>` : ''}
+        ${m.size_bytes ? `<span class="chip">${fmtSize(m.size_bytes)}</span>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+function escapeHtml(s) { return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function doScan() {
+  await api('/api/scan', { method: 'POST' }).catch(e => alert(e.message));
+  pollScan();
+}
+async function pollScan() {
+  const s = await api('/api/scan/status');
+  document.getElementById('scanStatus').textContent = s.running ? `scanning ${s.done}/${s.total}: ${s.current}` : '';
+  if (s.running) setTimeout(pollScan, 1000);
+  else if (!location.hash || location.hash === '#/') loadGrid();
+}
+async function doCleanupJunk() {
+  const p = await api('/api/junk/preview');
+  if (!p.total) { alert('No junk files found.'); return; }
+  const sample = Object.entries(p.folders).flatMap(([folder, files]) =>
+    files.map(f => `${folder === '__top_level__' ? '' : folder + '/'}${f}`)
+  ).slice(0, 20).join('\n');
+  const more = p.total > 20 ? `\n...and ${p.total - 20} more` : '';
+  if (!confirm(`Delete ${p.total} junk file(s) across the library?\n\n${sample}${more}`)) return;
+  const r = await api('/api/junk/apply', { method: 'POST' });
+  alert(`Removed ${r.removed} junk file(s).${r.errors.length ? '\n' + r.errors.length + ' error(s).' : ''}`);
+}
+
+// ---------- jobs strip ----------
+async function pollJobs() {
+  const jobs = await api('/api/jobs').catch(() => []);
+  const active = jobs.filter(j => j.status === 'running' || j.status === 'queued');
+  const strip = document.getElementById('jobs-strip');
+  if (!active.length) { strip.style.display = 'none'; return; }
+  strip.style.display = 'flex';
+  const KIND_LABEL = { remux: 'Quick Remux', encode: 'Heavy Encode', sample: 'Sample' };
+  strip.innerHTML = active.map(j => `<div class="job-row">
+    <span><b>${j.movie_title || 'movie ' + j.movie_id}</b> — ${KIND_LABEL[j.kind] || j.kind} (#${j.id})</span>
+    ${j.status === 'queued'
+      ? '<div class="bar"></div><span>queued</span>'
+      : `<div class="bar"><div style="width:${j.progress || 0}%"></div></div><span>${(j.progress || 0).toFixed(0)}%</span>`}
+  </div>`).join('');
+}
+
+// ---------- detail ----------
+let dragSrcIdx = null;
+
+async function renderDetail(id) {
+  const app = document.getElementById('app');
+  app.innerHTML = '<p class="muted">loading...</p>';
+  const data = await api(`/api/movies/${id}`).catch(e => { app.innerHTML = `<p>${e.message}</p>`; throw e; });
+  const m = data.movie;
+  const title = m.title || m.clean_title || m.folder;
+  const poster = posterUrl(m.poster_path);
+  const video = data.tracks.find(t => t.type === 'video');
+  const audio = data.tracks.filter(t => t.type === 'audio');
+  const subs = data.tracks.filter(t => t.type === 'subtitle');
+
+  // --- workflow step states: done / active / pending ---
+  const safeStd = m.title && m.year ? `${m.title} (${m.year})`.replace(/[<>:"/\\|?*]/g, '').trim() : null;
+  const running = ['cleaning', 'encoding', 'working'].includes(m.status);
+  const configured = ['ready', 'cleaning', 'encoding', 'working', 'clean', 'error'].includes(m.status);
+  const s1 = m.tmdb_id ? 'done' : 'active';
+  const s2 = s1 !== 'done' ? 'pending' : (configured ? 'done' : 'active');
+  const s3 = m.status === 'clean' ? 'done' : (running || s2 === 'done' ? 'active' : 'pending');
+  const finalized = m.status === 'clean' && !m.output_file && m.folder === safeStd && m.file && m.file.startsWith(safeStd);
+  const s4 = s3 !== 'done' ? 'pending' : (finalized ? 'done' : 'active');
+  const dis = st => st === 'pending' ? 'disabled' : '';
+
+  app.innerHTML = `
+    <a class="back" onclick="location.hash=''">&larr; back to library</a>
+    <div class="detail-header">
+      ${poster ? `<img src="${poster}">` : ''}
+      <div class="info">
+        <h2>${escapeHtml(title)} ${m.year ? `(${m.year})` : ''}</h2>
+        <div class="muted">${escapeHtml(m.folder)}${m.file ? ' / ' + escapeHtml(m.file) : ''}</div>
+        <div class="chips">
+          <span class="chip status-${m.status}">${m.status}</span>
+          ${m.width ? `<span class="chip">${m.width}x${m.height}</span>` : ''}
+          ${m.video_codec ? `<span class="chip">${m.video_codec}</span>` : ''}
+          ${m.bitrate ? `<span class="chip">${(m.bitrate/1e6).toFixed(1)} Mbps</span>` : ''}
+          ${m.hdr ? `<span class="chip hdr">${m.hdr}</span>` : ''}
+          ${m.size_bytes ? `<span class="chip">${fmtSize(m.size_bytes)}</span>` : ''}
+          ${m.original_language ? `<span class="chip">orig: ${m.original_language}</span>` : ''}
+        </div>
+        ${data.duplicates.length ? `<div class="muted" style="margin-top:6px">Duplicates: ${data.duplicates.map(d => `<a class="back" onclick="location.hash='#/movie/${d.id}'">${escapeHtml(d.folder)}</a>`).join(', ')}</div>` : ''}
+      </div>
+    </div>
+
+    <div class="step ${s1}">
+      <div class="step-head"><span class="num">${s1 === 'done' ? '✓' : '1'}</span>
+        <span class="step-title">Match on TMDB</span>
+        <span class="hint">${m.tmdb_id ? `matched: ${escapeHtml(m.title)} (${m.year})` : 'find the canonical title'}</span></div>
+      <div class="step-body">
+        <div class="actions" style="margin:0">
+          <input id="tmdbQ" placeholder="search TMDB..." style="width:220px" value="${escapeHtml(m.clean_title || '')}">
+          <button onclick="tmdbSearch(${id})">${m.tmdb_id ? 'Re-match' : 'Search'}</button>
+        </div>
+        <div id="tmdbResults"></div>
+      </div>
+    </div>
+
+    <div class="step ${s2}">
+      <div class="step-head"><span class="num">${s2 === 'done' ? '✓' : '2'}</span>
+        <span class="step-title">Configure tracks</span>
+        <span class="hint">pick what to keep, order it, flag it — then save</span></div>
+      <div class="step-body">
+        <div class="section-title">Video</div>
+        <table class="tracks"><tr><td>${video ? escapeHtml(video.codec) : '-'}</td><td>${video ? video.lang : ''}</td><td class="muted">always kept</td></tr></table>
+        <div class="section-title">Audio (drag to reorder — top = primary)</div>
+        <table class="tracks" id="audioTable"><thead><tr><th></th><th>keep</th><th>src</th><th>ch</th><th>lang</th><th>default</th><th>name</th></tr></thead>
+          <tbody>${audio.map(trackRow).join('')}</tbody></table>
+        <div class="section-title">Subtitles (drag to reorder)</div>
+        <table class="tracks" id="subTable"><thead><tr><th></th><th>keep</th><th>src</th><th>lang</th><th>default</th><th>forced</th><th>name</th></tr></thead>
+          <tbody>${subs.map(trackRow).join('')}</tbody></table>
+        <div class="actions">
+          <button onclick="callSuggest(${id})" ${dis(s2)}>Auto-suggest</button>
+          <button onclick="callStrip(${id})" ${dis(s2)}>Strip junk names</button>
+          <button class="primary" onclick="saveConfig(${id})" ${dis(s2)}>Save configuration</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="step ${s3}">
+      <div class="step-head"><span class="num">${s3 === 'done' ? '✓' : '3'}</span>
+        <span class="step-title">Process</span>
+        <span class="hint">${m.status === 'clean' ? 'output verified' : running ? 'job running...'
+          : m.advice === 'encode' ? `advice: shrink — ${(m.bitrate/1e6).toFixed(0)} Mbps is above the ${m.height >= 2000 ? 25 : m.height >= 1000 ? 15 : 8} Mbps bar for this resolution`
+          : m.advice === 'keep' ? 'advice: bitrate already reasonable — accept as-is or quick remux'
+          : 'quick remux for most files; heavy encode to shrink size'}</span></div>
+      <div class="step-body">
+        <div class="actions" style="margin:0 0 8px">
+          <button class="primary" onclick="runJob(${id}, 'remux')" ${dis(s3)}>Run Quick Remux (minutes)</button>
+          <button onclick="runJob(${id}, 'encode')" ${dis(s3)}>Run Heavy Encode (hours-days)</button>
+          <button onclick="acceptAsIs(${id})" ${dis(s3)}>Accept as-is (no job)</button>
+          <button onclick="previewCmd(${id}, 'remux')" ${dis(s3)}>Preview remux cmd</button>
+          <button onclick="previewCmd(${id}, 'encode')" ${dis(s3)}>Preview encode cmd</button>
+        </div>
+        <div class="section-title">Encode tweaks</div>
+        <div class="actions" style="margin:0 0 8px">
+          <label class="muted">RF <input type="number" id="rfInput" value="22" min="14" max="32" style="width:60px"></label>
+          <button onclick="runSample(${id})" ${dis(s3)}>Encode 30s sample</button>
+          <span class="muted">lower RF = bigger file, better quality — heavy encode uses this RF too</span>
+        </div>
+        <div id="samplesList"></div>
+        <pre class="cmd" id="cmdPreview" style="display:none"></pre>
+        <div id="jobStatus" class="muted"></div>
+      </div>
+    </div>
+
+    <div class="step ${s4}">
+      <div class="step-head"><span class="num">${s4 === 'done' ? '✓' : '4'}</span>
+        <span class="step-title">Finalize</span>
+        <span class="hint">${finalized ? 'all done — clean and standard-named' : 'delete original, rename everything to “Title (Year)”'}</span></div>
+      <div class="step-body">
+        <div class="actions" style="margin:0">
+          <button class="danger" onclick="doFinalize(${id})" ${s4 === 'active' ? '' : 'disabled'}>Finalize: delete original + rename</button>
+          <button onclick="doRename(${id})" ${m.tmdb_id ? '' : 'disabled'}>Rename only (keep original)</button>
+        </div>
+      </div>
+    </div>
+  `;
+  setupDragDrop('audioTable');
+  setupDragDrop('subTable');
+  loadSamples(id, m.size_bytes);
+  document.querySelectorAll('.step.done .step-head').forEach(h =>
+    h.onclick = () => h.parentElement.classList.toggle('open'));
+  if (running) watchMovieJob(id);
+}
+
+function trackRow(t) {
+  const off = t.keep ? '' : 'disabled';
+  return `<tr draggable="true" data-id="${t.id}" data-type="${t.type}" class="${t.keep ? '' : 'dropped'}">
+    <td>⠿</td>
+    <td><input type="checkbox" ${t.keep ? 'checked' : ''} data-f="keep" onchange="keepChanged(this)"></td>
+    <td>${escapeHtml(t.codec || '')} <span class="muted">(${t.lang}${t.forced_flag ? ', forced' : ''}${t.default_flag ? ', def' : ''}${t.ext_path ? ', ext' : ''})</span></td>
+    ${t.type === 'audio' ? `<td>${t.channels || ''}</td>` : ''}
+    <td><select data-f="out_lang" ${off}>${['eng','spa','und',t.out_lang].filter((v,i,a)=>v&&a.indexOf(v)===i).map(l => `<option value="${l}" ${t.out_lang===l?'selected':''}>${l}</option>`).join('')}</select></td>
+    <td><input type="checkbox" ${t.keep && t.out_default ? 'checked' : ''} data-f="out_default" ${off} onchange="defaultChanged(this)"></td>
+    ${t.type === 'subtitle' ? `<td><input type="checkbox" ${t.keep && t.out_forced ? 'checked' : ''} data-f="out_forced" ${off}></td>` : ''}
+    <td><input type="text" value="${escapeHtml(t.out_name || '')}" data-f="out_name" ${off}></td>
+  </tr>`;
+}
+
+// a track you don't keep can't carry flags: uncheck + disable its other inputs
+function keepChanged(cb) {
+  const row = cb.closest('tr');
+  row.classList.toggle('dropped', !cb.checked);
+  row.querySelectorAll('select, input[type=text], input[type=checkbox]:not([data-f=keep])').forEach(el => {
+    el.disabled = !cb.checked;
+    if (!cb.checked && el.type === 'checkbox') el.checked = false;
+  });
+}
+
+// only one default track per type (players pick one anyway)
+function defaultChanged(cb) {
+  if (!cb.checked) return;
+  cb.closest('tbody').querySelectorAll('[data-f=out_default]').forEach(el => { if (el !== cb) el.checked = false; });
+}
+
+async function doFinalize(id) {
+  if (!confirm('Delete the original source file and rename everything to standard? The original cannot be recovered.')) return;
+  try {
+    await api(`/api/movies/${id}/delete-original`, { method: 'POST' });
+  } catch (e) { alert(e.message); return; }
+  await api(`/api/movies/${id}/rename`, { method: 'POST' }).catch(e => alert(e.message));
+  renderDetail(id);
+}
+
+function setupDragDrop(tableId) {
+  const tbody = document.querySelector(`#${tableId} tbody`);
+  if (!tbody) return;
+  [...tbody.rows].forEach(row => {
+    row.addEventListener('dragstart', () => { dragSrcIdx = row; row.classList.add('dragging'); });
+    row.addEventListener('dragend', () => row.classList.remove('dragging'));
+    row.addEventListener('dragover', e => e.preventDefault());
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      if (dragSrcIdx && dragSrcIdx !== row) {
+        const rows = [...tbody.rows];
+        const from = rows.indexOf(dragSrcIdx), to = rows.indexOf(row);
+        if (from < to) row.after(dragSrcIdx); else row.before(dragSrcIdx);
+      }
+    });
+  });
+}
+
+function collectTracks(tableId, type) {
+  const rows = [...document.querySelectorAll(`#${tableId} tbody tr`)];
+  return rows.map((row, i) => {
+    const get = f => row.querySelector(`[data-f="${f}"]`);
+    return {
+      id: parseInt(row.dataset.id),
+      keep: get('keep').checked ? 1 : 0,
+      out_order: i,
+      out_lang: get('out_lang').value,
+      out_default: get('out_default').checked ? 1 : 0,
+      out_forced: type === 'subtitle' ? (get('out_forced').checked ? 1 : 0) : 0,
+      out_name: get('out_name').value,
+    };
+  });
+}
+
+async function saveConfig(id) {
+  const tracks = [...collectTracks('audioTable', 'audio'), ...collectTracks('subTable', 'subtitle')];
+  await api(`/api/movies/${id}/config`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({tracks}) });
+  renderDetail(id);
+}
+
+async function callSuggest(id) { await api(`/api/movies/${id}/suggest`, { method: 'POST' }); renderDetail(id); }
+async function callStrip(id) { await api(`/api/movies/${id}/strip-names`, { method: 'POST' }); renderDetail(id); }
+
+async function acceptAsIs(id) {
+  if (!confirm('Mark this file as final? No re-encode — current quality/size is kept.')) return;
+  await api(`/api/movies/${id}/accept`, { method: 'POST' }).catch(e => alert(e.message));
+  renderDetail(id);
+}
+
+async function previewCmd(id, kind) {
+  const r = await api(`/api/movies/${id}/command?kind=${kind}`).catch(e => { alert(e.message); throw e; });
+  const pre = document.getElementById('cmdPreview');
+  pre.style.display = 'block';
+  pre.textContent = r.cmd;
+}
+
+async function runJob(id, kind) {
+  if (!confirm(`Run ${kind} now? This modifies files on disk.`)) return;
+  const quality = parseInt(document.getElementById('rfInput')?.value) || 22;
+  const r = await api(`/api/movies/${id}/jobs`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({kind, quality}) })
+    .catch(e => { alert(e.message); throw e; });
+  renderDetail(id);
+  watchJob(r.job_id, id);
+}
+
+async function runSample(id) {
+  const quality = parseInt(document.getElementById('rfInput').value) || 22;
+  const r = await api(`/api/movies/${id}/jobs`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({kind: 'sample', quality}) })
+    .catch(e => { alert(e.message); throw e; });
+  document.getElementById('jobStatus').textContent = `Sample job #${r.job_id} started (RF ${quality})...`;
+  watchJob(r.job_id, id);
+}
+
+async function loadSamples(id, srcBytes) {
+  const el = document.getElementById('samplesList');
+  if (!el) return;
+  const samples = await api(`/api/movies/${id}/samples`).catch(() => []);
+  el.innerHTML = samples.map(s => {
+    const pct = srcBytes && s.est_full_bytes ? ` — ${(100 * s.est_full_bytes / srcBytes).toFixed(0)}% of source` : '';
+    const est = s.est_full_bytes ? `est. full ~${fmtSize(s.est_full_bytes)}${pct}` : '';
+    const fileArg = encodeURIComponent(s.file);
+    return `<div class="muted" style="margin:2px 0">
+      <b>RF ${s.rf}</b>: sample ${fmtSize(s.size_bytes)}, ${est}
+      &nbsp;<a class="back" href="/api/movies/${id}/samples/file?file=${fileArg}" target="_blank">play</a>
+      &nbsp;<a class="back" onclick="delSample(${id}, '${fileArg}')">delete</a>
+    </div>`;
+  }).join('');
+}
+
+async function delSample(id, fileArg) {
+  await api(`/api/movies/${id}/samples?file=${fileArg}`, { method: 'DELETE' }).catch(e => alert(e.message));
+  const m = await api(`/api/movies/${id}`);
+  loadSamples(id, m.movie.size_bytes);
+}
+
+// always hits the single-job endpoint, which is the one that runs verify/finalize;
+// the list endpoint (used by the header strip) is summary-only
+async function watchJob(jobId, movieId) {
+  const j = await api(`/api/jobs/${jobId}`).catch(() => null);
+  if (!j) return;
+  const status = document.getElementById('jobStatus');
+  if (status) status.textContent = `Job #${j.id} (${j.kind}): ${j.status} ${j.progress ? j.progress.toFixed(0)+'%' : ''}`;
+  if (j.status === 'running') {
+    setTimeout(() => watchJob(jobId, movieId), 3000);
+  } else if (location.hash === `#/movie/${movieId}`) {
+    renderDetail(movieId);
+  }
+}
+
+async function watchMovieJob(id) {
+  const allJobs = await api('/api/jobs').catch(() => []);
+  const mine = allJobs.filter(j => j.movie_id === id).sort((a, b) => b.id - a.id);
+  if (mine.length) watchJob(mine[0].id, id);
+}
+
+async function doRename(id) {
+  const r = await api(`/api/movies/${id}/rename`, { method: 'POST' }).catch(e => { alert(e.message); throw e; });
+  renderDetail(id);
+}
+
+async function tmdbSearch(id) {
+  const q = document.getElementById('tmdbQ').value;
+  const results = await api(`/api/tmdb/search?q=${encodeURIComponent(q)}`);
+  document.getElementById('tmdbResults').innerHTML = results.map(r => `
+    <div class="tmdb-cand" onclick="pickTmdb(${id}, ${r.tmdb_id})">
+      ${r.poster_path ? `<img src="${posterUrl(r.poster_path)}">` : ''}
+      <span>${escapeHtml(r.title)} (${r.year || '?'}) <span class="muted">${r.original_language || ''}</span></span>
+    </div>`).join('') || '<p class="muted">no results</p>';
+}
+
+async function pickTmdb(id, tmdbId) {
+  await api(`/api/movies/${id}/tmdb`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({tmdb_id: tmdbId}) });
+  renderDetail(id);
+}
+</script>
+</body>

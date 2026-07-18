@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas"><style>body{margin:0;background:#e9ebef;font-family:system-ui,sans-serif}a{color:#2a78d6}a:hover{color:#1d5fb0}.dv-turn{padding:40px 44px 32px;border-bottom:1px solid rgba(0,0,0,.08);scroll-margin-top:16px}.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}.dv-tid{font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:#1a1a1a;color:#fff;border-radius:4px;text-decoration:none}.dv-tname{font:600 13px/1.2 system-ui,sans-serif;color:#1a1a1a}.dv-opts{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px}.dv-oid{font:600 10.5px ui-monospace,Menlo,monospace;padding:3px 7px;background:rgba(0,0,0,.08);color:#1a1a1a;border-radius:5px;text-decoration:none}.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 system-ui,sans-serif;color:rgba(0,0,0,.55)}.dv-card{max-width:100%;background:#0b0d12;border:1px solid rgba(0,0,0,.2);border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.25);overflow:hidden}.dv-opt:target .dv-oid{background:#2a78d6;color:#fff}.dv-next{margin:22px 0 0;font:12px/1.5 system-ui,sans-serif;color:rgba(0,0,0,.5)}</style></helmet>
+
+<section class="dv-turn" id="t3">
+<div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">Movie detail — 4-step wizard + RF decision chart, in the <a class="dv-oid" href="#2a">2a</a> system</span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="3a">
+<div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Detail wizard — phone-friendly track cards (↑↓, no drag), RF chart in step 3</div>
+<div class="dv-card" style="width:960px;color:#dfe5ee;font-family:system-ui,sans-serif">
+  <div style="display:flex;align-items:center;gap:14px;padding:12px 22px;border-bottom:1px solid #161b25">
+    <span style="font-size:13px;color:{{ accent }}">← Library</span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:6px;font:10px ui-monospace,Menlo,monospace;color:{{ fineC }}"><span style="width:6px;height:6px;border-radius:50%;background:{{ fineC }};box-shadow:0 0 6px {{ fineGlow }}"></span>READY</span>
+  </div>
+  <div style="display:flex;gap:18px;padding:18px 22px 4px">
+    <div style="width:110px;aspect-ratio:2/3;border-radius:8px;flex:none;background:linear-gradient(160deg, hsl(200 28% 22%), hsl(200 35% 9%)), repeating-linear-gradient(45deg, rgba(255,255,255,.04) 0 6px, transparent 6px 12px);display:flex;align-items:center;justify-content:center;font:9px ui-monospace,Menlo,monospace;color:rgba(255,255,255,.3)">POSTER</div>
+    <div style="min-width:0">
+      <div style="font-size:19px;font-weight:700">Blade Runner 2049 <span style="color:#5b6577;font-weight:400">(2017)</span></div>
+      <div style="font:11px ui-monospace,Menlo,monospace;color:#5b6577;margin-top:4px">Blade.Runner.2049.2017.2160p.BDRemux.HEVC.DV.mkv</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;font:10px ui-monospace,Menlo,monospace">
+        <span style="border:1px solid #232a38;border-radius:4px;padding:3px 7px;color:#8a94a6">3840×2160</span>
+        <span style="border:1px solid #232a38;border-radius:4px;padding:3px 7px;color:#8a94a6">HEVC</span>
+        <span style="border:1px solid {{ accBd }};border-radius:4px;padding:3px 7px;color:{{ accent }}">DV</span>
+        <span style="border:1px solid {{ shrBd }};border-radius:4px;padding:3px 7px;color:{{ shrinkC }}">52 Mbps</span>
+        <span style="border:1px solid {{ shrBd }};border-radius:4px;padding:3px 7px;color:{{ shrinkC }}">78.4 G</span>
+        <span style="border:1px solid #232a38;border-radius:4px;padding:3px 7px;color:#8a94a6">orig: eng</span>
+      </div>
+      <div style="font-size:11px;color:#5b6577;margin-top:8px">1 duplicate: <span style="color:{{ dupC }}">Blade.Runner.2049.1080p.x264</span></div>
+    </div>
+  </div>
+  <div style="padding:14px 22px 22px;display:flex;flex-direction:column;gap:10px">
+
+    <div style="border:1px solid #1c2230;border-radius:10px;background:#0e1218;display:flex;align-items:center;gap:12px;padding:10px 14px">
+      <span style="width:22px;height:22px;border-radius:50%;background:{{ fineC }};color:#0b0d12;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:none">✓</span>
+      <span style="font-size:13px;font-weight:600">Match on TMDB</span>
+      <span style="font-size:12px;color:#5b6577">Blade Runner 2049 (2017) · tmdb 335984</span>
+      <span style="margin-left:auto;font-size:11px;color:#8a94a6;border:1px solid #232a38;border-radius:6px;padding:4px 9px">Re-match</span>
+    </div>
+
+    <div style="border:1px solid #1c2230;border-radius:10px;background:#0e1218;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #161b25">
+        <span style="width:22px;height:22px;border-radius:50%;background:{{ fineC }};color:#0b0d12;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:none">✓</span>
+        <span style="font-size:13px;font-weight:600">Configure tracks</span>
+        <span style="font-size:12px;color:#5b6577">7 tracks → 4 kept · eng primary</span>
+        <span style="margin-left:auto;font-size:11px;color:#8a94a6">▾ reopened</span>
+      </div>
+      <div style="padding:12px 14px;display:flex;flex-direction:column;gap:6px">
+        <div style="font:10px ui-monospace,Menlo,monospace;color:#5b6577;letter-spacing:.12em">AUDIO — TOP = PRIMARY</div>
+        <sc-for list="{{ audioTracks }}" as="t" hint-placeholder-count="4">
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#10141c;border:1px solid #1c2230;border-radius:8px;opacity:{{ t.rowOp }}">
+            <div style="display:flex;flex-direction:column;gap:3px;flex:none">
+              <div style="width:24px;height:17px;border:1px solid #232a38;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:8px;color:#8a94a6">▲</div>
+              <div style="width:24px;height:17px;border:1px solid #232a38;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:8px;color:#8a94a6">▼</div>
+            </div>
+            <div style="font:700 9px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:{{ t.keepFg }};background:{{ t.keepBg }};border:1px solid {{ t.keepBd }};border-radius:4px;padding:4px 8px;flex:none">{{ t.keepLabel }}</div>
+            <div style="width:170px;flex:none"><div style="font-size:12px;font-weight:600">{{ t.codec }}</div><div style="font:10px ui-monospace,Menlo,monospace;color:#5b6577;margin-top:2px">{{ t.meta }}</div></div>
+            <div style="font:10px ui-monospace,Menlo,monospace;color:#8a94a6;border:1px solid #232a38;border-radius:4px;padding:4px 8px;flex:none">{{ t.lang }} ▾</div>
+            <sc-if value="{{ t.def }}" hint-placeholder-val="{{ false }}"><div style="font:700 9px ui-monospace,Menlo,monospace;color:{{ accent }};border:1px solid {{ accBd }};border-radius:4px;padding:4px 7px;flex:none">DEFAULT</div></sc-if>
+            <sc-if value="{{ t.forced }}" hint-placeholder-val="{{ false }}"><div style="font:700 9px ui-monospace,Menlo,monospace;color:{{ shrinkC }};border:1px solid {{ shrBd }};border-radius:4px;padding:4px 7px;flex:none">FORCED</div></sc-if>
+            <div style="flex:1;min-width:0;font:11px ui-monospace,Menlo,monospace;color:#8a94a6;background:#0b0d12;border:1px solid #1c2230;border-radius:5px;padding:6px 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ t.name }}</div>
+          </div>
+        </sc-for>
+        <div style="font:10px ui-monospace,Menlo,monospace;color:#5b6577;letter-spacing:.12em;margin-top:8px">SUBTITLES</div>
+        <sc-for list="{{ subTracks }}" as="t" hint-placeholder-count="3">
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#10141c;border:1px solid #1c2230;border-radius:8px;opacity:{{ t.rowOp }}">
+            <div style="display:flex;flex-direction:column;gap:3px;flex:none">
+              <div style="width:24px;height:17px;border:1px solid #232a38;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:8px;color:#8a94a6">▲</div>
+              <div style="width:24px;height:17px;border:1px solid #232a38;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:8px;color:#8a94a6">▼</div>
+            </div>
+            <div style="font:700 9px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:{{ t.keepFg }};background:{{ t.keepBg }};border:1px solid {{ t.keepBd }};border-radius:4px;padding:4px 8px;flex:none">{{ t.keepLabel }}</div>
+            <div style="width:170px;flex:none"><div style="font-size:12px;font-weight:600">{{ t.codec }}</div><div style="font:10px ui-monospace,Menlo,monospace;color:#5b6577;margin-top:2px">{{ t.meta }}</div></div>
+            <div style="font:10px ui-monospace,Menlo,monospace;color:#8a94a6;border:1px solid #232a38;border-radius:4px;padding:4px 8px;flex:none">{{ t.lang }} ▾</div>
+            <sc-if value="{{ t.def }}" hint-placeholder-val="{{ false }}"><div style="font:700 9px ui-monospace,Menlo,monospace;color:{{ accent }};border:1px solid {{ accBd }};border-radius:4px;padding:4px 7px;flex:none">DEFAULT</div></sc-if>
+            <sc-if value="{{ t.forced }}" hint-placeholder-val="{{ false }}"><div style="font:700 9px ui-monospace,Menlo,monospace;color:{{ shrinkC }};border:1px solid {{ shrBd }};border-radius:4px;padding:4px 7px;flex:none">FORCED</div></sc-if>
+            <div style="flex:1;min-width:0;font:11px ui-monospace,Menlo,monospace;color:#8a94a6;background:#0b0d12;border:1px solid #1c2230;border-radius:5px;padding:6px 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ t.name }}</div>
+          </div>
+        </sc-for>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <div style="font-size:12px;color:#8a94a6;border:1px solid #232a38;border-radius:7px;padding:7px 13px">Auto-suggest</div>
+          <div style="font-size:12px;color:#8a94a6;border:1px solid #232a38;border-radius:7px;padding:7px 13px">Strip junk names</div>
+          <div style="font-size:12px;font-weight:600;color:#0b0d12;background:{{ accent }};border-radius:7px;padding:7px 14px;box-shadow:0 0 14px {{ accGlow }}">Save configuration</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="border:1px solid {{ accBd }};border-radius:10px;background:#0e1218;overflow:hidden;box-shadow:0 0 20px {{ accBg }}">
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #161b25">
+        <span style="width:22px;height:22px;border-radius:50%;background:{{ accent }};color:#0b0d12;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:none;box-shadow:0 0 10px {{ accGlow }}">3</span>
+        <span style="font-size:13px;font-weight:600">Process</span>
+        <span style="font-size:12px;color:#5b6577">pick a route, then commit</span>
+      </div>
+      <div style="padding:14px">
+        <div style="display:flex;align-items:center;gap:10px;background:{{ shrBg }};border:1px solid {{ shrBd }};border-radius:8px;padding:10px 14px;font-size:12.5px">
+          <span style="color:{{ shrinkC }};font-weight:700">SHRINK ADVISED</span>
+          <span style="color:#c9d2e0">52 Mbps is above the 25 Mbps bar for 4K — a heavy encode should reclaim ~60 GB with no visible loss.</span>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+          <div style="font-size:12.5px;font-weight:700;color:#0b0d12;background:{{ shrinkC }};border-radius:7px;padding:9px 16px;box-shadow:0 0 16px {{ shrGlow }}">Heavy Encode @ RF 22 · est ~17.9 G</div>
+          <div style="font-size:12.5px;font-weight:600;color:#c9d2e0;border:1px solid #2c3648;border-radius:7px;padding:9px 14px">Quick Remux <span style="color:#5b6577;font-weight:400">(minutes)</span></div>
+          <div style="font-size:12.5px;font-weight:600;color:{{ fineC }};border:1px solid {{ fineBd }};border-radius:7px;padding:9px 14px">Accept as-is</div>
+          <div style="font-size:12px;color:#5b6577;padding:9px 4px">view command ›</div>
+        </div>
+        <div style="margin-top:14px;border:1px solid #1c2230;border-radius:10px;background:#0b0e14;padding:14px 16px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font:600 10px ui-monospace,Menlo,monospace;color:#8a94a6;letter-spacing:.12em">RF DECISION — PROJECTED FULL SIZE FROM 30s SAMPLES</span>
+            <span style="margin-left:auto;font:11px ui-monospace,Menlo,monospace;color:#5b6577">source 78.4 G</span>
+            <span style="font-size:11px;color:#8a94a6;border:1px solid #232a38;border-radius:6px;padding:5px 10px">RF 21 ▾</span>
+            <span style="font-size:11px;font-weight:600;color:{{ accent }};border:1px solid {{ accBd }};border-radius:6px;padding:5px 10px">+ Encode sample</span>
+          </div>
+          <div style="display:flex;gap:14px;align-items:flex-end;margin-top:14px;height:150px">
+            <sc-for list="{{ rfSamples }}" as="s" hint-placeholder-count="4">
+              <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:100%">
+                <sc-if value="{{ s.rec }}" hint-placeholder-val="{{ false }}"><div style="font:700 8px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:{{ fineC }};text-shadow:0 0 8px {{ fineGlow }}">RECOMMENDED</div></sc-if>
+                <div style="font:600 12px ui-monospace,Menlo,monospace;color:{{ s.fg }}">{{ s.size }}</div>
+                <div style="font:10px ui-monospace,Menlo,monospace;color:#5b6577">{{ s.pctSrc }} of source</div>
+                <div style="width:100%;height:{{ s.barH }};background:{{ s.barBg }};border:1px solid {{ s.bd }};border-radius:6px 6px 2px 2px;box-shadow:{{ s.barSh }}"></div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;gap:14px;margin-top:8px">
+            <sc-for list="{{ rfSamples }}" as="s" hint-placeholder-count="4">
+              <div style="flex:1;text-align:center">
+                <div style="font:700 11px ui-monospace,Menlo,monospace;color:{{ s.fg }}">RF {{ s.rf }}</div>
+                <div style="font:9px ui-monospace,Menlo,monospace;color:#5b6577;letter-spacing:.06em;margin-top:2px">{{ s.tag }}</div>
+                <div style="font-size:10px;margin-top:5px;color:#5b6577"><span style="color:{{ accent }}">▶ play</span> · ✕</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="height:5px;border-radius:3px;margin-top:14px;background:linear-gradient(90deg,{{ fineC }},{{ shrinkC }},#ff5d5d)"></div>
+          <div style="display:flex;justify-content:space-between;font:9px ui-monospace,Menlo,monospace;color:#5b6577;letter-spacing:.08em;margin-top:5px"><span>← HIGHER QUALITY · BIGGER FILE</span><span>SMALLER FILE · QUALITY RISK →</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="border:1px solid #1c2230;border-radius:10px;background:#0e1218;display:flex;align-items:center;gap:12px;padding:10px 14px;opacity:.55">
+      <span style="width:22px;height:22px;border-radius:50%;background:#2a2e37;color:#8a94a6;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:none">4</span>
+      <span style="font-size:13px;font-weight:600">Finalize</span>
+      <span style="font-size:12px;color:#5b6577">delete original + rename to “Blade Runner 2049 (2017)” · unlocks after verified output · typed confirmation</span>
+      <span style="margin-left:auto;font-size:11px;color:#ff5d5d;border:1px solid rgba(255,93,93,.3);border-radius:6px;padding:4px 10px">Delete original…</span>
+    </div>
+
+  </div>
+</div>
+</div>
+
+</div>
+<p class="dv-next">Try next: "design the typed-confirm delete modal" · "jobs screen with ETA + live log" · "mobile (iPhone) version of <a class="dv-oid" href="#2a">2a</a> and <a class="dv-oid" href="#3a">3a</a>"</p>
+</section>
+
+<section class="dv-turn" id="t2">
+<div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Committed direction — 1b grid + 1c ring dashboard + 1a mono readouts</span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="2a">
+<div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Library home — palette/columns/glow still tweakable</div>
+<div class="dv-card" style="width:1120px;color:#dfe5ee;font-family:system-ui,sans-serif">
+  <div style="display:flex;align-items:center;gap:16px;padding:14px 22px;border-bottom:1px solid #161b25">
+    <div style="font-size:15px;font-weight:700;letter-spacing:.02em">Media Manager</div>
+    <div style="flex:1;display:flex;align-items:center;gap:8px;background:#12161f;border:1px solid #232a38;border-radius:8px;padding:8px 14px;max-width:340px"><span style="color:#4a5568;font-size:13px">⌕</span><span style="font-size:13px;color:#5b6577">Search library</span></div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <div style="font-size:12px;color:#8a94a6;border:1px solid #232a38;border-radius:8px;padding:7px 12px">⟳ Scan</div>
+      <div style="font-size:12px;color:#8a94a6;border:1px solid #232a38;border-radius:8px;padding:7px 12px">Maintenance ▾</div>
+      <div style="display:flex;align-items:center;gap:7px;font-size:12px;color:{{ accent }};border:1px solid {{ accBd }};border-radius:8px;padding:7px 12px"><span style="width:7px;height:7px;border-radius:50%;background:{{ accent }};box-shadow:0 0 7px {{ accGlow }}"></span>Auto power · 09–18</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:stretch;gap:0;margin:16px 22px;background:linear-gradient(135deg,#10141c,#0d1017);border:1px solid #1c2230;border-radius:12px;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:16px;padding:16px 22px;border-right:1px solid #161b25;flex:none">
+      <div style="position:relative;width:72px;height:72px;border-radius:50%;background:conic-gradient({{ fineC }} 0 273deg,#1a202c 273deg 360deg);display:flex;align-items:center;justify-content:center;flex:none">
+        <div style="width:56px;height:56px;border-radius:50%;background:#0d1015;display:flex;align-items:center;justify-content:center"><span style="font:700 14px ui-monospace,Menlo,monospace;color:{{ fineC }}">76%</span></div>
+      </div>
+      <div>
+        <div style="font-size:14px;font-weight:600">227 of 300 triaged</div>
+        <div style="font-size:12px;color:#8a94a6;margin-top:3px"><span style="color:{{ shrinkC }};font-weight:600">~0.9 TB</span> still on the table</div>
+      </div>
+    </div>
+    <div style="flex:1;display:grid;grid-template-columns:repeat(4,1fr)">
+      <div style="padding:14px 18px;border-right:1px solid #161b25"><div style="font:10px ui-monospace,Menlo,monospace;color:#5b6577;letter-spacing:.12em">RECLAIMED</div><div style="font:600 19px ui-monospace,Menlo,monospace;color:{{ fineC }};margin-top:4px">1.92 TB</div></div>
+      <div style="padding:14px 18px;border-right:1px solid #161b25"><div style="font:10px ui-monospace,Menlo,monospace;color:#5b6577;letter-spacing:.12em">LIBRARY</div><div style="font:600 19px ui-monospace,Menlo,monospace;color:#dfe5ee;margin-top:4px">4.8 TB<span style="font-size:12px;color:#5b6577"> · 300</span></div></div>
+      <div style="padding:14px 18px;border-right:1px solid #161b25"><div style="font:10px ui-monospace,Menlo,monospace;color:#5b6577;letter-spacing:.12em">SHRINK QUEUE</div><div style="font:600 19px ui-monospace,Menlo,monospace;color:{{ shrinkC }};margin-top:4px">68<span style="font-size:12px;color:#5b6577"> files</span></div></div>
+      <div style="padding:14px 18px"><div style="font:10px ui-monospace,Menlo,monospace;color:#5b6577;letter-spacing:.12em">ACTIVE JOB</div><div style="display:flex;align-items:baseline;gap:8px;margin-top:4px"><span style="font:600 13px ui-monospace,Menlo,monospace;color:{{ accent }}">AKIRA · 64%</span><span style="font:11px ui-monospace,Menlo,monospace;color:#5b6577">ETA 4H 12M</span></div><div style="height:3px;background:#1a202c;border-radius:2px;margin-top:7px;overflow:hidden"><div style="width:64%;height:100%;background:{{ accent }};box-shadow:0 0 8px {{ accGlow }}"></div></div></div>
+    </div>
+  </div>
+  <div style="display:flex;gap:6px;align-items:center;margin:0 22px;padding-bottom:12px;border-bottom:1px solid #161b25;font:11px ui-monospace,Menlo,monospace">
+    <div style="padding:6px 13px;border-radius:6px;background:{{ shrBg }};border:1px solid {{ shrBd }};color:{{ shrinkC }}">NEEDS DECISION 68</div>
+    <div style="padding:6px 13px;border-radius:6px;border:1px solid #232a38;color:#8a94a6">IN FLIGHT 3</div>
+    <div style="padding:6px 13px;border-radius:6px;border:1px solid #232a38;color:#8a94a6">DONE 229</div>
+    <div style="padding:6px 13px;border-radius:6px;border:1px solid #232a38;color:#8a94a6">ALL 300</div>
+    <div style="margin-left:auto;color:#5b6577">SORT: SIZE ▾ · DUP ☐</div>
+  </div>
+  <div style="display:grid;grid-template-columns:{{ gridColsTpl }};gap:14px;padding:18px 22px 22px">
+    <sc-for list="{{ gridMovies }}" as="m" hint-placeholder-count="12">
+      <div style="position:relative;border-radius:10px;overflow:hidden;border:1px solid {{ m.cardBd }};background:#12161f">
+        <div style="aspect-ratio:2/3;background:{{ m.posterBg }};display:flex;align-items:center;justify-content:center;font:10px ui-monospace,Menlo,monospace;color:rgba(255,255,255,.3);letter-spacing:.1em">POSTER</div>
+        <div style="position:absolute;top:8px;left:8px;font:700 10px ui-monospace,Menlo,monospace;letter-spacing:.08em;color:{{ m.advFg }};background:{{ m.advBgSolid }};border-radius:4px;padding:3px 7px;box-shadow:{{ m.advShadow }}">{{ m.advLabel }}</div>
+        <sc-if value="{{ m.dup }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;top:8px;right:8px;font:700 9px ui-monospace,Menlo,monospace;color:{{ dupC }};background:rgba(15,8,14,.85);border:1px solid {{ dupBd }};border-radius:4px;padding:2px 6px">DUP</div></sc-if>
+        <sc-if value="{{ m.encoding }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;left:0;right:0;bottom:64px;height:3px;background:rgba(26,32,44,.9)"><div style="width:64%;height:100%;background:{{ accent }};box-shadow:0 0 8px {{ accGlow }}"></div></div></sc-if>
+        <div style="padding:8px 10px 9px;background:linear-gradient(180deg,#12161f,#0e1219)">
+          <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ m.t }}</div>
+          <div style="display:flex;justify-content:space-between;margin-top:3px;font:11px ui-monospace,Menlo,monospace;color:#5b6577"><span>{{ m.resHdr }}</span><span style="color:{{ m.sizeC }}">{{ m.size }}</span></div>
+          <sc-if value="{{ showSpec }}" hint-placeholder-val="{{ true }}"><div style="font:10px ui-monospace,Menlo,monospace;color:#5b6577;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ m.spec }}</div></sc-if>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</div>
+
+</div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;palette&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;tsType&quot;:&quot;string[]&quot;,&quot;default&quot;:[&quot;#8fb8d8&quot;,&quot;#e8c268&quot;,&quot;#7fc9a8&quot;,&quot;#b48ead&quot;],&quot;options&quot;:[[&quot;#8fb8d8&quot;,&quot;#e8c268&quot;,&quot;#7fc9a8&quot;,&quot;#b48ead&quot;],[&quot;#6db8ff&quot;,&quot;#ff8f6b&quot;,&quot;#4fd6a5&quot;,&quot;#d7a0ff&quot;],[&quot;#55e0ff&quot;,&quot;#ffb01f&quot;,&quot;#3ddc97&quot;,&quot;#ff4dc4&quot;],[&quot;#9d7bff&quot;,&quot;#ff5c8a&quot;,&quot;#3ee0c0&quot;,&quot;#ffd166&quot;]],&quot;section&quot;:&quot;Theme&quot;},&quot;glow&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;tsType&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;section&quot;:&quot;Theme&quot;},&quot;gridCols&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;default&quot;:6,&quot;min&quot;:3,&quot;max&quot;:6,&quot;step&quot;:1,&quot;unit&quot;:&quot;cols&quot;,&quot;section&quot;:&quot;Library grid&quot;},&quot;cardInfo&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;default&quot;:&quot;tech specs&quot;,&quot;options&quot;:[&quot;badge only&quot;,&quot;tech specs&quot;],&quot;section&quot;:&quot;Library grid&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const MOVIES = [
+      {t:'Blade Runner 2049', y:2017, gb:78.4, res:'4K', codec:'HEVC', hdr:'DV', br:52, status:'unprocessed', adv:'shrink', hue:200},
+      {t:'Dune: Part Two', y:2024, gb:61.2, res:'4K', codec:'HEVC', hdr:'HDR10', br:48, status:'unprocessed', adv:'shrink', hue:35},
+      {t:'Tenet', y:2020, gb:58.3, res:'4K', codec:'HEVC', hdr:'HDR10', br:47, status:'unprocessed', adv:'shrink', dup:true, hue:220},
+      {t:'Interstellar', y:2014, gb:54.6, res:'4K', codec:'HEVC', hdr:'HDR10', br:46, status:'unprocessed', adv:'shrink', hue:260},
+      {t:'Heat', y:1995, gb:44.8, res:'1080p', codec:'AVC', hdr:'SDR', br:38, status:'unprocessed', adv:'shrink', dup:true, hue:210},
+      {t:'Mad Max: Fury Road', y:2015, gb:42.0, res:'4K', codec:'HEVC', hdr:'HDR10', br:39, status:'error', adv:'shrink', hue:25},
+      {t:'Akira', y:1988, gb:35.1, res:'4K', codec:'HEVC', hdr:'HDR10', br:41, status:'encoding', adv:'shrink', prog:64, hue:350},
+      {t:'Ghost in the Shell', y:1995, gb:28.9, res:'1080p', codec:'AVC', hdr:'SDR', br:31, status:'ready', adv:'shrink', hue:170},
+      {t:'The Matrix', y:1999, gb:12.3, res:'1080p', codec:'HEVC', hdr:'SDR', br:11, status:'unprocessed', adv:'fine', hue:140},
+      {t:'Arrival', y:2016, gb:10.9, res:'1080p', codec:'HEVC', hdr:'SDR', br:10, status:'unprocessed', adv:'fine', hue:190},
+      {t:'Alien', y:1979, gb:9.8, res:'1080p', codec:'HEVC', hdr:'SDR', br:9, status:'clean', adv:'fine', hue:120},
+      {t:'Paprika', y:2006, gb:8.1, res:'1080p', codec:'HEVC', hdr:'SDR', br:8, status:'clean', adv:'fine', hue:0},
+    ];
+    const pal = Array.isArray(this.props.palette) && this.props.palette.length >= 4 ? this.props.palette : ['#6db8ff','#ff8f6b','#4fd6a5','#d7a0ff'];
+    const [accent, shrinkC, fineC, dupC] = pal;
+    const rgba = (h, a) => { const n = parseInt(h.slice(1), 16); return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; };
+    const glowOn = this.props.glow ?? true;
+    const g = (h, a) => glowOn ? rgba(h, a) : 'transparent';
+    const ST = {
+      unprocessed:{l:'NEW', c:'#8a94a6'}, ready:{l:'READY', c:fineC},
+      encoding:{l:'ENCODING', c:accent}, clean:{l:'CLEAN', c:fineC}, error:{l:'ERROR', c:'#ff5d5d'},
+    };
+    const maxGb = 80;
+    const decorate = m => {
+      const shrink = m.adv === 'shrink';
+      const st = ST[m.status] || ST.unprocessed;
+      const est = m.gb * 0.28;
+      return Object.assign({}, m, {
+        size: m.gb.toFixed(1) + ' G',
+        spec: [m.res, m.codec, m.hdr, m.br + 'Mbps'].join(' · '),
+        resHdr: m.res + (m.hdr !== 'SDR' ? ' ' + m.hdr : ''),
+        barW: Math.round(100 * m.gb / maxGb) + '%',
+        barC: shrink ? shrinkC : '#2c3648',
+        sizeC: shrink ? shrinkC : '#5b6577',
+        advLabel: shrink ? 'SHRINK' : 'FINE',
+        advFg: shrink ? shrinkC : fineC,
+        advBg: shrink ? rgba(shrinkC,.13) : rgba(fineC,.07),
+        advBd: shrink ? rgba(shrinkC,.45) : rgba(fineC,.25),
+        advGlow: shrink ? `0 0 10px ${g(shrinkC,.6)}` : 'none',
+        advBgSolid: 'rgba(10,11,15,.9)',
+        advShadow: shrink ? `0 0 12px ${g(shrinkC,.45)}, inset 0 0 0 1px ${rgba(shrinkC,.6)}` : `inset 0 0 0 1px ${rgba(fineC,.35)}`,
+        cardBd: shrink ? rgba(shrinkC,.35) : '#1c2230',
+        stLabel: st.l, stC: st.c,
+        encoding: m.status === 'encoding',
+        posterBg: `linear-gradient(160deg, hsl(${m.hue} 28% 22%), hsl(${m.hue} 35% 9%)), repeating-linear-gradient(45deg, rgba(255,255,255,.04) 0 6px, transparent 6px 12px)`,
+        est: '~' + est.toFixed(0) + ' G',
+        save: (m.gb - est).toFixed(0) + ' GB',
+        reason: `${m.br} Mbps ${m.codec} — above the ${m.res === '4K' ? 25 : 15} Mbps bar for ${m.res}`,
+      });
+    };
+    const all = MOVIES.map(decorate);
+    const rfSamples = [
+      {rf:'18', gb:31.4, tag:'NEAR-LOSSLESS'},
+      {rf:'20', gb:24.1, tag:'EXCELLENT'},
+      {rf:'22', gb:17.9, tag:'SWEET SPOT', rec:true},
+      {rf:'25', gb:11.8, tag:'QUALITY RISK'},
+    ].map(s => Object.assign({}, s, {
+      size: s.gb.toFixed(1) + ' G',
+      pctSrc: Math.round(100 * s.gb / 78.4) + '%',
+      barH: Math.round(86 * s.gb / 31.4) + 'px',
+      barBg: s.rec ? `linear-gradient(180deg, ${fineC}, ${rgba(fineC,.45)})` : rgba(accent,.28),
+      barSh: s.rec ? `0 0 16px ${g(fineC,.45)}` : 'none',
+      bd: s.rec ? rgba(fineC,.55) : 'transparent',
+      fg: s.rec ? fineC : '#8a94a6',
+      rec: !!s.rec,
+    }));
+    const decoT = t => Object.assign({}, t, {
+      rowOp: t.keep ? '1' : '.45',
+      keepFg: t.keep ? fineC : '#8a94a6',
+      keepBd: t.keep ? rgba(fineC,.4) : '#2c3648',
+      keepBg: t.keep ? rgba(fineC,.1) : 'transparent',
+      keepLabel: t.keep ? 'KEEP' : 'DROP',
+      meta: [t.ch, t.src].filter(Boolean).join(' · '),
+    });
+    const audioTracks = [
+      {codec:'TrueHD Atmos', ch:'7.1', src:'lossless', lang:'eng', keep:true, def:true, name:'TrueHD 7.1 Atmos'},
+      {codec:'E-AC3', ch:'5.1', src:'lossy', lang:'eng', keep:true, def:false, name:'DD+ 5.1'},
+      {codec:'DTS', ch:'5.1', src:'lossy', lang:'spa', keep:false, def:false, name:'DTS 5.1 Castellano'},
+      {codec:'AAC', ch:'2.0', src:'commentary', lang:'eng', keep:false, def:false, name:'Director commentary'},
+    ].map(decoT);
+    const subTracks = [
+      {codec:'PGS', src:'forced', lang:'eng', keep:true, def:true, forced:true, name:'Forced (signs only)'},
+      {codec:'PGS', src:'full', lang:'eng', keep:true, def:false, forced:false, name:'English'},
+      {codec:'PGS', src:'full', lang:'spa', keep:false, def:false, forced:false, name:'Español'},
+    ].map(decoT);
+    return { movies: all, gridMovies: all, rfSamples, audioTracks, subTracks,
+      accent, shrinkC, fineC, dupC,
+      accLine: rgba(accent,.14), accBd: rgba(accent,.35), accBg: rgba(accent,.08), accGlow: g(accent,.5),
+      shrBg: rgba(shrinkC,.13), shrBd: rgba(shrinkC,.4), shrGlow: g(shrinkC,.3),
+      fineGlow: g(fineC,.4), fineBd: rgba(fineC,.35), dupBd: rgba(dupC,.45),
+      gridColsTpl: `repeat(${this.props.gridCols ?? 4}, 1fr)`,
+      showSpec: (this.props.cardInfo ?? 'tech specs') === 'tech specs',
+    };
+  }
+}
+</script>
+</body>
+</html>

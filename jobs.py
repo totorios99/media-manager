@@ -11,6 +11,7 @@ TMUX_PREFIX = "mm-"
 HB_PROGRESS_RE = re.compile(r"Encoding:.*?(\d+\.\d+)\s*%")
 MKV_PROGRESS_RE = re.compile(r"Progress:\s*(\d+)%")
 EXIT_RE = re.compile(r"EXIT:(\d+)")
+ETA_RE = re.compile(r"ETA\s+(\d+h\d+m\d+s)")
 
 TYPE_RANK = {"video": 0, "audio": 1, "subtitle": 2}
 

@@ -740,6 +740,14 @@ def _poll_and_finalize(conn, job_id):
     return job
 
 
+def _job_eta(j):
+    """Last ETA HandBrake printed, parsed from the log tail (running jobs only)."""
+    if j.get("status") == "running" and j.get("log_path"):
+        m = jobs.ETA_RE.findall(jobs.tail(j["log_path"]))
+        return m[-1] if m else None
+    return None
+
+
 @app.get("/api/jobs")
 def list_jobs():
     conn = get_db()
@@ -755,6 +763,7 @@ def list_jobs():
                   for m in conn.execute("SELECT id, title, year, clean_title, folder FROM movies")}
         for j in out:
             j["movie_title"] = titles.get(j["movie_id"], f"movie {j['movie_id']}")
+            j["eta"] = _job_eta(j)
         return out
     finally:
         conn.close()
@@ -767,7 +776,17 @@ def get_job(job_id: int):
         job = _poll_and_finalize(conn, job_id)
         if not job:
             raise HTTPException(404, "not found")
+        job["eta"] = _job_eta(job)
         return job
+    finally:
+        conn.close()
+
+
+@app.get("/api/stats")
+def get_stats():
+    conn = get_db()
+    try:
+        return {"reclaimed_bytes": int(_get_setting(conn, "reclaimed_bytes", "0"))}
     finally:
         conn.close()
 
@@ -811,7 +830,9 @@ def delete_original(movie_id: int):
             out = cand
 
         old_path = os.path.join(folder, m["file"]) if m["file"] else None
+        freed = 0
         if old_path and os.path.exists(old_path) and old_path != out:
+            freed = os.path.getsize(old_path) - os.path.getsize(out)
             os.remove(old_path)
         for t in conn.execute("SELECT ext_path FROM tracks WHERE movie_id=? AND ext_path IS NOT NULL", (movie_id,)):
             if t["ext_path"] and os.path.exists(t["ext_path"]):
@@ -830,6 +851,9 @@ def delete_original(movie_id: int):
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
         conn.execute("UPDATE movies SET file=?, output_file=NULL, updated_at=? WHERE id=?",
                      (final_name, now, movie_id))
+        if freed > 0:
+            total = int(_get_setting(conn, "reclaimed_bytes", "0")) + freed
+            _set_setting(conn, "reclaimed_bytes", str(total))
         conn.commit()
         return {"ok": True, "file": final_name}
     finally:

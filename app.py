@@ -336,7 +336,9 @@ def get_movie(movie_id: int):
         if not movie:
             raise HTTPException(404, "not found")
         tracks = conn.execute(
-            "SELECT * FROM tracks WHERE movie_id=? ORDER BY type, mkv_id", (movie_id,)
+            # kept tracks in planned output order first — the UI table renders rows
+            # in this order and writes row position back as out_order on save
+            "SELECT * FROM tracks WHERE movie_id=? ORDER BY type, keep DESC, out_order, mkv_id", (movie_id,)
         ).fetchall()
         siblings = []
         if movie["tmdb_id"]:

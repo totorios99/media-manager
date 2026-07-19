@@ -661,7 +661,9 @@ def _build_job_cmd(conn, m, kind, quality):
     out_path = os.path.join(MEDIA_ROOT, m["folder"], f"{_safe_name(title)}.hevc.mkv")
     hb_argv, sub_order = commands.build_handbrake_encode(tracks, in_path, out_path, quality=quality)
     audio_order = sorted([t for t in tracks if t["type"] == "audio" and t["keep"]], key=lambda t: t["out_order"])
-    mkvpe = commands.build_mkvpropedit_chain(out_path, title, audio_order, sub_order)
+    vtrack = next((t for t in tracks if t["type"] == "video"), None)
+    mkvpe = commands.build_mkvpropedit_chain(out_path, title, audio_order, sub_order,
+                                             video_lang=vtrack["out_lang"] if vtrack else None)
     return shlex.join(hb_argv) + " && " + shlex.join(mkvpe), out_path
 
 

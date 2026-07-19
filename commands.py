@@ -153,10 +153,14 @@ def build_handbrake_encode(tracks, in_path, out_path,
     return argv, sub_output_order
 
 
-def build_mkvpropedit_chain(out_path, title, audio_output_order, sub_output_order):
+def build_mkvpropedit_chain(out_path, title, audio_output_order, sub_output_order, video_lang=None):
     """audio_output_order / sub_output_order: kept tracks in final OUTPUT order
     (1-based position == track:a{N}/track:s{N} target)."""
     argv = ["mkvpropedit", out_path, "--edit", "info", "--set", f"title={title}"]
+    if video_lang:
+        # HandBrake writes the video track as 'und'; verify compares against the
+        # configured lang, so it must be stamped here
+        argv += ["--edit", "track:v1", "--set", f"language={video_lang}"]
     for i, t in enumerate(audio_output_order, start=1):
         argv += [
             "--edit", f"track:a{i}",

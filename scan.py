@@ -29,12 +29,22 @@ ARTWORK_SUFFIXES = {"folder", "poster", "backdrop", "background", "landscape", "
 ARTWORK_EXT = (".jpg", ".jpeg", ".png", ".webp")
 
 
-def _is_artwork(stem, ext):
+def _artwork_base(stem, ext):
+    """None if not artwork. '' for generic artwork (folder.jpg, backdrop.jpg).
+    Otherwise the file-stem prefix it belongs to ('Movie.hevc-poster' -> 'Movie.hevc')."""
     if ext.lower() not in ARTWORK_EXT:
-        return False
+        return None
     low = stem.lower()
-    return any(low == suf or low.endswith(("-" + suf, "." + suf, " " + suf, "_" + suf))
-               for suf in ARTWORK_SUFFIXES)
+    for suf in ARTWORK_SUFFIXES:
+        if low == suf:
+            return ""
+        if low.endswith(("-" + suf, "." + suf, " " + suf, "_" + suf)):
+            return stem[:-(len(suf) + 1)]
+    return None
+
+
+def _is_artwork(stem, ext):
+    return _artwork_base(stem, ext) is not None
 
 # Known scene/tracker junk patterns -- deny-list, not allow-list: anything that
 # doesn't match a known-junk pattern is left alone rather than guessed at.
@@ -49,12 +59,16 @@ JUNK_FILE_RE = re.compile(
 def find_movie_junk(folder, keep_files):
     """Non-destructive: returns filenames (not paths) of scene/tracker junk in a
     movie folder, excluding keep_files (main video + external subs, by filename)
-    and any recognized Jellyfin artwork or .nfo."""
+    and recognized Jellyfin artwork/.nfo — unless that artwork/.nfo belongs to a
+    file that no longer exists (orphans left behind after delete-original)."""
     junk = []
     try:
         entries = os.listdir(folder)
     except OSError:
         return junk
+    # stems that per-file artwork/.nfo may legitimately reference
+    live_stems = {os.path.splitext(f)[0] for f in entries if f.lower().endswith(VIDEO_EXT)}
+    live_stems |= {os.path.splitext(f)[0] for f in keep_files}
     for f in entries:
         if f in keep_files:
             continue
@@ -65,9 +79,14 @@ def find_movie_junk(folder, keep_files):
             junk.append(f)
             continue
         stem, ext = os.path.splitext(f)
-        if _is_artwork(stem, ext):
+        base = _artwork_base(stem, ext)
+        if base is not None:
+            if base and base not in live_stems:
+                junk.append(f)  # orphaned Jellyfin artwork
             continue
         if ext.lower() == ".nfo":
+            if stem.lower() != "movie" and stem not in live_stems:
+                junk.append(f)  # orphaned nfo
             continue
         if JUNK_FILE_RE.search(f):
             junk.append(f)
@@ -552,6 +571,8 @@ if __name__ == "__main__":
         names = [
             "Movie (2016).mkv", "Movie.eng.srt", "folder.jpg", "backdrop.jpg",
             "landscape.jpg", "logo.png", "movie.nfo",
+            "Movie (2016)-poster.jpg", "Movie (2016).nfo",          # live artwork/nfo — keep
+            "Movie (2016).remux-poster.jpg", "Old Cut.nfo",          # orphans — junk
             "www.YTS.MX.jpg", "YIFYStatus.com.txt", "RARBG.txt", "._Movie (2016)",
             "2 Fast 2 Furious (2003) 1080p BluRay REMUX [wWw.PelisMKVHD.Com]-logo.png",
             "2 Fast 2 Furious (2003) 1080p BluRay REMUX [wWw.PelisMKVHD.Com]-backdrop.jpg",
@@ -559,7 +580,10 @@ if __name__ == "__main__":
         for n in names:
             open(os.path.join(d, n), "w").close()
         junk = set(find_movie_junk(d, {"Movie (2016).mkv", "Movie.eng.srt"}))
-        assert junk == {"www.YTS.MX.jpg", "YIFYStatus.com.txt", "RARBG.txt", "._Movie (2016)"}, junk
+        assert junk == {"www.YTS.MX.jpg", "YIFYStatus.com.txt", "RARBG.txt", "._Movie (2016)",
+                        "Movie (2016).remux-poster.jpg", "Old Cut.nfo",
+                        "2 Fast 2 Furious (2003) 1080p BluRay REMUX [wWw.PelisMKVHD.Com]-logo.png",
+                        "2 Fast 2 Furious (2003) 1080p BluRay REMUX [wWw.PelisMKVHD.Com]-backdrop.jpg"}, junk
 
     # suggest_tracks: TrueHD skipped for default, forced sub first+default, dup PGS unchecked
     import sqlite3 as _sq

@@ -151,9 +151,6 @@ def _startup():
     threading.Thread(target=_job_ticker, daemon=True).start()
 
 
-_applied_quota = {}
-
-
 def _job_ticker():
     """Server-side job driver (UI polling only works while a browser is open):
     advances running jobs, starts the next queued one, re-applies the CPU
@@ -171,9 +168,7 @@ def _job_ticker():
                         jobs.launch_queued(conn, dict(nxt), LOG_DIR, cpu_quota=_current_quota(conn))
                 quota = _current_quota(conn)
                 for r in conn.execute("SELECT id FROM jobs WHERE status='running'").fetchall():
-                    if _applied_quota.get(r["id"]) != quota:
-                        jobs.set_cpu_quota(r["id"], quota)
-                        _applied_quota[r["id"]] = quota
+                    jobs.set_cpu_quota(r["id"], quota)
             finally:
                 conn.close()
         except Exception:
@@ -617,7 +612,6 @@ def set_power(body: dict):
         quota = _current_quota(conn)
         for r in conn.execute("SELECT id FROM jobs WHERE status='running'").fetchall():
             jobs.set_cpu_quota(r["id"], quota)
-            _applied_quota[r["id"]] = quota
         p = _power_state(conn)
         p["effective_quota"] = quota
         return p

@@ -64,11 +64,25 @@ def launch_queued(conn, job, log_dir, cpu_quota=None):
     _launch(conn, job["id"], job["cmd"], log_dir, cpu_quota)
 
 
+def _handbrake_scopes():
+    """flatpak launches HandBrakeCLI in its own transient scope
+    (app-flatpak-fr.handbrake.ghb-*.scope), escaping mm-job-N.scope — so a quota
+    set there only caps the idle launcher. Return the live flatpak app scopes so
+    the real encoder can be throttled. Only one encode runs at a time, so setting
+    all of them is safe."""
+    r = subprocess.run(["systemctl", "--user", "list-units", "--plain", "--no-legend",
+                        "app-flatpak-fr.handbrake.ghb-*.scope"], capture_output=True, text=True)
+    return [ln.split()[0] for ln in r.stdout.splitlines() if ln.split()]
+
+
 def set_cpu_quota(job_id, quota):
+    """Non-flatpak jobs (mkvmerge/mkvpropedit) run inside mm-job-N.scope; encodes
+    run in a flatpak app scope. Set both so throttle applies either way."""
     if NO_SYSTEMD:
         return
-    subprocess.run(["systemctl", "--user", "set-property", "--runtime",
-                    f"mm-job-{job_id}.scope", f"CPUQuota={quota}"], capture_output=True)
+    for unit in [f"mm-job-{job_id}.scope", *_handbrake_scopes()]:
+        subprocess.run(["systemctl", "--user", "set-property", "--runtime",
+                        unit, f"CPUQuota={quota}"], capture_output=True)
 
 
 def tail(path, n=4096):

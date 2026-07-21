@@ -20,6 +20,14 @@ TYPE_RANK = {"video": 0, "audio": 1, "subtitle": 2}
 # the container (compose `cpus:`). Live per-job quota control is host-only.
 NO_SYSTEMD = bool(os.environ.get("MM_NO_SYSTEMD"))
 
+# Encode scopes land as siblings of app-org.chromium.Chromium-*.scope under
+# app.slice. CPUQuota caps total time but doesn't stop the encoder's many
+# threads from winning CFS contests against a foreground app's few threads at
+# equal weight — cgroup v2 splits time by group weight first, so a low weight
+# here makes the browser/audio win every contested tick, independent of the
+# quota schedule (applies in "full" mode too, not just "throttle").
+CPU_WEIGHT = "10"
+
 
 def _systemd_wrap(cmd_str, unit, cpu_quota):
     """Run cmd inside a named user scope so its CPU quota can be changed live:
@@ -30,7 +38,8 @@ def _systemd_wrap(cmd_str, unit, cpu_quota):
     uid = os.getuid()
     env = f"XDG_RUNTIME_DIR=/run/user/{uid} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus"
     quota = f"-p CPUQuota={cpu_quota} " if cpu_quota else ""
-    return f"{env} systemd-run --user --scope --unit={unit} {quota}sh -c {shlex.quote(cmd_str)}"
+    return (f"{env} systemd-run --user --scope --unit={unit} "
+            f"-p CPUWeight={CPU_WEIGHT} {quota}sh -c {shlex.quote(cmd_str)}")
 
 
 def start_job(conn, movie_id, kind, cmd_str, log_dir, cpu_quota=None, queued=False):
@@ -81,8 +90,8 @@ def set_cpu_quota(job_id, quota):
     if NO_SYSTEMD:
         return
     for unit in [f"mm-job-{job_id}.scope", *_handbrake_scopes()]:
-        subprocess.run(["systemctl", "--user", "set-property", "--runtime",
-                        unit, f"CPUQuota={quota}"], capture_output=True)
+        subprocess.run(["systemctl", "--user", "set-property", "--runtime", unit,
+                        f"CPUQuota={quota}", f"CPUWeight={CPU_WEIGHT}"], capture_output=True)
 
 
 def tail(path, n=4096):

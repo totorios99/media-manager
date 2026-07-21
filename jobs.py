@@ -29,6 +29,29 @@ NO_SYSTEMD = bool(os.environ.get("MM_NO_SYSTEMD"))
 CPU_WEIGHT = "10"
 
 
+def _cpu_range(cpu_quota):
+    """CPUQuota only caps average CPU *time*; x265 still spawns a thread pool
+    sized to all physical cores regardless of quota, so the encode's ~50
+    threads keep contending with the browser's few threads for scheduler
+    attention on every core, causing latency spikes even though the average
+    time-share is correctly capped. Pinning the encode to a core range sized
+    to its quota removes it from the remaining cores entirely — the cpuset
+    cgroup controller isn't delegated to the user manager here, so this uses
+    plain CPU-affinity (taskset), which the kernel inherits across
+    fork/exec, instead of a cgroup property.
+    "300%" on a 6-core box -> "0-2", leaving cores 3-5 exclusively for
+    everything else. "600%" (full/unrestricted) -> "0-5", i.e. no pinning."""
+    if not cpu_quota:
+        return None
+    try:
+        pct = int(cpu_quota.rstrip("%"))
+    except ValueError:
+        return None
+    n = os.cpu_count() or 1
+    cores = max(1, min(n, round(pct / 100)))
+    return f"0-{cores - 1}"
+
+
 def _systemd_wrap(cmd_str, unit, cpu_quota):
     """Run cmd inside a named user scope so its CPU quota can be changed live:
     systemctl --user set-property --runtime <unit>.scope CPUQuota=N%.
@@ -38,8 +61,10 @@ def _systemd_wrap(cmd_str, unit, cpu_quota):
     uid = os.getuid()
     env = f"XDG_RUNTIME_DIR=/run/user/{uid} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus"
     quota = f"-p CPUQuota={cpu_quota} " if cpu_quota else ""
+    cpu_range = _cpu_range(cpu_quota)
+    taskset = f"taskset -c {cpu_range} " if cpu_range else ""
     return (f"{env} systemd-run --user --scope --unit={unit} "
-            f"-p CPUWeight={CPU_WEIGHT} {quota}sh -c {shlex.quote(cmd_str)}")
+            f"-p CPUWeight={CPU_WEIGHT} {quota}{taskset}sh -c {shlex.quote(cmd_str)}")
 
 
 def start_job(conn, movie_id, kind, cmd_str, log_dir, cpu_quota=None, queued=False):

@@ -15,6 +15,9 @@ import scan
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "/media/hdd1/Movies")
+# TV shows live in their own root, separate from MEDIA_ROOT's movies. Falls
+# back to MEDIA_ROOT so a single-root setup keeps working unchanged.
+SHOWS_ROOT = os.environ.get("MM_SHOWS_ROOT", MEDIA_ROOT)
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
 DB_PATH = os.environ.get("MM_DB_PATH", os.path.join(BASE_DIR, "media.db"))
 LOG_DIR = os.environ.get("MM_LOG_DIR", os.path.join(BASE_DIR, "logs"))
@@ -218,10 +221,17 @@ def _owner_table(kind):
     return "movies" if kind == "movie" else "episodes"
 
 
+def _root_for(kind):
+    """Movies live under MEDIA_ROOT, episodes under SHOWS_ROOT -- separate
+    filesystem roots, falling back to the same one when unconfigured."""
+    return MEDIA_ROOT if kind == "movie" else SHOWS_ROOT
+
+
 def _owner_info(conn, kind, owner_id):
     """Uniform dict for a movie or episode row: folder (already composed with
-    any show/season prefix, relative to MEDIA_ROOT), file, title_display (for
-    --title metadata), out_base (filename stem), duration, size_bytes, status,
+    any show/season prefix, relative to MEDIA_ROOT for a movie or SHOWS_ROOT
+    for an episode -- see _root_for), file, title_display (for --title
+    metadata), out_base (filename stem), duration, size_bytes, status,
     output_file, original_language. None if the row doesn't exist."""
     if kind == "movie":
         row = conn.execute("SELECT * FROM movies WHERE id=?", (owner_id,)).fetchone()
@@ -336,7 +346,10 @@ def _run_scan():
     def cb(done, total, name):
         scan_state.update(done=done, total=total, current=name)
     try:
-        scan.scan_library(conn, MEDIA_ROOT, TMDB_API_KEY, progress_cb=cb)
+        separate_roots = SHOWS_ROOT != MEDIA_ROOT
+        scan.scan_library(conn, MEDIA_ROOT, TMDB_API_KEY, progress_cb=cb, include_shows=not separate_roots)
+        if separate_roots:
+            scan.scan_shows_root(conn, SHOWS_ROOT, TMDB_API_KEY, progress_cb=cb)
     finally:
         conn.close()
         scan_state["running"] = False
@@ -385,18 +398,25 @@ def _keep_files_for(conn, kind, owner):
 
 
 def _junk_scan(conn):
-    """folder -> [junk filenames], plus a synthetic "__top_level__" entry for
-    stray ._* AppleDouble files sitting directly under MEDIA_ROOT."""
+    """abs folder path -> [junk filenames], plus synthetic "__top_level__" /
+    "__top_level_shows__" entries for stray ._* AppleDouble files sitting
+    directly under MEDIA_ROOT / SHOWS_ROOT. Keyed by absolute path (not a
+    folder name relative to some assumed root) since movies and episodes can
+    now live under two different roots."""
     result = {}
     top_junk = [e.name for e in os.scandir(MEDIA_ROOT) if e.is_file() and e.name.startswith("._")]
     if top_junk:
-        result["__top_level__"] = top_junk
+        result[("__top_level__", MEDIA_ROOT)] = top_junk
+    if SHOWS_ROOT != MEDIA_ROOT:
+        show_top_junk = [e.name for e in os.scandir(SHOWS_ROOT) if e.is_file() and e.name.startswith("._")]
+        if show_top_junk:
+            result[("__top_level_shows__", SHOWS_ROOT)] = show_top_junk
     for row in conn.execute("SELECT id FROM movies WHERE file IS NOT NULL").fetchall():
         owner = _owner_info(conn, "movie", row["id"])
         folder = os.path.join(MEDIA_ROOT, owner["folder"])
         junk = scan.find_movie_junk(folder, _keep_files_for(conn, "movie", owner))
         if junk:
-            result[owner["folder"]] = junk
+            result[(owner["folder"], folder)] = junk
     # episodes: sweep once per distinct (show, folder) pair, not once per
     # episode -- the union keep-set already covers every sibling
     seen = set()
@@ -406,10 +426,10 @@ def _junk_scan(conn):
             continue
         seen.add(key)
         owner = _owner_info(conn, "episode", row["id"])
-        folder = os.path.join(MEDIA_ROOT, owner["folder"])
+        folder = os.path.join(SHOWS_ROOT, owner["folder"])
         junk = scan.find_movie_junk(folder, _keep_files_for(conn, "episode", owner))
         if junk:
-            result[owner["folder"]] = junk
+            result[(owner["folder"], folder)] = junk
     return result
 
 
@@ -418,7 +438,8 @@ def junk_preview():
     conn = get_db()
     try:
         result = _junk_scan(conn)
-        return {"total": sum(len(v) for v in result.values()), "folders": result}
+        return {"total": sum(len(v) for v in result.values()),
+                "folders": {label: files for (label, _abs), files in result.items()}}
     finally:
         conn.close()
 
@@ -429,14 +450,13 @@ def junk_apply():
     try:
         result = _junk_scan(conn)
         removed, errors = 0, []
-        for folder, files in result.items():
-            base = MEDIA_ROOT if folder == "__top_level__" else os.path.join(MEDIA_ROOT, folder)
+        for (label, base), files in result.items():
             for f in files:
                 try:
                     os.remove(os.path.join(base, f))
                     removed += 1
                 except OSError as e:
-                    errors.append(f"{folder}/{f}: {e}")
+                    errors.append(f"{label}/{f}: {e}")
         return {"removed": removed, "errors": errors}
     finally:
         conn.close()
@@ -902,7 +922,7 @@ def launch_show_jobs(show_id: int, body: dict):
         if not todo:
             raise HTTPException(409, "every included episode already has a job running or queued")
         need_bytes = sum((e["size_bytes"] or 0) for e in todo) if job_kind != "sample" else 2 * 10**9 * len(todo)
-        if not jobs.has_space_for(MEDIA_ROOT, need_bytes):
+        if not jobs.has_space_for(SHOWS_ROOT, need_bytes):
             raise HTTPException(507, "not enough free disk space for this batch")
         job_ids = [_enqueue(conn, "episode", e["id"], job_kind, quality)["job_id"] for e in todo]
         return {"job_ids": job_ids, "count": len(job_ids)}
@@ -929,8 +949,8 @@ def rename_show(show_id: int):
             raise HTTPException(409, "a job is running for this show; rename after it finishes")
 
         target = _safe_name(f"{s['title']} ({s['year']})")
-        old_folder = os.path.join(MEDIA_ROOT, s["folder"])
-        new_folder = os.path.join(MEDIA_ROOT, target)
+        old_folder = os.path.join(SHOWS_ROOT, s["folder"])
+        new_folder = os.path.join(SHOWS_ROOT, target)
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
 
         if target != s["folder"]:
@@ -1136,7 +1156,7 @@ def _build_job_cmd(conn, kind, owner, job_kind, quality):
     """Returns (cmd_str, out_path) for remux/encode/sample. `owner` is the
     uniform dict from _owner_info; `kind` is 'movie'|'episode'."""
     title = owner["title_display"]
-    folder_path = os.path.join(MEDIA_ROOT, owner["folder"])
+    folder_path = os.path.join(_root_for(kind), owner["folder"])
     in_path = os.path.join(folder_path, owner["file"])
     tracks = _all_tracks(conn, kind, owner["id"])
     if job_kind == "remux":
@@ -1189,7 +1209,7 @@ def _enqueue(conn, kind, owner_id, job_kind, quality):
         raise HTTPException(409, "a job is already running or queued for this item")
 
     need_bytes = 2 * 10**9 if job_kind == "sample" else owner["size_bytes"]
-    if not jobs.has_space_for(MEDIA_ROOT, need_bytes):
+    if not jobs.has_space_for(_root_for(kind), need_bytes):
         raise HTTPException(507, "not enough free disk space for this operation")
 
     # global single runner: one job hammers the CPU at a time, rest queue up
@@ -1318,7 +1338,7 @@ def _delete_original(conn, kind, owner_id):
     owner = _owner_or_404(conn, kind, owner_id)
     if owner["status"] != "clean":
         raise HTTPException(400, "not verified clean yet")
-    folder = os.path.join(MEDIA_ROOT, owner["folder"])
+    folder = os.path.join(_root_for(kind), owner["folder"])
 
     # Resolve the job output BEFORE deleting anything. If there is no
     # recorded output (already finalized) or it can't be found on disk,

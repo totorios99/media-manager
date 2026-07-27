@@ -765,21 +765,29 @@ def _upsert_tracks(conn, owner_id, source_tracks, ext_subs, original_language, o
             conn.execute("DELETE FROM tracks WHERE id=?", (prior["id"],))
 
 
-def scan_library(conn, media_root, api_key, progress_cb=None):
+def scan_library(conn, media_root, api_key, progress_cb=None, include_shows=True):
     """Scans all top-level entries, classifying each as a movie or a show
     before pruning -- a folder reclassified between scans (or one that just
-    vanished) is pruned from whichever table it used to live in."""
+    vanished) is pruned from whichever table it used to live in.
+
+    include_shows=False: skip show classification/pruning entirely -- used
+    when TV shows live under a separate MM_SHOWS_ROOT, scanned instead by
+    scan_shows_root() below. Without this, every top-level name here would be
+    treated as this root's complete set of shows, and any show actually
+    living under the other root would look "vanished" and get pruned."""
     entries = sorted(e.name for e in os.scandir(media_root) if e.is_dir() and not e.name.startswith("._"))
-    kinds = {name: classify_folder(os.path.join(media_root, name)) for name in entries}
+    kinds = {name: (classify_folder(os.path.join(media_root, name)) if include_shows else "movie")
+             for name in entries}
     movie_folders = {n for n, k in kinds.items() if k == "movie"}
     show_folders = {n for n, k in kinds.items() if k == "show"}
 
     for r in conn.execute("SELECT id, folder FROM movies").fetchall():
         if r["folder"] not in movie_folders:
             conn.execute("DELETE FROM movies WHERE id=?", (r["id"],))
-    for r in conn.execute("SELECT id, folder FROM shows").fetchall():
-        if r["folder"] not in show_folders:
-            conn.execute("DELETE FROM shows WHERE id=?", (r["id"],))
+    if include_shows:
+        for r in conn.execute("SELECT id, folder FROM shows").fetchall():
+            if r["folder"] not in show_folders:
+                conn.execute("DELETE FROM shows WHERE id=?", (r["id"],))
     conn.commit()
 
     total = len(entries)
@@ -806,6 +814,35 @@ def scan_library(conn, media_root, api_key, progress_cb=None):
                     "ON CONFLICT(folder) DO UPDATE SET status='error', updated_at=excluded.updated_at",
                     (name, now),
                 )
+            conn.commit()
+        if progress_cb:
+            progress_cb(i, total, name)
+    return total
+
+
+def scan_shows_root(conn, shows_root, api_key, progress_cb=None):
+    """Scans a dedicated TV-shows root (MM_SHOWS_ROOT), separate from
+    MEDIA_ROOT's movies. Every top-level folder here is expected to be a
+    show; classify_folder is still consulted as a safety net so a stray
+    non-show folder is skipped rather than miscreated as an empty show."""
+    entries = sorted(e.name for e in os.scandir(shows_root) if e.is_dir() and not e.name.startswith("._"))
+    on_disk = set(entries)
+    for r in conn.execute("SELECT id, folder FROM shows").fetchall():
+        if r["folder"] not in on_disk:
+            conn.execute("DELETE FROM shows WHERE id=?", (r["id"],))
+    conn.commit()
+
+    total = len(entries)
+    for i, name in enumerate(entries, start=1):
+        try:
+            if classify_folder(os.path.join(shows_root, name)) == "show":
+                upsert_show(conn, shows_root, name, api_key)
+        except Exception:
+            conn.execute(
+                "INSERT INTO shows (folder, updated_at) VALUES (?, ?) "
+                "ON CONFLICT(folder) DO UPDATE SET updated_at=excluded.updated_at",
+                (name, time.strftime("%Y-%m-%dT%H:%M:%S")),
+            )
             conn.commit()
         if progress_cb:
             progress_cb(i, total, name)

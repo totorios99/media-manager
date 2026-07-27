@@ -152,22 +152,32 @@ def tmdb_search(title, year, api_key):
     }
 
 
-def tmdb_search_candidates(query, year, api_key, limit=6):
-    """List of candidate matches for manual re-match UI (unlike tmdb_search, no auto-pick)."""
+def tmdb_search_candidates(query, year, api_key, limit=6, kind="movie"):
+    """List of candidate matches for manual re-match UI (unlike tmdb_search, no
+    auto-pick). kind='tv' searches shows (TMDB field names differ: name/first_air_date
+    instead of title/release_date)."""
     if not api_key or not query:
         return []
+    endpoint = "movie" if kind == "movie" else "tv"
     params = {"api_key": api_key, "query": query, "include_adult": "false"}
-    if year:
+    if year and kind == "movie":
         params["year"] = year
-    url = f"{TMDB_BASE}/search/movie?{urllib.parse.urlencode(params)}"
+    url = f"{TMDB_BASE}/search/{endpoint}?{urllib.parse.urlencode(params)}"
     try:
         with urllib.request.urlopen(url, timeout=10) as r:
             results = json.load(r).get("results") or []
     except Exception:
         results = []
+    if kind == "movie":
+        return [
+            {"tmdb_id": r["id"], "title": r.get("title"),
+             "year": int(r["release_date"][:4]) if r.get("release_date") else None,
+             "original_language": r.get("original_language"), "poster_path": r.get("poster_path")}
+            for r in results[:limit]
+        ]
     return [
-        {"tmdb_id": r["id"], "title": r.get("title"),
-         "year": int(r["release_date"][:4]) if r.get("release_date") else None,
+        {"tmdb_id": r["id"], "title": r.get("name"),
+         "year": int(r["first_air_date"][:4]) if r.get("first_air_date") else None,
          "original_language": r.get("original_language"), "poster_path": r.get("poster_path")}
         for r in results[:limit]
     ]
@@ -219,19 +229,29 @@ def _sub_class(t):
     return "other"
 
 
-def suggest_tracks(conn, movie_id):
+def suggest_tracks(conn, owner_id, table="movies", multi_audio=False):
     """One audio track per language (orig lang first + default), best codec that
     isn't TrueHD/Atmos; TrueHD/Atmos kept after the compatible picks, never default.
     Subs: forced first (orig lang default), then PGS, then SRT fallback, one per
-    (class, lang). Sets status='ready'; overwrites any prior config."""
-    movie = conn.execute("SELECT * FROM movies WHERE id=?", (movie_id,)).fetchone()
+    (class, lang). Sets status='ready'; overwrites any prior config.
+
+    multi_audio=True (TV only): keeps EVERY audio track in a wanted language
+    (multiple dub sources), instead of one best-codec pick per language."""
+    col = "movie_id" if table == "movies" else "episode_id"
+    movie = conn.execute(f"SELECT * FROM {table} WHERE id=?", (owner_id,)).fetchone()
     if not movie:
         return
-    orig3 = LANG_ISO1_TO_3.get(movie["original_language"] or "")
+    # episodes hold no original_language of their own -- it lives on the parent show
+    if table == "movies":
+        original_language = movie["original_language"]
+    else:
+        show = conn.execute("SELECT original_language FROM shows WHERE id=?", (movie["show_id"],)).fetchone()
+        original_language = show["original_language"] if show else None
+    orig3 = LANG_ISO1_TO_3.get(original_language or "")
     wanted = [l for l in ([orig3] if orig3 else []) + ["eng", "spa"] if l]
     wanted = list(dict.fromkeys(wanted))  # de-dup, preserve order (original lang first)
 
-    tracks = [dict(r) for r in conn.execute("SELECT * FROM tracks WHERE movie_id=?", (movie_id,))]
+    tracks = [dict(r) for r in conn.execute(f"SELECT * FROM tracks WHERE {col}=?", (owner_id,))]
     audio = [t for t in tracks if t["type"] == "audio"]
     subs = [t for t in tracks if t["type"] == "subtitle"]
     if len(audio) == 1 and audio[0]["lang"] == "und":
@@ -251,22 +271,28 @@ def suggest_tracks(conn, movie_id):
         order[t["type"]] += 1
 
     # audio: one track per language, best codec that isn't TrueHD/Atmos;
-    # avoided codecs only win when they're the sole option for that language
+    # avoided codecs only win when they're the sole option for that language.
+    # multi_audio (TV): keep every dub source in a wanted language instead.
     first_audio = True
     for lang in wanted:
-        cands = sorted([t for t in audio if t["lang"] == lang], key=lambda t: _audio_rank(t["codec"]))
+        # avoided codecs sort last within a language, so cands[0] is the compatible
+        # best — the same pick the old next() made, one less pass
+        cands = sorted([t for t in audio if t["lang"] == lang],
+                       key=lambda t: (_audio_avoided(t["codec"]), _audio_rank(t["codec"])))
         if not cands:
             continue
-        pick = next((t for t in cands if not _audio_avoided(t["codec"])), cands[0])
-        mark(pick, lang, default=first_audio, forced=False)
-        first_audio = False
-    # TrueHD/Atmos stays in the file for the premium experience — kept after the
-    # compatible picks, never default (one per language)
-    for lang in wanted:
-        t = next((t for t in audio if t["lang"] == lang and _audio_avoided(t["codec"])
-                  and t["id"] not in plan), None)
-        if t:
-            mark(t, lang, default=False, forced=False)
+        # ponytail: TV keeps every dub in a wanted language; movies keep one
+        for t in (cands if multi_audio else cands[:1]):
+            mark(t, lang, default=first_audio, forced=False)
+            first_audio = False
+    if not multi_audio:
+        # TrueHD/Atmos stays in the file for the premium experience — kept after
+        # the compatible picks, never default (one per language)
+        for lang in wanted:
+            t = next((t for t in audio if t["lang"] == lang and _audio_avoided(t["codec"])
+                      and t["id"] not in plan), None)
+            if t:
+                mark(t, lang, default=False, forced=False)
 
     # subs, output order: forced (movie language first, that one default),
     # then one image sub (PGS, VobSub fallback) per language, then one SRT
@@ -305,7 +331,7 @@ def suggest_tracks(conn, movie_id):
             )
         else:
             conn.execute("UPDATE tracks SET keep=0 WHERE id=?", (t["id"],))
-    conn.execute("UPDATE movies SET status='ready', updated_at=? WHERE id=?", (now, movie_id))
+    conn.execute(f"UPDATE {table} SET status='ready', updated_at=? WHERE id=?", (now, owner_id))
     conn.commit()
 
 
@@ -317,16 +343,223 @@ def guess_srt_lang(filename):
     return code if len(code) == 3 else LANG_2TO3.get(code, "und")
 
 
-def find_external_subs(folder):
+def find_external_subs(folder, stem=None):
+    """stem: if given (episode path), only .srt files whose name starts with the
+    video's own stem are matched -- otherwise a season folder makes every
+    episode adopt every sibling's subtitle files (and delete_original would
+    then delete them out from under the other episodes)."""
     subs = []
     try:
         entries = os.listdir(folder)
     except OSError:
         return subs
     for f in entries:
-        if f.lower().endswith(".srt"):
-            subs.append({"ext_path": os.path.join(folder, f), "lang": guess_srt_lang(f), "name": f})
+        if not f.lower().endswith(".srt"):
+            continue
+        if stem is not None and not f.startswith(stem):
+            continue
+        subs.append({"ext_path": os.path.join(folder, f), "lang": guess_srt_lang(f), "name": f})
     return subs
+
+
+# ---------- TV shows ----------
+
+SEASON_DIR_RE = re.compile(r"^season\s*0*(\d+)$|^s0*(\d+)$", re.IGNORECASE)
+# SxxExx / sxex, or a bare "1x03" form. Deliberately requires the S.../x
+# separator so a lone year like "2019" in a filename never matches.
+EPISODE_RE = re.compile(r"s0*(\d+)\s*e0*(\d+)|(?<!\d)(\d{1,2})x(\d{2})(?!\d)", re.IGNORECASE)
+
+
+def parse_episode(name):
+    """(season, episode) or None. Tries SxxExx first, then 1x03; a year
+    (Show 2019 S02E10) never matches by itself since EPISODE_RE requires
+    the S/E or x separator, not bare digits."""
+    m = EPISODE_RE.search(name)
+    if not m:
+        return None
+    if m.group(1) is not None:
+        return int(m.group(1)), int(m.group(2))
+    return int(m.group(3)), int(m.group(4))
+
+
+def classify_folder(path):
+    """'show' if the folder holds a Season NN / SNN subdir, or >=2 files that
+    parse as episodes; 'movie' otherwise (the existing one-video-per-folder
+    default). A single stray SxxExx-named file is not enough -- movies
+    occasionally have a release tag that happens to look like one."""
+    try:
+        entries = list(os.scandir(path))
+    except OSError:
+        return "movie"
+    for e in entries:
+        if e.is_dir() and SEASON_DIR_RE.match(e.name):
+            return "show"
+    ep_files = [e.name for e in entries
+                if e.is_file() and e.name.lower().endswith(VIDEO_EXT) and parse_episode(e.name)]
+    return "show" if len(ep_files) >= 2 else "movie"
+
+
+JOB_OUTPUT_RE = re.compile(r"\.(remux|hevc)\.mkv$|\.sample\.rf\d+\.mkv$", re.IGNORECASE)
+
+
+def find_episode_files(folder):
+    """[(rel_subpath, season, episode)] -- rel_subpath is relative to `folder`
+    and may include a season subdir. Recurses exactly one extra level (season
+    dirs only), matching scan_library's one-level movie walk.
+
+    Movies never see two files claim to be the same movie because
+    find_main_file picks one (the largest) per folder. Episodes have no such
+    guarantee -- a remux/encode job leaves its OWN SxxExx-matching output
+    sitting next to the source until delete-original runs, and both would
+    otherwise register as separate episodes. So candidates are grouped by
+    (season, episode) and, within a group, a job-output file only wins if it's
+    the only candidate (i.e. delete-original already ran); otherwise the
+    original source file wins, exactly mirroring find_main_file's role."""
+    candidates = []  # (rel_subpath, season, episode, stat_size)
+    try:
+        top = list(os.scandir(folder))
+    except OSError:
+        return []
+    for e in top:
+        if e.is_file() and e.name.lower().endswith(VIDEO_EXT) and not e.name.startswith("._"):
+            ep = parse_episode(e.name)
+            if ep:
+                candidates.append((e.name, ep[0], ep[1], e.stat().st_size))
+        elif e.is_dir() and SEASON_DIR_RE.match(e.name):
+            try:
+                sub = list(os.scandir(e.path))
+            except OSError:
+                continue
+            for f in sub:
+                if f.is_file() and f.name.lower().endswith(VIDEO_EXT) and not f.name.startswith("._"):
+                    ep = parse_episode(f.name)
+                    if ep:
+                        candidates.append((os.path.join(e.name, f.name), ep[0], ep[1], f.stat().st_size))
+
+    groups = {}
+    for rel_path, season, episode, size in candidates:
+        groups.setdefault((season, episode), []).append((rel_path, size))
+    out = []
+    for (season, episode), files in groups.items():
+        non_output = [f for f in files if not JOB_OUTPUT_RE.search(f[0])]
+        pool = non_output or files
+        best = max(pool, key=lambda f: f[1])  # largest, ties broken deterministically by size
+        out.append((best[0], season, episode))
+    return out
+
+
+def tmdb_search_tv(name, api_key):
+    if not api_key or not name:
+        return None
+    params = {"api_key": api_key, "query": name, "include_adult": "false"}
+    url = f"{TMDB_BASE}/search/tv?{urllib.parse.urlencode(params)}"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            results = json.load(r).get("results") or []
+    except Exception:
+        results = []
+    if not results:
+        return None
+    top = results[0]
+    return {
+        "tmdb_id": top["id"],
+        "title": top.get("name") or name,
+        "year": int(top["first_air_date"][:4]) if top.get("first_air_date") else None,
+        "original_language": top.get("original_language"),
+        "poster_path": top.get("poster_path"),
+    }
+
+
+def tmdb_get_tv(tmdb_id, api_key):
+    if not api_key:
+        return None
+    url = f"{TMDB_BASE}/tv/{tmdb_id}?{urllib.parse.urlencode({'api_key': api_key})}"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            d = json.load(r)
+    except Exception:
+        return None
+    return {
+        "tmdb_id": d["id"], "title": d.get("name"),
+        "year": int(d["first_air_date"][:4]) if d.get("first_air_date") else None,
+        "original_language": d.get("original_language"), "poster_path": d.get("poster_path"),
+    }
+
+
+def upsert_show(conn, media_root, folder_name, api_key):
+    """Mirrors upsert_movie: upserts the show row, then each episode file found
+    by find_episode_files, then prunes episode rows whose file vanished."""
+    folder_path = os.path.join(media_root, folder_name)
+    clean_title, guess_year = clean_title_year(folder_name)
+    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+
+    row = conn.execute("SELECT id FROM shows WHERE folder=?", (folder_name,)).fetchone()
+    show_id = row["id"] if row else None
+    tmdb = tmdb_search_tv(clean_title, api_key) if not show_id else None
+    if show_id:
+        existing = conn.execute("SELECT * FROM shows WHERE id=?", (show_id,)).fetchone()
+        tmdb = {"tmdb_id": existing["tmdb_id"], "title": existing["title"], "year": existing["year"],
+                "original_language": existing["original_language"], "poster_path": existing["poster_path"]}
+
+    fields = dict(
+        folder=folder_name, clean_title=clean_title, guess_year=guess_year,
+        tmdb_id=(tmdb or {}).get("tmdb_id"), title=(tmdb or {}).get("title"), year=(tmdb or {}).get("year"),
+        original_language=(tmdb or {}).get("original_language"), poster_path=(tmdb or {}).get("poster_path"),
+        updated_at=now,
+    )
+    if show_id:
+        set_clause = ", ".join(f"{k}=?" for k in fields if k != "folder")
+        vals = [v for k, v in fields.items() if k != "folder"] + [show_id]
+        conn.execute(f"UPDATE shows SET {set_clause} WHERE id=?", vals)
+    else:
+        cols = ", ".join(fields.keys())
+        qs = ", ".join("?" for _ in fields)
+        cur = conn.execute(f"INSERT INTO shows ({cols}) VALUES ({qs})", list(fields.values()))
+        show_id = cur.lastrowid
+
+    found = find_episode_files(folder_path)
+    seen_files = set()
+    for rel_path, season, episode in found:
+        seen_files.add(rel_path)
+        ep_folder_name = os.path.dirname(rel_path)  # '' or a season subdir name
+        ep_file = os.path.basename(rel_path)
+        ep_row = conn.execute(
+            "SELECT id, status FROM episodes WHERE show_id=? AND folder=? AND file=?",
+            (show_id, ep_folder_name, ep_file),
+        ).fetchone()
+        abs_path = os.path.join(folder_path, rel_path)
+        info = inspect_file(abs_path)
+        stem = os.path.splitext(ep_file)[0]
+        ext_subs = find_external_subs(os.path.join(folder_path, ep_folder_name), stem=stem)
+        existing_status = ep_row["status"] if ep_row else None
+        status = existing_status if existing_status in (
+            "ready", "working", "clean", "cleaning", "encoding") else "unprocessed"
+        ep_fields = dict(
+            show_id=show_id, season=season, episode=episode, folder=ep_folder_name, file=ep_file,
+            container_title=info["container_title"], video_codec=info["video_codec"],
+            width=info["width"], height=info["height"], bitrate=info["bitrate"],
+            duration=info["duration"], size_bytes=info["size_bytes"], hdr=info["hdr"],
+            status=status, updated_at=now,
+        )
+        if ep_row:
+            set_clause = ", ".join(f"{k}=?" for k in ep_fields if k not in ("folder", "file"))
+            vals = [v for k, v in ep_fields.items() if k not in ("folder", "file")] + [ep_row["id"]]
+            conn.execute(f"UPDATE episodes SET {set_clause} WHERE id=?", vals)
+            episode_id = ep_row["id"]
+        else:
+            cols = ", ".join(ep_fields.keys())
+            qs = ", ".join("?" for _ in ep_fields)
+            cur = conn.execute(f"INSERT INTO episodes ({cols}) VALUES ({qs})", list(ep_fields.values()))
+            episode_id = cur.lastrowid
+        _upsert_tracks(conn, episode_id, info["tracks"], ext_subs, (tmdb or {}).get("original_language"),
+                       owner_col="episode_id")
+
+    for r in conn.execute("SELECT id, folder, file FROM episodes WHERE show_id=?", (show_id,)).fetchall():
+        rel = os.path.join(r["folder"], r["file"]) if r["folder"] else r["file"]
+        if rel not in seen_files:
+            conn.execute("DELETE FROM episodes WHERE id=?", (r["id"],))
+    conn.commit()
+    return show_id
 
 
 def find_main_file(folder):
@@ -486,9 +719,9 @@ def upsert_movie(conn, media_root, folder_name, api_key):
     return movie_id
 
 
-def _upsert_tracks(conn, movie_id, source_tracks, ext_subs, original_language):
+def _upsert_tracks(conn, owner_id, source_tracks, ext_subs, original_language, owner_col="movie_id"):
     existing = {}
-    for r in conn.execute("SELECT * FROM tracks WHERE movie_id=?", (movie_id,)):
+    for r in conn.execute(f"SELECT * FROM tracks WHERE {owner_col}=?", (owner_id,)):
         key = ("mkv", r["mkv_id"]) if r["mkv_id"] is not None else ("ext", r["ext_path"])
         existing[key] = r
 
@@ -511,10 +744,10 @@ def _upsert_tracks(conn, movie_id, source_tracks, ext_subs, original_language):
         if type_ in order_counters:
             order_counters[type_] += 1
         conn.execute(
-            "INSERT INTO tracks (movie_id, mkv_id, type, codec, lang, name, channels, default_flag, forced_flag, "
+            f"INSERT INTO tracks ({owner_col}, mkv_id, type, codec, lang, name, channels, default_flag, forced_flag, "
             "ext_path, keep, out_order, out_lang, out_default, out_forced, out_name) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)",
-            (movie_id, mkv_id, type_, codec, lang, name, channels, default_flag, forced_flag,
+            (owner_id, mkv_id, type_, codec, lang, name, channels, default_flag, forced_flag,
              ext_path, out_order, out_lang, default_flag, forced_flag, ""),
         )
 
@@ -533,24 +766,46 @@ def _upsert_tracks(conn, movie_id, source_tracks, ext_subs, original_language):
 
 
 def scan_library(conn, media_root, api_key, progress_cb=None):
-    """Scans all top-level entries. progress_cb(done, total, name) optional."""
+    """Scans all top-level entries, classifying each as a movie or a show
+    before pruning -- a folder reclassified between scans (or one that just
+    vanished) is pruned from whichever table it used to live in."""
     entries = sorted(e.name for e in os.scandir(media_root) if e.is_dir() and not e.name.startswith("._"))
-    # prune rows whose folder vanished from disk (renamed away, merged, deleted)
-    on_disk = set(entries)
+    kinds = {name: classify_folder(os.path.join(media_root, name)) for name in entries}
+    movie_folders = {n for n, k in kinds.items() if k == "movie"}
+    show_folders = {n for n, k in kinds.items() if k == "show"}
+
     for r in conn.execute("SELECT id, folder FROM movies").fetchall():
-        if r["folder"] not in on_disk:
+        if r["folder"] not in movie_folders:
             conn.execute("DELETE FROM movies WHERE id=?", (r["id"],))
+    for r in conn.execute("SELECT id, folder FROM shows").fetchall():
+        if r["folder"] not in show_folders:
+            conn.execute("DELETE FROM shows WHERE id=?", (r["id"],))
     conn.commit()
+
     total = len(entries)
     for i, name in enumerate(entries, start=1):
         try:
-            upsert_movie(conn, media_root, name, api_key)
-        except Exception as e:
-            conn.execute(
-                "INSERT INTO movies (folder, status, updated_at) VALUES (?, 'error', ?) "
-                "ON CONFLICT(folder) DO UPDATE SET status='error', updated_at=excluded.updated_at",
-                (name, time.strftime("%Y-%m-%dT%H:%M:%S")),
-            )
+            if kinds[name] == "show":
+                upsert_show(conn, media_root, name, api_key)
+            else:
+                upsert_movie(conn, media_root, name, api_key)
+        except Exception:
+            now = time.strftime("%Y-%m-%dT%H:%M:%S")
+            if kinds[name] == "show":
+                # shows carry no status column (it's a computed aggregate over
+                # episodes) -- just make sure a row exists so it's visible; the
+                # next scan retries upsert_show naturally
+                conn.execute(
+                    "INSERT INTO shows (folder, updated_at) VALUES (?, ?) "
+                    "ON CONFLICT(folder) DO UPDATE SET updated_at=excluded.updated_at",
+                    (name, now),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO movies (folder, status, updated_at) VALUES (?, 'error', ?) "
+                    "ON CONFLICT(folder) DO UPDATE SET status='error', updated_at=excluded.updated_at",
+                    (name, now),
+                )
             conn.commit()
         if progress_cb:
             progress_cb(i, total, name)
@@ -616,4 +871,56 @@ if __name__ == "__main__":
     assert got[6]["keep"] == 1 and got[6]["out_order"] == 1
     assert got[7]["keep"] == 0, "duplicate PGS must stay unchecked"
     assert got[8]["keep"] == 1 and got[8]["out_order"] == 2
+
+    # multi_audio=True (TV): both eng audio tracks survive, TrueHD still never default
+    c2 = _sq.connect(":memory:")
+    c2.row_factory = _sq.Row
+    c2.executescript("""
+      CREATE TABLE shows (id INTEGER PRIMARY KEY, original_language TEXT);
+      CREATE TABLE episodes (id INTEGER PRIMARY KEY, show_id INT, original_language TEXT,
+        status TEXT, updated_at TEXT);
+      CREATE TABLE tracks (id INTEGER PRIMARY KEY, episode_id INT, mkv_id INT, type TEXT, codec TEXT,
+        lang TEXT, name TEXT, channels INT, default_flag INT DEFAULT 0, forced_flag INT DEFAULT 0,
+        ext_path TEXT, keep INT DEFAULT 1, out_order INT DEFAULT 0, out_lang TEXT DEFAULT '',
+        out_default INT DEFAULT 0, out_forced INT DEFAULT 0, out_name TEXT DEFAULT '');
+      INSERT INTO shows VALUES (1, 'en');
+      INSERT INTO episodes (id, show_id, status, updated_at) VALUES (1, 1, 'unprocessed', NULL);
+      INSERT INTO tracks (id, episode_id, mkv_id, type, codec, lang, forced_flag) VALUES
+        (1,1,0,'video','HEVC','und',0),
+        (2,1,1,'audio','TrueHD Atmos','eng',0),
+        (3,1,2,'audio','DTS-HD Master Audio','eng',0),
+        (4,1,3,'audio','AAC','eng',0);
+    """)
+    suggest_tracks(c2, 1, table="episodes", multi_audio=True)
+    got2 = {r["id"]: dict(r) for r in c2.execute("SELECT * FROM tracks")}
+    assert got2[3]["keep"] == 1 and got2[3]["out_default"] == 1, "best compatible eng audio, default"
+    assert got2[4]["keep"] == 1 and got2[4]["out_default"] == 0, "second eng dub source also kept"
+    assert got2[2]["keep"] == 1 and got2[2]["out_default"] == 0, "TrueHD kept too, never default"
+
+    # classify_folder / parse_episode
+    assert parse_episode("Show.S01E03.mkv") == (1, 3)
+    assert parse_episode("show.s1e3.mkv") == (1, 3)
+    assert parse_episode("show.1x03.mkv") == (1, 3)
+    assert parse_episode("Show 2019 S02E10.mkv") == (2, 10)
+    assert parse_episode("Show 2019.mkv") is None, "bare year must not parse as an episode"
+
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, "show_seasondir", "Season 01"))
+        open(os.path.join(d, "show_seasondir", "Season 01", "e1.mkv"), "w").close()
+        assert classify_folder(os.path.join(d, "show_seasondir")) == "show"
+
+        os.makedirs(os.path.join(d, "show_flat"))
+        open(os.path.join(d, "show_flat", "Show.S01E01.mkv"), "w").close()
+        open(os.path.join(d, "show_flat", "Show.S01E02.mkv"), "w").close()
+        assert classify_folder(os.path.join(d, "show_flat")) == "show"
+
+        os.makedirs(os.path.join(d, "movie_dir"))
+        open(os.path.join(d, "movie_dir", "Movie (2016).mkv"), "w").close()
+        assert classify_folder(os.path.join(d, "movie_dir")) == "movie"
+
+        # a single stray SxxExx-looking file is not enough to call it a show
+        os.makedirs(os.path.join(d, "movie_one_ep_like"))
+        open(os.path.join(d, "movie_one_ep_like", "Movie.S01E01.mkv"), "w").close()
+        assert classify_folder(os.path.join(d, "movie_one_ep_like")) == "movie"
+
     print("scan.py self-check OK")

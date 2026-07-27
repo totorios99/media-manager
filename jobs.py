@@ -67,13 +67,14 @@ def _systemd_wrap(cmd_str, unit, cpu_quota):
             f"-p CPUWeight={CPU_WEIGHT} {quota}{taskset}sh -c {shlex.quote(cmd_str)}")
 
 
-def start_job(conn, movie_id, kind, cmd_str, log_dir, cpu_quota=None, queued=False):
+def start_job(conn, kind, cmd_str, log_dir, movie_id=None, episode_id=None, cpu_quota=None, queued=False):
     """cmd_str: full shell command (already built/joined, may contain && chains).
-    queued=True only records the row; a ticker launches it when the runner is free."""
+    queued=True only records the row; a ticker launches it when the runner is free.
+    Exactly one of movie_id/episode_id should be set."""
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     cur = conn.execute(
-        "INSERT INTO jobs (movie_id, kind, status, cmd, started_at) VALUES (?,?,?,?,?)",
-        (movie_id, kind, "queued" if queued else "running", cmd_str, now),
+        "INSERT INTO jobs (movie_id, episode_id, kind, status, cmd, started_at) VALUES (?,?,?,?,?,?)",
+        (movie_id, episode_id, kind, "queued" if queued else "running", cmd_str, now),
     )
     job_id = cur.lastrowid
     conn.commit()

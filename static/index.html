@@ -332,11 +332,14 @@ function modal(o) {
 }
 
 // ---------- state ----------
-let MOVIES = [], JOBS = [], POWER = null, STATS = { reclaimed_bytes: 0 };
+let MOVIES = [], SHOWS = [], JOBS = [], POWER = null, STATS = { reclaimed_bytes: 0 };
 let TAB = 'needs', SORT = 'size', DUPONLY = false, Q = '';
 let SCAN = { running: false };
 let TRACKSTATE = null;   // {audio:[], subs:[]} while a detail page is open
+let TRACK_BASE = 'movies';  // 'movies' | 'episodes' -- which API the track editor writes to
+let TRACK_ID = null;        // owner id (movie or episode) for the open track editor
 let SELRF = null, SAMPLES = [], CURID = null, VIDEOTRACK = null;
+let CURSHOWID = null;   // set while a show/episode page is open (movie CURID stays null there)
 let powerPopOpen = false, maintPopOpen = false;
 
 // ---------- routing ----------
@@ -348,10 +351,14 @@ window.onload = () => {
   api('/api/stats').then(s => { STATS = s; if (!CURID) paintDash(); }).catch(() => {});
 };
 function route() {
-  const m = location.hash.match(/^#\/movie\/(\d+)/);
+  const mv = location.hash.match(/^#\/movie\/(\d+)/);
+  const sh = location.hash.match(/^#\/show\/(\d+)/);
+  const ep = location.hash.match(/^#\/episode\/(\d+)/);
   powerPopOpen = maintPopOpen = false;
-  if (m) { CURID = parseInt(m[1]); renderDetail(CURID); }
-  else { CURID = null; TRACKSTATE = null; renderHome(); }
+  if (mv) { CURID = parseInt(mv[1]); CURSHOWID = null; TRACK_BASE = 'movies'; renderDetail(CURID); }
+  else if (sh) { CURID = null; CURSHOWID = parseInt(sh[1]); renderShow(CURSHOWID); }
+  else if (ep) { CURID = null; CURSHOWID = null; TRACK_BASE = 'episodes'; renderEpisode(parseInt(ep[1])); }
+  else { CURID = null; CURSHOWID = null; TRACKSTATE = null; renderHome(); }
 }
 
 // ---------- header ----------
@@ -422,6 +429,7 @@ async function loadMovies() {
   const params = new URLSearchParams();
   if (Q) params.set('q', Q);
   MOVIES = await api('/api/movies?' + params).catch(e => { oops(e); return MOVIES; });
+  SHOWS = await api('/api/shows?' + params).catch(() => SHOWS);
 }
 function paintHomeBody() { if (CURID) return; paintDash(); paintTabs(); paintGrid(); }
 
@@ -481,7 +489,7 @@ function paintTabs() {
   MOVIES.forEach(m => { const b = bucketOf(m); if (counts[b] !== undefined) counts[b]++; });
   const t = (id, label, n) => `<button class="tab ${TAB === id ? 'on' : ''}" onclick="TAB='${id}';paintTabs();paintGrid()">${label} ${n}</button>`;
   el.innerHTML = `<div class="tabs">
-    ${t('needs', 'NEEDS DECISION', counts.needs)}${t('flight', 'IN FLIGHT', counts.flight)}${t('done', 'DONE', counts.done)}${t('all', 'ALL', MOVIES.length)}
+    ${t('needs', 'NEEDS DECISION', counts.needs)}${t('flight', 'IN FLIGHT', counts.flight)}${t('done', 'DONE', counts.done)}${t('all', 'ALL', MOVIES.length)}${t('shows', 'TV SHOWS', SHOWS.length)}
     <div class="right">
       <span>SORT:</span><select onchange="SORT=this.value;paintGrid()">
         <option value="size" ${SORT === 'size' ? 'selected' : ''}>SIZE ▾</option>
@@ -492,11 +500,27 @@ function paintTabs() {
 function paintGrid() {
   const el = document.getElementById('gridwrap');
   if (!el) return;
+  if (TAB === 'shows') {
+    const ss = [...SHOWS].sort((a, b) => (a.title || a.clean_title || a.folder).localeCompare(b.title || b.clean_title || b.folder));
+    el.innerHTML = ss.length ? `<div class="grid">${ss.map(showCardHtml).join('')}</div>` : '<div class="empty">NO SHOWS FOUND</div>';
+    return;
+  }
   let ms = MOVIES.filter(m => TAB === 'all' || bucketOf(m) === TAB);
   if (DUPONLY) ms = ms.filter(m => m.dup);
   ms.sort(SORT === 'size' ? (a, b) => (b.size_bytes || 0) - (a.size_bytes || 0)
                           : (a, b) => (a.title || a.clean_title || a.folder).localeCompare(b.title || b.clean_title || b.folder));
   el.innerHTML = ms.length ? `<div class="grid">${ms.map(cardHtml).join('')}</div>` : '<div class="empty">NOTHING HERE</div>';
+}
+function showCardHtml(s) {
+  const title = s.title || s.clean_title || s.folder;
+  const poster = posterUrl(s.poster_path);
+  const STMAP = { unprocessed: 'var(--mut)', ready: 'var(--fine)', encoding: 'var(--acc)', clean: 'var(--fine)', error: 'var(--err)' };
+  return `<div class="mcard" onclick="location.hash='#/show/${s.id}'">
+    ${poster ? `<img class="poster" src="${poster}" loading="lazy">` : `<div class="noposter">${esc(title)}</div>`}
+    <div class="foot">
+      <div class="t">${esc(title)}</div>
+      <div class="row2"><span style="color:${STMAP[s.status] || 'var(--faint)'}">${esc((s.status || '').toUpperCase())}</span><span></span></div>
+    </div></div>`;
 }
 function cardHtml(m) {
   const title = m.title || m.clean_title || m.folder;
@@ -560,6 +584,7 @@ async function renderDetail(id) {
   const data = await api(`/api/movies/${id}`).catch(e => { page.innerHTML = `<div class="empty">${esc(e.message)}</div>`; throw e; });
   const m = data.movie;
   SAMPLES = await api(`/api/movies/${id}/samples`).catch(() => []);
+  TRACK_BASE = 'movies'; TRACK_ID = id;
   TRACKSTATE = {
     audio: data.tracks.filter(t => t.type === 'audio').map(t => ({ ...t })),
     subs: data.tracks.filter(t => t.type === 'subtitle').map(t => ({ ...t })),
@@ -660,9 +685,9 @@ function tracksHtml(video) {
     ${grp('AUDIO — TOP = PRIMARY', TRACKSTATE.audio, 'audio')}
     ${grp('SUBTITLES', TRACKSTATE.subs, 'subs')}
     <div class="btnrow">
-      <button class="btn" onclick="callSuggest(${CURID})">Auto-suggest</button>
-      <button class="btn" onclick="callStrip(${CURID})">Strip junk names</button>
-      <button class="btn primary g-acc-lg" onclick="saveConfig(${CURID})">Save configuration</button>
+      <button class="btn" onclick="callSuggest(${TRACK_ID})">Auto-suggest</button>
+      <button class="btn" onclick="callStrip(${TRACK_ID})">Strip junk names</button>
+      <button class="btn primary g-acc-lg" onclick="saveConfig(${TRACK_ID})">Save configuration</button>
     </div>`;
 }
 function trackRowHtml(t, i, type, n) {
@@ -714,15 +739,16 @@ function toggleForced(i) {
   t.out_forced = t.out_forced ? 0 : 1;
   repaintTracks();
 }
+function reopenDetail(id) { TRACK_BASE === 'episodes' ? renderEpisode(id) : renderDetail(id); }
 async function saveConfig(id) {
   const withOrder = l => l.map((t, i) => ({ id: t.id, keep: t.keep ? 1 : 0, out_order: i, out_lang: t.out_lang || '',
     out_default: t.out_default ? 1 : 0, out_forced: t.out_forced ? 1 : 0, out_name: t.out_name || '' }));
-  await api(`/api/movies/${id}/config`, { method: 'PUT', headers: {'Content-Type':'application/json'},
+  await api(`/api/${TRACK_BASE}/${id}/config`, { method: 'PUT', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ tracks: [...withOrder(TRACKSTATE.audio), ...withOrder(TRACKSTATE.subs)] }) }).catch(oops);
-  renderDetail(id);
+  reopenDetail(id);
 }
-async function callSuggest(id) { await api(`/api/movies/${id}/suggest`, { method: 'POST' }).catch(oops); renderDetail(id); }
-async function callStrip(id) { await api(`/api/movies/${id}/strip-names`, { method: 'POST' }).catch(oops); renderDetail(id); }
+async function callSuggest(id) { await api(`/api/${TRACK_BASE}/${id}/suggest`, { method: 'POST' }).catch(oops); reopenDetail(id); }
+async function callStrip(id) { await api(`/api/${TRACK_BASE}/${id}/strip-names`, { method: 'POST' }).catch(oops); reopenDetail(id); }
 
 // ---------- step 3: process ----------
 function tagForRF(rf) { return rf <= 18 ? 'NEAR-LOSSLESS' : rf <= 21 ? 'EXCELLENT' : rf <= 23 ? 'SWEET SPOT' : 'QUALITY RISK'; }
@@ -907,6 +933,171 @@ async function tmdbSearch(id) {
 async function pickTmdb(id, tmdbId) {
   await api(`/api/movies/${id}/tmdb`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tmdb_id: tmdbId }) }).catch(oops);
   renderDetail(id);
+}
+
+// ---------- show detail ----------
+let SHOWDATA = null;
+async function renderShow(id) {
+  const page = document.getElementById('page');
+  page.innerHTML = '<div class="dwrap"><div class="skel" style="height:60px;margin:20px 22px"></div><div class="skel" style="height:180px;margin:20px 22px"></div></div>';
+  const data = await api(`/api/shows/${id}`).catch(e => { page.innerHTML = `<div class="empty">${esc(e.message)}</div>`; throw e; });
+  SHOWDATA = data;
+  const s = data.show;
+  const title = s.title || s.clean_title || s.folder;
+  const poster = posterUrl(s.poster_path);
+  page.innerHTML = `<div class="dwrap">
+    <div class="dtop"><span class="back" onclick="location.hash=''">← Library</span></div>
+    <div class="ident">
+      ${poster ? `<img src="${poster}">` : '<div class="noposter">POSTER</div>'}
+      <div style="min-width:0">
+        <h2>${esc(title)} ${s.year ? `<span class="yr">(${s.year})</span>` : ''}</h2>
+        <div class="fn">${esc(s.folder)}</div>
+      </div>
+    </div>
+    <div class="steps">
+      ${stepCard(1, s.tmdb_id ? 'done' : 'active', 'Match on TMDB',
+        s.tmdb_id ? `${esc(s.title)} (${s.year}) · tmdb ${s.tmdb_id}` : 'find the canonical title',
+        s.tmdb_id ? 'Re-match' : null, `
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="showTmdbQ" placeholder="Search TMDB…" style="width:240px" value="${esc(s.clean_title || '')}">
+          <button class="btn" onclick="tmdbSearchShow(${id})">Search</button>
+        </div><div id="showTmdbResults"></div>`)}
+      ${stepCard(2, 'active', 'Episodes', `${data.episodes.length} episode(s)`, null, episodesHtml(data))}
+    </div></div>`;
+}
+function episodesHtml(data) {
+  const rows = data.episodes.map(e => {
+    const running = INFLIGHT.includes(e.status);
+    const job = JOBS.find(j => j.episode_id === e.id && (j.status === 'running' || j.status === 'queued'));
+    return `<div class="trow ${e.excluded ? 'drop' : ''}">
+      <button class="keep-pill ${e.excluded ? 'off' : 'on'}" onclick="toggleExcluded(${data.show.id},${e.id})">${e.excluded ? 'EXCLUDED' : 'INCLUDED'}</button>
+      <div class="cinfo" style="width:110px"><div class="cc">S${String(e.season||0).padStart(2,'0')}E${String(e.episode||0).padStart(2,'0')}</div></div>
+      <div class="cinfo"><div class="cc">${esc(e.file || '')}</div><div class="cm">${fmtG(e.size_bytes)}</div></div>
+      <span style="font:10px var(--mono);color:${job ? 'var(--acc)' : running ? 'var(--acc)' : e.status === 'clean' ? 'var(--fine)' : e.status === 'error' ? 'var(--err)' : 'var(--faint)'}">${job ? (job.status.toUpperCase() + ' ' + (job.progress||0).toFixed(0) + '%') : e.status.toUpperCase()}</span>
+      <span class="linky" onclick="location.hash='#/episode/${e.id}'">configure ›</span>
+    </div>`;
+  }).join('');
+  return `${rows || '<div style="color:var(--faint);font-size:12px">no episodes found</div>'}
+    <div class="btnrow">
+      <button class="btn" onclick="suggestShow(${data.show.id})">Suggest all (non-excluded)</button>
+      <button class="btn ghost2" onclick="runShowJob(${data.show.id},'remux')">Remux all configured</button>
+      <button class="btn gold" onclick="runShowJob(${data.show.id},'encode')">Encode all configured</button>
+    </div>`;
+}
+async function toggleExcluded(showId, epId) {
+  // PUT takes the full excluded set (not a diff) -- flip epId's own flag, keep every other episode's as-is
+  const excludedIds = SHOWDATA.episodes.filter(e => e.id === epId ? !e.excluded : e.excluded).map(e => e.id);
+  await api(`/api/shows/${showId}/episodes`, { method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ excluded: excludedIds }) }).catch(oops);
+  renderShow(showId);
+}
+async function suggestShow(showId) { await api(`/api/shows/${showId}/suggest`, { method: 'POST' }).catch(oops); renderShow(showId); }
+async function runShowJob(showId, kind) {
+  const ok = await modal({
+    title: kind === 'encode' ? 'Encode all configured episodes' : 'Remux all configured episodes',
+    html: `Enqueues one job per non-excluded, configured episode (status ready/clean). Jobs run one at a time; the rest queue up.`,
+    confirmLabel: 'Start', mode: 'plain',
+  });
+  if (!ok) return;
+  const r = await api(`/api/shows/${showId}/jobs`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ kind, quality: 22 }) }).catch(e => { oops(e); throw e; });
+  toast(`${r.count} job(s) enqueued.`);
+  renderShow(showId);
+}
+async function tmdbSearchShow(id) {
+  const q = document.getElementById('showTmdbQ').value;
+  const results = await api(`/api/tmdb/search?q=${encodeURIComponent(q)}&kind=tv`).catch(e => { oops(e); return []; });
+  document.getElementById('showTmdbResults').innerHTML = results.map(r => `
+    <div class="cand" onclick="pickTmdbShow(${id}, ${r.tmdb_id})">
+      ${r.poster_path ? `<img src="${posterUrl(r.poster_path)}">` : ''}
+      <span>${esc(r.title)} (${r.year || '?'}) <span class="cl">${esc(r.original_language || '')}</span></span>
+    </div>`).join('') || '<div class="empty" style="padding:14px">NO RESULTS</div>';
+}
+async function pickTmdbShow(id, tmdbId) {
+  await api(`/api/shows/${id}/tmdb`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tmdb_id: tmdbId }) }).catch(oops);
+  renderShow(id);
+}
+
+// ---------- episode detail (reuses the movie track editor via TRACK_BASE/TRACK_ID) ----------
+async function renderEpisode(id) {
+  const page = document.getElementById('page');
+  page.innerHTML = '<div class="dwrap"><div class="skel" style="height:60px;margin:20px 22px"></div><div class="skel" style="height:180px;margin:20px 22px"></div></div>';
+  const data = await api(`/api/episodes/${id}`).catch(e => { page.innerHTML = `<div class="empty">${esc(e.message)}</div>`; throw e; });
+  const e = data.episode;
+  TRACK_BASE = 'episodes'; TRACK_ID = id;
+  TRACKSTATE = {
+    audio: data.tracks.filter(t => t.type === 'audio').map(t => ({ ...t })),
+    subs: data.tracks.filter(t => t.type === 'subtitle').map(t => ({ ...t })),
+  };
+  VIDEOTRACK = data.tracks.find(t => t.type === 'video');
+  const show = e.show;
+  const title = `${(show && (show.title || show.clean_title)) || 'Show'} - S${String(e.season||0).padStart(2,'0')}E${String(e.episode||0).padStart(2,'0')}`;
+  const running = INFLIGHT.includes(e.status);
+  const backHash = show ? `#/show/${show.id}` : '';
+
+  page.innerHTML = `<div class="dwrap">
+    <div class="dtop"><span class="back" onclick="location.hash='${backHash}'">← ${esc((show && (show.title || show.clean_title)) || 'Show')}</span></div>
+    <div class="ident">
+      <div style="min-width:0">
+        <h2>${esc(title)}</h2>
+        <div class="fn">${esc(e.file || e.folder)}</div>
+      </div>
+    </div>
+    <div class="steps">
+      ${stepCard(1, 'active', 'Configure tracks',
+        `${TRACKSTATE.audio.length + TRACKSTATE.subs.length + 1} tracks → ${1 + [...TRACKSTATE.audio, ...TRACKSTATE.subs].filter(t => t.keep).length} kept`,
+        null, `<div id="tracksbox">${tracksHtml(VIDEOTRACK)}</div>`)}
+      ${stepCard(2, running ? 'active' : e.status === 'clean' ? 'done' : 'active', 'Process',
+        running ? 'job running…' : e.status === 'clean' ? 'output verified' : 'pick a route',
+        null, `<div id="epJobBody">${episodeJobHtml(e, running)}</div>`)}
+      ${e.status === 'clean' ? stepCard(3, 'active', 'Finalize', 'delete original source file', null, `
+        <div class="btnrow" style="margin:0"><button class="btn danger" onclick="deleteOriginalEpisode(${id})">Delete original</button></div>`) : ''}
+    </div></div>`;
+  window._ep = e;
+  if (running) watchEpisodeJob(id);
+}
+function episodeJobHtml(e, running) {
+  if (running) {
+    const j = JOBS.find(x => x.episode_id === e.id && (x.status === 'running' || x.status === 'queued'));
+    if (j && j.status === 'queued') return `<div class="jprog"><div class="row" style="color:var(--faint)">QUEUED — waiting for the runner</div></div>`;
+    if (j) return `<div class="jprog"><div class="row">${esc(KIND_LABEL[j.kind] || j.kind).toUpperCase()} · ${(j.progress || 0).toFixed(1)}%</div>
+      <div class="bar"><div class="g-acc" style="width:${j.progress || 0}%"></div></div></div>`;
+    return '<div class="jprog"><div class="row">job starting…</div></div>';
+  }
+  return `<div class="btnrow" style="margin-top:0">
+    <button class="btn gold" onclick="runEpisodeJob(${e.id},'encode')">Heavy Encode</button>
+    <button class="btn ghost2" onclick="runEpisodeJob(${e.id},'remux')">Quick Remux</button>
+  </div>`;
+}
+async function runEpisodeJob(id, kind) {
+  const ok = await modal({
+    title: kind === 'encode' ? 'Heavy Encode' : 'Quick Remux',
+    html: kind === 'encode' ? 'x265 10-bit re-encode. Source file is not touched; output lands next to it.'
+                            : 'mkvmerge repackage with your kept tracks — minutes, no quality change.',
+    confirmLabel: kind === 'encode' ? 'Start encode' : 'Start remux', mode: 'plain',
+  });
+  if (!ok) return;
+  const r = await api(`/api/episodes/${id}/jobs`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ kind, quality: 22 }) }).catch(e => { oops(e); throw e; });
+  renderEpisode(id);
+  watchEpisodeJob(id);
+}
+async function watchEpisodeJob(id) {
+  const mine = JOBS.filter(j => j.episode_id === id).sort((a, b) => b.id - a.id);
+  if (!mine.length) return;
+  const j = await api(`/api/jobs/${mine[0].id}`).catch(() => null);
+  if (!j) return;
+  if (j.status === 'running' || j.status === 'queued') setTimeout(() => watchEpisodeJob(id), 3000);
+  else if (location.hash === `#/episode/${id}`) renderEpisode(id);
+}
+async function deleteOriginalEpisode(id) {
+  const ok = await modal({
+    title: 'Delete original', danger: true, mode: 'hold', confirmLabel: 'Hold to delete',
+    html: 'Permanently deletes the original source file, keeping the verified job output. This cannot be undone.',
+  });
+  if (!ok) return;
+  await api(`/api/episodes/${id}/delete-original`, { method: 'POST' }).catch(oops);
+  renderEpisode(id);
 }
 </script>
 </body>

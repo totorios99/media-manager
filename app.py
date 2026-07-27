@@ -71,28 +71,60 @@ CREATE TABLE IF NOT EXISTS movies (
     status TEXT DEFAULT 'unprocessed',
     output_file TEXT, updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS shows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    folder TEXT UNIQUE NOT NULL,
+    clean_title TEXT, guess_year INTEGER,
+    tmdb_id INTEGER, title TEXT, year INTEGER,
+    original_language TEXT, poster_path TEXT,
+    updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS episodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    season INTEGER, episode INTEGER,
+    folder TEXT NOT NULL,
+    file TEXT,
+    container_title TEXT, video_codec TEXT, width INTEGER, height INTEGER,
+    bitrate INTEGER, duration REAL, size_bytes INTEGER, hdr TEXT,
+    status TEXT DEFAULT 'unprocessed',
+    excluded INTEGER DEFAULT 0,
+    output_file TEXT, updated_at TEXT,
+    UNIQUE(folder, file)
+);
 CREATE TABLE IF NOT EXISTS tracks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    movie_id INTEGER NOT NULL REFERENCES movies(id) ON DELETE CASCADE,
+    movie_id INTEGER REFERENCES movies(id) ON DELETE CASCADE,
+    episode_id INTEGER REFERENCES episodes(id) ON DELETE CASCADE,
     mkv_id INTEGER,
     type TEXT NOT NULL, codec TEXT, lang TEXT, name TEXT,
     channels INTEGER, default_flag INTEGER DEFAULT 0, forced_flag INTEGER DEFAULT 0,
     ext_path TEXT,
     keep INTEGER DEFAULT 1, out_order INTEGER DEFAULT 0,
     out_lang TEXT DEFAULT '', out_default INTEGER DEFAULT 0, out_forced INTEGER DEFAULT 0,
-    out_name TEXT DEFAULT ''
+    out_name TEXT DEFAULT '',
+    CHECK ((movie_id IS NULL) <> (episode_id IS NULL))
 );
 CREATE TABLE IF NOT EXISTS jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    movie_id INTEGER, kind TEXT,
+    movie_id INTEGER, episode_id INTEGER, kind TEXT,
     tmux_session TEXT, log_path TEXT, cmd TEXT,
     status TEXT, progress REAL DEFAULT 0, exit_code INTEGER,
     started_at TEXT, finished_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tracks_movie ON tracks(movie_id);
+CREATE INDEX IF NOT EXISTS idx_tracks_episode ON tracks(episode_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_movie ON jobs(movie_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_episode ON jobs(episode_id);
+CREATE INDEX IF NOT EXISTS idx_episodes_show ON episodes(show_id);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 """
+
+# Columns of the pre-TV `tracks` table, in order -- used verbatim by the
+# rebuild migration below (SQLite can't drop NOT NULL any other way).
+_TRACKS_OLD_COLS = ("id", "movie_id", "mkv_id", "type", "codec", "lang", "name",
+                     "channels", "default_flag", "forced_flag", "ext_path", "keep",
+                     "out_order", "out_lang", "out_default", "out_forced", "out_name")
 
 
 def get_db():
@@ -103,8 +135,65 @@ def get_db():
     return conn
 
 
+def _migrate(conn):
+    """One-shot rebuild for pre-TV databases: tracks.movie_id was NOT NULL, which
+    SQLite can't alter away, so the table must be recreated. Gated on
+    PRAGMA user_version (not a column sniff) so a crash mid-migration can't be
+    mistaken for "done" on the next startup."""
+    if conn.execute("PRAGMA user_version").fetchone()[0] >= 1:
+        return
+    jobs_exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='jobs'").fetchone()
+    if jobs_exists:
+        job_cols = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)")}
+        if "episode_id" not in job_cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN episode_id INTEGER")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_episode ON jobs(episode_id)")
+    exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='tracks'").fetchone()
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(tracks)")} if exists else set()
+    if exists and "episode_id" not in cols:
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.execute("BEGIN")
+        try:
+            conn.execute("""
+                CREATE TABLE tracks_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    movie_id INTEGER REFERENCES movies(id) ON DELETE CASCADE,
+                    episode_id INTEGER REFERENCES episodes(id) ON DELETE CASCADE,
+                    mkv_id INTEGER,
+                    type TEXT NOT NULL, codec TEXT, lang TEXT, name TEXT,
+                    channels INTEGER, default_flag INTEGER DEFAULT 0, forced_flag INTEGER DEFAULT 0,
+                    ext_path TEXT,
+                    keep INTEGER DEFAULT 1, out_order INTEGER DEFAULT 0,
+                    out_lang TEXT DEFAULT '', out_default INTEGER DEFAULT 0, out_forced INTEGER DEFAULT 0,
+                    out_name TEXT DEFAULT '',
+                    CHECK ((movie_id IS NULL) <> (episode_id IS NULL))
+                )
+            """)
+            col_list = ", ".join(_TRACKS_OLD_COLS)
+            conn.execute(f"INSERT INTO tracks_new ({col_list}) SELECT {col_list} FROM tracks")
+            conn.execute("DROP TABLE tracks")
+            conn.execute("ALTER TABLE tracks_new RENAME TO tracks")
+            conn.execute("CREATE INDEX idx_tracks_movie ON tracks(movie_id)")
+            conn.execute("CREATE INDEX idx_tracks_episode ON tracks(episode_id)")
+            bad = conn.execute("PRAGMA foreign_key_check(tracks)").fetchall()
+            if bad:
+                raise RuntimeError(f"foreign_key_check failed post-migration: {bad}")
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA user_version=1")
+    conn.commit()
+
+
 def init_db():
     conn = get_db()
+    # migrate BEFORE the schema script: on a pre-TV DB, `tracks` still has the
+    # old NOT NULL shape, and the script's own `idx_tracks_episode` index would
+    # fail against it since CREATE TABLE IF NOT EXISTS no-ops on the existing table
+    _migrate(conn)
     conn.executescript(SCHEMA)
     conn.commit()
     conn.close()
@@ -113,6 +202,61 @@ def init_db():
 app = FastAPI()
 
 scan_state = {"running": False, "done": 0, "total": 0, "current": ""}
+
+
+# ---------- owner abstraction (movie or episode) ----------
+# A "job owner" is either a movie or an episode. Both are one metadata row +
+# one file; everything below (job building, verification, junk sweep) only
+# needs a uniform view of that, so the rest of the file works on `kind`
+# ('movie'|'episode') + a plain dict, never branching on the two schemas again.
+
+def _owner_col(kind):
+    return "movie_id" if kind == "movie" else "episode_id"
+
+
+def _owner_table(kind):
+    return "movies" if kind == "movie" else "episodes"
+
+
+def _owner_info(conn, kind, owner_id):
+    """Uniform dict for a movie or episode row: folder (already composed with
+    any show/season prefix, relative to MEDIA_ROOT), file, title_display (for
+    --title metadata), out_base (filename stem), duration, size_bytes, status,
+    output_file, original_language. None if the row doesn't exist."""
+    if kind == "movie":
+        row = conn.execute("SELECT * FROM movies WHERE id=?", (owner_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["title_display"] = f"{d['title']} ({d['year']})" if d.get("title") else d.get("clean_title")
+        d["out_base"] = _safe_name(d["title_display"] or d["folder"])
+        return d
+    row = conn.execute("SELECT * FROM episodes WHERE id=?", (owner_id,)).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    show = conn.execute("SELECT * FROM shows WHERE id=?", (d["show_id"],)).fetchone()
+    show_title = (show["title"] or show["clean_title"]) if show else "Unknown"
+    d["original_language"] = show["original_language"] if show else None
+    d["_raw_folder"] = d["folder"]  # season subdir (or '') relative to the show folder
+    d["folder"] = os.path.join(show["folder"], d["folder"]) if d["folder"] else show["folder"]
+    d["title_display"] = f"{show_title} - S{(d['season'] or 0):02d}E{(d['episode'] or 0):02d}"
+    d["out_base"] = _safe_name(d["title_display"])
+    return d
+
+
+def _set_owner_status(conn, kind, owner_id, status, output_file=None):
+    table = _owner_table(kind)
+    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    if output_file is not None:
+        conn.execute(f"UPDATE {table} SET status=?, output_file=?, updated_at=? WHERE id=?",
+                     (status, output_file, now, owner_id))
+    else:
+        conn.execute(f"UPDATE {table} SET status=?, updated_at=? WHERE id=?", (status, now, owner_id))
+
+
+def _job_owner_kind_id(job):
+    return ("movie", job["movie_id"]) if job["movie_id"] else ("episode", job["episode_id"])
 
 
 def _reap_stale_jobs():
@@ -128,15 +272,17 @@ def _reap_stale_jobs():
             job = _poll_and_finalize(conn, r["id"])
             if job and job["status"] == "running" and not jobs.scope_active(job["id"]):
                 now = time.strftime("%Y-%m-%dT%H:%M:%S")
+                kind, oid = _job_owner_kind_id(job)
                 conn.execute("UPDATE jobs SET status='failed', finished_at=? WHERE id=?", (now, job["id"]))
-                conn.execute("UPDATE movies SET status='error', updated_at=? WHERE id=?", (now, job["movie_id"]))
+                _set_owner_status(conn, kind, oid, "error")
                 conn.commit()
                 job = dict(conn.execute("SELECT * FROM jobs WHERE id=?", (r["id"],)).fetchone())
             if job and job["status"] == "failed" and job["kind"] != "sample":
-                m = conn.execute("SELECT output_file FROM movies WHERE id=?", (job["movie_id"],)).fetchone()
-                if m and m["output_file"]:
+                kind, oid = _job_owner_kind_id(job)
+                owner = _owner_info(conn, kind, oid)
+                if owner and owner["output_file"]:
                     try:
-                        os.remove(m["output_file"])
+                        os.remove(owner["output_file"])
                     except OSError:
                         pass
     finally:
@@ -210,16 +356,31 @@ def scan_status():
     return scan_state
 
 
-def _keep_files_for_movie(conn, m):
-    """Filenames (basename only) that must survive any junk sweep for this movie:
-    the current source video, any in-progress/finished job output, external subs."""
+def _keep_files_for(conn, kind, owner):
+    """Filenames (basename only) that must survive any junk sweep for this
+    movie/episode: the current source video, any in-progress/finished job
+    output, external subs. For an episode, also every sibling episode's files
+    in the same folder -- a shared season directory is swept as one unit, and
+    a sibling's live file must never be mistaken for junk."""
     keep = set()
-    if m["file"]:
-        keep.add(m["file"])
-    if m["output_file"]:
-        keep.add(os.path.basename(m["output_file"]))
-    for t in conn.execute("SELECT ext_path FROM tracks WHERE movie_id=? AND ext_path IS NOT NULL", (m["id"],)):
+    if owner["file"]:
+        keep.add(owner["file"])
+    if owner["output_file"]:
+        keep.add(os.path.basename(owner["output_file"]))
+    col = _owner_col(kind)
+    for t in conn.execute(f"SELECT ext_path FROM tracks WHERE {col}=? AND ext_path IS NOT NULL", (owner["id"],)):
         keep.add(os.path.basename(t["ext_path"]))
+    if kind == "episode":
+        for r in conn.execute(
+            "SELECT id, file, output_file FROM episodes WHERE show_id=? AND folder=? AND id!=?",
+            (owner["show_id"], owner["_raw_folder"], owner["id"]),
+        ).fetchall():
+            if r["file"]:
+                keep.add(r["file"])
+            if r["output_file"]:
+                keep.add(os.path.basename(r["output_file"]))
+            for t in conn.execute("SELECT ext_path FROM tracks WHERE episode_id=? AND ext_path IS NOT NULL", (r["id"],)):
+                keep.add(os.path.basename(t["ext_path"]))
     return keep
 
 
@@ -230,12 +391,25 @@ def _junk_scan(conn):
     top_junk = [e.name for e in os.scandir(MEDIA_ROOT) if e.is_file() and e.name.startswith("._")]
     if top_junk:
         result["__top_level__"] = top_junk
-    for row in conn.execute("SELECT * FROM movies WHERE file IS NOT NULL").fetchall():
-        m = dict(row)
-        folder = os.path.join(MEDIA_ROOT, m["folder"])
-        junk = scan.find_movie_junk(folder, _keep_files_for_movie(conn, m))
+    for row in conn.execute("SELECT id FROM movies WHERE file IS NOT NULL").fetchall():
+        owner = _owner_info(conn, "movie", row["id"])
+        folder = os.path.join(MEDIA_ROOT, owner["folder"])
+        junk = scan.find_movie_junk(folder, _keep_files_for(conn, "movie", owner))
         if junk:
-            result[m["folder"]] = junk
+            result[owner["folder"]] = junk
+    # episodes: sweep once per distinct (show, folder) pair, not once per
+    # episode -- the union keep-set already covers every sibling
+    seen = set()
+    for row in conn.execute("SELECT id, show_id, folder FROM episodes WHERE file IS NOT NULL").fetchall():
+        key = (row["show_id"], row["folder"])
+        if key in seen:
+            continue
+        seen.add(key)
+        owner = _owner_info(conn, "episode", row["id"])
+        folder = os.path.join(MEDIA_ROOT, owner["folder"])
+        junk = scan.find_movie_junk(folder, _keep_files_for(conn, "episode", owner))
+        if junk:
+            result[owner["folder"]] = junk
     return result
 
 
@@ -349,8 +523,8 @@ def get_movie(movie_id: int):
 
 
 @app.get("/api/tmdb/search")
-def tmdb_search_ep(q: str, year: int | None = None):
-    return scan.tmdb_search_candidates(q, year, TMDB_API_KEY)
+def tmdb_search_ep(q: str, year: int | None = None, kind: str = "movie"):
+    return scan.tmdb_search_candidates(q, year, TMDB_API_KEY, kind=kind)
 
 
 @app.post("/api/movies/{movie_id}/tmdb")
@@ -579,6 +753,318 @@ def accept_as_is(movie_id: int):
         conn.close()
 
 
+# ---------- shows / episodes ----------
+# Shows carry no status column -- it's an aggregate over their episodes,
+# computed here rather than stored, so it can never drift out of sync with
+# the episode rows that are the actual source of truth.
+
+def _show_or_404(conn, show_id):
+    s = conn.execute("SELECT * FROM shows WHERE id=?", (show_id,)).fetchone()
+    if not s:
+        raise HTTPException(404, "not found")
+    return dict(s)
+
+
+def _show_status(conn, show_id):
+    rows = conn.execute(
+        "SELECT status FROM episodes WHERE show_id=? AND excluded=0", (show_id,)
+    ).fetchall()
+    statuses = {r["status"] for r in rows}
+    if not statuses:
+        return "unprocessed"
+    if statuses == {"clean"}:
+        return "clean"
+    if "encoding" in statuses or "cleaning" in statuses:
+        return "encoding"
+    if "error" in statuses:
+        return "error"
+    if statuses <= {"ready", "clean"}:
+        return "ready" if "ready" in statuses else "clean"
+    return "unprocessed"
+
+
+def _show_summary(conn, s):
+    d = dict(s)
+    d["status"] = _show_status(conn, s["id"])
+    return d
+
+
+@app.get("/api/shows")
+def list_shows(q: str | None = None):
+    conn = get_db()
+    try:
+        sql = "SELECT * FROM shows WHERE 1=1"
+        args = []
+        if q:
+            sql += " AND (title LIKE ? OR clean_title LIKE ? OR folder LIKE ?)"
+            args += [f"%{q}%"] * 3
+        sql += " ORDER BY COALESCE(title, clean_title, folder)"
+        rows = conn.execute(sql, args).fetchall()
+        return [_show_summary(conn, r) for r in rows]
+    finally:
+        conn.close()
+
+
+@app.get("/api/shows/{show_id}")
+def get_show(show_id: int):
+    conn = get_db()
+    try:
+        s = _show_or_404(conn, show_id)
+        episodes = conn.execute(
+            "SELECT * FROM episodes WHERE show_id=? ORDER BY season, episode", (show_id,)
+        ).fetchall()
+        d = _show_summary(conn, s)
+        return {"show": d, "episodes": [dict(e) for e in episodes]}
+    finally:
+        conn.close()
+
+
+@app.post("/api/shows/{show_id}/tmdb")
+def set_show_tmdb(show_id: int, body: dict):
+    tmdb_id = body.get("tmdb_id")
+    if not tmdb_id:
+        raise HTTPException(400, "tmdb_id required")
+    info = scan.tmdb_get_tv(tmdb_id, TMDB_API_KEY)
+    if not info:
+        raise HTTPException(502, "TMDB lookup failed")
+    conn = get_db()
+    try:
+        _show_or_404(conn, show_id)
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        conn.execute(
+            "UPDATE shows SET tmdb_id=?, title=?, year=?, original_language=?, poster_path=?, updated_at=? WHERE id=?",
+            (info["tmdb_id"], info["title"], info["year"], info["original_language"], info["poster_path"], now, show_id),
+        )
+        conn.commit()
+        return {"ok": True, "show": info}
+    finally:
+        conn.close()
+
+
+@app.put("/api/shows/{show_id}/episodes")
+def set_excluded(show_id: int, body: dict):
+    """body: {excluded: [episode_id, ...]} -- the full set of excluded episode
+    ids for this show (not a diff); any episode not listed is included."""
+    conn = get_db()
+    try:
+        _show_or_404(conn, show_id)
+        excluded = set(int(i) for i in body.get("excluded", []))
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        for r in conn.execute("SELECT id FROM episodes WHERE show_id=?", (show_id,)).fetchall():
+            conn.execute("UPDATE episodes SET excluded=?, updated_at=? WHERE id=?",
+                         (1 if r["id"] in excluded else 0, now, r["id"]))
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+@app.post("/api/shows/{show_id}/suggest")
+def suggest_show(show_id: int):
+    """Runs suggest_tracks per non-excluded episode -- never a copied plan,
+    since sibling episodes routinely differ in track count/order (different
+    rip sources per episode)."""
+    conn = get_db()
+    try:
+        _show_or_404(conn, show_id)
+        eps = conn.execute("SELECT id FROM episodes WHERE show_id=? AND excluded=0", (show_id,)).fetchall()
+        for e in eps:
+            scan.suggest_tracks(conn, e["id"], table="episodes", multi_audio=True)
+        return {"ok": True, "count": len(eps)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/shows/{show_id}/jobs")
+def launch_show_jobs(show_id: int, body: dict):
+    """Enqueues one job per included, configured episode. Space is checked
+    ONCE for the whole batch -- source+output coexist per episode until each
+    finalizes, so a per-job check alone would under-count a 24-episode run."""
+    job_kind = body.get("kind")
+    if job_kind not in ("remux", "encode", "sample"):
+        raise HTTPException(400, "kind must be remux|encode|sample")
+    quality = int(body.get("quality") or 22)
+    conn = get_db()
+    try:
+        _show_or_404(conn, show_id)
+        eps = conn.execute(
+            "SELECT id, size_bytes FROM episodes WHERE show_id=? AND excluded=0 AND status IN ('ready','clean')",
+            (show_id,),
+        ).fetchall()
+        if not eps:
+            raise HTTPException(400, "no configured, included episodes to run")
+        already = conn.execute(
+            "SELECT episode_id FROM jobs j JOIN episodes e ON e.id=j.episode_id "
+            "WHERE e.show_id=? AND j.status IN ('running','queued')", (show_id,)
+        ).fetchall()
+        already_ids = {r["episode_id"] for r in already}
+        todo = [e for e in eps if e["id"] not in already_ids]
+        if not todo:
+            raise HTTPException(409, "every included episode already has a job running or queued")
+        need_bytes = sum((e["size_bytes"] or 0) for e in todo) if job_kind != "sample" else 2 * 10**9 * len(todo)
+        if not jobs.has_space_for(MEDIA_ROOT, need_bytes):
+            raise HTTPException(507, "not enough free disk space for this batch")
+        job_ids = [_enqueue(conn, "episode", e["id"], job_kind, quality)["job_id"] for e in todo]
+        return {"job_ids": job_ids, "count": len(job_ids)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/shows/{show_id}/rename")
+def rename_show(show_id: int):
+    """Folder -> "Title (Year)", then each episode's video (and sidecars) to
+    its own S01E03-style out_base. Season-directory names are left as-is --
+    Jellyfin reads season/episode numbers from the filename, so the directory
+    name is cosmetic."""
+    conn = get_db()
+    try:
+        s = _show_or_404(conn, show_id)
+        if not s["title"] or not s["year"]:
+            raise HTTPException(400, "show not TMDB-matched yet")
+        running = conn.execute(
+            "SELECT j.id FROM jobs j JOIN episodes e ON e.id=j.episode_id "
+            "WHERE e.show_id=? AND j.status='running'", (show_id,)
+        ).fetchone()
+        if running:
+            raise HTTPException(409, "a job is running for this show; rename after it finishes")
+
+        target = _safe_name(f"{s['title']} ({s['year']})")
+        old_folder = os.path.join(MEDIA_ROOT, s["folder"])
+        new_folder = os.path.join(MEDIA_ROOT, target)
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+
+        if target != s["folder"]:
+            if not os.path.isdir(old_folder):
+                raise HTTPException(404, f"folder missing on disk: {s['folder']}")
+            if os.path.exists(new_folder):
+                raise HTTPException(409, f"target folder already exists: {target}")
+            os.rename(old_folder, new_folder)
+            conn.execute("UPDATE shows SET folder=?, updated_at=? WHERE id=?", (target, now, show_id))
+            conn.commit()
+
+        for e in conn.execute("SELECT * FROM episodes WHERE show_id=?", (show_id,)).fetchall():
+            if not e["file"]:
+                continue
+            ep_folder = os.path.join(new_folder, e["folder"]) if e["folder"] else new_folder
+            out_base = _safe_name(f"{s['title']} - S{(e['season'] or 0):02d}E{(e['episode'] or 0):02d}")
+            old_stem, ext = os.path.splitext(e["file"])
+            new_file = out_base + ext
+            if new_file != e["file"] and os.path.exists(os.path.join(ep_folder, e["file"])):
+                dst = os.path.join(ep_folder, new_file)
+                if not os.path.exists(dst):
+                    os.rename(os.path.join(ep_folder, e["file"]), dst)
+                    for f in os.listdir(ep_folder):
+                        if f.startswith(old_stem) and f != new_file:
+                            new_name = out_base + f[len(old_stem):]
+                            if not os.path.exists(os.path.join(ep_folder, new_name)):
+                                os.rename(os.path.join(ep_folder, f), os.path.join(ep_folder, new_name))
+                    conn.execute(
+                        "UPDATE tracks SET ext_path=REPLACE(ext_path, ?, ?) WHERE episode_id=? AND ext_path IS NOT NULL",
+                        (os.path.join(ep_folder, old_stem), os.path.join(ep_folder, out_base), e["id"]),
+                    )
+                    conn.execute("UPDATE episodes SET file=?, updated_at=? WHERE id=?", (new_file, now, e["id"]))
+        conn.commit()
+        return {"ok": True, "folder": target}
+    finally:
+        conn.close()
+
+
+# ---------- episode wrappers (thin, over the shared owner-agnostic functions) ----------
+
+@app.get("/api/episodes/{episode_id}")
+def get_episode(episode_id: int):
+    conn = get_db()
+    try:
+        e = conn.execute("SELECT * FROM episodes WHERE id=?", (episode_id,)).fetchone()
+        if not e:
+            raise HTTPException(404, "not found")
+        tracks = conn.execute(
+            "SELECT * FROM tracks WHERE episode_id=? ORDER BY type, keep DESC, out_order, mkv_id", (episode_id,)
+        ).fetchall()
+        show = conn.execute("SELECT * FROM shows WHERE id=?", (e["show_id"],)).fetchone()
+        d = dict(e)
+        d["show"] = dict(show) if show else None
+        return {"episode": d, "tracks": [dict(t) for t in tracks]}
+    finally:
+        conn.close()
+
+
+@app.post("/api/episodes/{episode_id}/suggest")
+def suggest_episode(episode_id: int):
+    conn = get_db()
+    try:
+        _owner_or_404(conn, "episode", episode_id)
+        scan.suggest_tracks(conn, episode_id, table="episodes", multi_audio=True)
+        tracks = conn.execute(
+            "SELECT * FROM tracks WHERE episode_id=? ORDER BY type, out_order", (episode_id,)
+        ).fetchall()
+        return [dict(t) for t in tracks]
+    finally:
+        conn.close()
+
+
+@app.post("/api/episodes/{episode_id}/strip-names")
+def strip_names_episode(episode_id: int):
+    conn = get_db()
+    try:
+        _owner_or_404(conn, "episode", episode_id)
+        conn.execute("UPDATE tracks SET out_name='' WHERE episode_id=?", (episode_id,))
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+@app.put("/api/episodes/{episode_id}/config")
+def save_config_episode(episode_id: int, body: dict):
+    conn = get_db()
+    try:
+        _owner_or_404(conn, "episode", episode_id)
+        for t in body.get("tracks", []):
+            conn.execute(
+                "UPDATE tracks SET keep=?, out_order=?, out_lang=?, out_default=?, out_forced=?, out_name=? "
+                "WHERE id=? AND episode_id=?",
+                (int(t["keep"]), int(t["out_order"]), t["out_lang"], int(t["out_default"]),
+                 int(t["out_forced"]), t.get("out_name", ""), t["id"], episode_id),
+            )
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        conn.execute(
+            "UPDATE episodes SET status='ready', updated_at=? WHERE id=? AND status NOT IN ('working','clean')",
+            (now, episode_id),
+        )
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+@app.get("/api/episodes/{episode_id}/command")
+def preview_command_episode(episode_id: int, kind: str, quality: int = 22):
+    conn = get_db()
+    try:
+        return _preview_command(conn, "episode", episode_id, kind, quality)
+    finally:
+        conn.close()
+
+
+@app.post("/api/episodes/{episode_id}/jobs")
+def launch_job_episode(episode_id: int, body: dict):
+    conn = get_db()
+    try:
+        return _enqueue(conn, "episode", episode_id, body.get("kind"), int(body.get("quality") or 22))
+    finally:
+        conn.close()
+
+
+@app.post("/api/episodes/{episode_id}/delete-original")
+def delete_original_episode(episode_id: int):
+    conn = get_db()
+    try:
+        return _delete_original(conn, "episode", episode_id)
+    finally:
+        conn.close()
+
+
 # ---------- power / throttle ----------
 
 @app.get("/api/power")
@@ -621,13 +1107,15 @@ def set_power(body: dict):
 
 # ---------- commands / jobs ----------
 
-def _kept_tracks(conn, movie_id):
-    rows = conn.execute("SELECT * FROM tracks WHERE movie_id=? AND keep=1", (movie_id,)).fetchall()
+def _kept_tracks(conn, kind, owner_id):
+    col = _owner_col(kind)
+    rows = conn.execute(f"SELECT * FROM tracks WHERE {col}=? AND keep=1", (owner_id,)).fetchall()
     return [dict(r) for r in rows]
 
 
-def _all_tracks(conn, movie_id):
-    return [dict(r) for r in conn.execute("SELECT * FROM tracks WHERE movie_id=?", (movie_id,)).fetchall()]
+def _all_tracks(conn, kind, owner_id):
+    col = _owner_col(kind)
+    return [dict(r) for r in conn.execute(f"SELECT * FROM tracks WHERE {col}=?", (owner_id,)).fetchall()]
 
 
 def _movie_or_404(conn, movie_id):
@@ -637,22 +1125,31 @@ def _movie_or_404(conn, movie_id):
     return dict(m)
 
 
-def _build_job_cmd(conn, m, kind, quality):
-    """Returns (cmd_str, out_path) for remux/encode/sample."""
-    title = f"{m['title']} ({m['year']})" if m["title"] else m["clean_title"]
-    in_path = os.path.join(MEDIA_ROOT, m["folder"], m["file"])
-    tracks = _all_tracks(conn, m["id"])
-    if kind == "remux":
-        out_path = os.path.join(MEDIA_ROOT, m["folder"], f"{_safe_name(title)}.remux.mkv")
+def _owner_or_404(conn, kind, owner_id):
+    owner = _owner_info(conn, kind, owner_id)
+    if not owner:
+        raise HTTPException(404, "not found")
+    return owner
+
+
+def _build_job_cmd(conn, kind, owner, job_kind, quality):
+    """Returns (cmd_str, out_path) for remux/encode/sample. `owner` is the
+    uniform dict from _owner_info; `kind` is 'movie'|'episode'."""
+    title = owner["title_display"]
+    folder_path = os.path.join(MEDIA_ROOT, owner["folder"])
+    in_path = os.path.join(folder_path, owner["file"])
+    tracks = _all_tracks(conn, kind, owner["id"])
+    if job_kind == "remux":
+        out_path = os.path.join(folder_path, f"{owner['out_base']}.remux.mkv")
         return shlex.join(commands.build_mkvmerge_remux(tracks, title, in_path, out_path)), out_path
-    if kind == "sample":
-        out_path = os.path.join(MEDIA_ROOT, m["folder"], f"{_safe_name(title)}.sample.rf{quality}.mkv")
-        start = int((m["duration"] or 1200) / 2)  # mid-movie: representative scene
+    if job_kind == "sample":
+        out_path = os.path.join(folder_path, f"{owner['out_base']}.sample.rf{quality}.mkv")
+        start = int((owner["duration"] or 1200) / 2)  # mid-movie: representative scene
         hb_argv, _ = commands.build_handbrake_encode(tracks, in_path, out_path,
                                                       quality=quality, sample_start=start)
         # throwaway preview: skip the mkvpropedit metadata pass
         return shlex.join(hb_argv), out_path
-    out_path = os.path.join(MEDIA_ROOT, m["folder"], f"{_safe_name(title)}.hevc.mkv")
+    out_path = os.path.join(folder_path, f"{owner['out_base']}.hevc.mkv")
     hb_argv, sub_order = commands.build_handbrake_encode(tracks, in_path, out_path, quality=quality)
     audio_order = sorted([t for t in tracks if t["type"] == "audio" and t["keep"]], key=lambda t: t["out_order"])
     vtrack = next((t for t in tracks if t["type"] == "video"), None)
@@ -661,52 +1158,58 @@ def _build_job_cmd(conn, m, kind, quality):
     return shlex.join(hb_argv) + " && " + shlex.join(mkvpe), out_path
 
 
+def _preview_command(conn, kind, owner_id, job_kind, quality):
+    if job_kind not in ("remux", "encode", "sample"):
+        raise HTTPException(400, "kind must be remux|encode|sample")
+    owner = _owner_or_404(conn, kind, owner_id)
+    cmd_str, _ = _build_job_cmd(conn, kind, owner, job_kind, quality)
+    return {"cmd": cmd_str}
+
+
 @app.get("/api/movies/{movie_id}/command")
 def preview_command(movie_id: int, kind: str, quality: int = 22):
-    if kind not in ("remux", "encode", "sample"):
-        raise HTTPException(400, "kind must be remux|encode|sample")
     conn = get_db()
     try:
-        m = _movie_or_404(conn, movie_id)
-        cmd_str, _ = _build_job_cmd(conn, m, kind, quality)
-        return {"cmd": cmd_str}
+        return _preview_command(conn, "movie", movie_id, kind, quality)
     finally:
         conn.close()
 
 
+def _enqueue(conn, kind, owner_id, job_kind, quality):
+    if job_kind not in ("remux", "encode", "sample"):
+        raise HTTPException(400, "kind must be remux|encode|sample")
+    owner = _owner_or_404(conn, kind, owner_id)
+    if not owner["file"]:
+        raise HTTPException(400, "no source file")
+    col = _owner_col(kind)
+    mine = conn.execute(
+        f"SELECT id FROM jobs WHERE {col}=? AND status IN ('running','queued')", (owner_id,)
+    ).fetchone()
+    if mine:
+        raise HTTPException(409, "a job is already running or queued for this item")
+
+    need_bytes = 2 * 10**9 if job_kind == "sample" else owner["size_bytes"]
+    if not jobs.has_space_for(MEDIA_ROOT, need_bytes):
+        raise HTTPException(507, "not enough free disk space for this operation")
+
+    # global single runner: one job hammers the CPU at a time, rest queue up
+    busy = conn.execute("SELECT id FROM jobs WHERE status='running' LIMIT 1").fetchone()
+    cmd_str, out_path = _build_job_cmd(conn, kind, owner, job_kind, quality)
+    id_kwargs = {"movie_id": owner_id} if kind == "movie" else {"episode_id": owner_id}
+    job_id = jobs.start_job(conn, job_kind, cmd_str, LOG_DIR,
+                            cpu_quota=_current_quota(conn), queued=bool(busy), **id_kwargs)
+    if job_kind != "sample":  # samples never touch owner state
+        status = "cleaning" if job_kind == "remux" else "encoding"
+        _set_owner_status(conn, kind, owner_id, status, output_file=out_path)
+        conn.commit()
+    return {"job_id": job_id, "queued": bool(busy)}
+
+
 @app.post("/api/movies/{movie_id}/jobs")
 def launch_job(movie_id: int, body: dict):
-    kind = body.get("kind")
-    if kind not in ("remux", "encode", "sample"):
-        raise HTTPException(400, "kind must be remux|encode|sample")
-    quality = int(body.get("quality") or 22)
     conn = get_db()
     try:
-        m = _movie_or_404(conn, movie_id)
-        if not m["file"]:
-            raise HTTPException(400, "no source file")
-        mine = conn.execute(
-            "SELECT id FROM jobs WHERE movie_id=? AND status IN ('running','queued')", (movie_id,)
-        ).fetchone()
-        if mine:
-            raise HTTPException(409, "a job is already running or queued for this movie")
-
-        need_bytes = 2 * 10**9 if kind == "sample" else m["size_bytes"]
-        if not jobs.has_space_for(MEDIA_ROOT, need_bytes):
-            raise HTTPException(507, "not enough free disk space for this operation")
-
-        # global single runner: one job hammers the CPU at a time, rest queue up
-        busy = conn.execute("SELECT id FROM jobs WHERE status='running' LIMIT 1").fetchone()
-        cmd_str, out_path = _build_job_cmd(conn, m, kind, quality)
-        job_id = jobs.start_job(conn, movie_id, kind, cmd_str, LOG_DIR,
-                                cpu_quota=_current_quota(conn), queued=bool(busy))
-        if kind != "sample":  # samples never touch movie state
-            now = time.strftime("%Y-%m-%dT%H:%M:%S")
-            status = "cleaning" if kind == "remux" else "encoding"
-            conn.execute("UPDATE movies SET status=?, output_file=?, updated_at=? WHERE id=?",
-                         (status, out_path, now, movie_id))
-            conn.commit()
-        return {"job_id": job_id, "queued": bool(busy)}
+        return _enqueue(conn, "movie", movie_id, body.get("kind"), int(body.get("quality") or 22))
     finally:
         conn.close()
 
@@ -720,18 +1223,18 @@ def _poll_and_finalize(conn, job_id):
         return None
     job = dict(job)
     if job["kind"] == "sample":
-        # samples have no movie state to advance; just close out the job row
+        # samples have no owner state to advance; just close out the job row
         if job["status"] == "done":
             conn.execute("UPDATE jobs SET status='verified' WHERE id=?", (job_id,))
             conn.commit()
             job["status"] = "verified"
         return job
+    kind, oid = _job_owner_kind_id(job)
     if job["status"] == "done":
-        _verify_and_finalize(conn, job)
+        _verify_and_finalize(conn, kind, oid, job)
         job = dict(conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone())
     elif job["status"] == "failed":
-        conn.execute("UPDATE movies SET status='error', updated_at=? WHERE id=?",
-                     (time.strftime("%Y-%m-%dT%H:%M:%S"), job["movie_id"]))
+        _set_owner_status(conn, kind, oid, "error")
         conn.commit()
     return job
 
@@ -755,10 +1258,20 @@ def list_jobs():
                 out.append(_poll_and_finalize(conn, r["id"]))
             else:
                 out.append(dict(r))
-        titles = {m["id"]: (f"{m['title']} ({m['year']})" if m["title"] else m["clean_title"] or m["folder"])
-                  for m in conn.execute("SELECT id, title, year, clean_title, folder FROM movies")}
+        movie_titles = {m["id"]: (f"{m['title']} ({m['year']})" if m["title"] else m["clean_title"] or m["folder"])
+                        for m in conn.execute("SELECT id, title, year, clean_title, folder FROM movies")}
+        ep_titles = {}
+        for e in conn.execute(
+            "SELECT e.id, e.season, e.episode, s.title, s.clean_title FROM episodes e "
+            "JOIN shows s ON s.id = e.show_id"
+        ):
+            show_title = e["title"] or e["clean_title"]
+            ep_titles[e["id"]] = f"{show_title} S{(e['season'] or 0):02d}E{(e['episode'] or 0):02d}"
         for j in out:
-            j["movie_title"] = titles.get(j["movie_id"], f"movie {j['movie_id']}")
+            if j["movie_id"]:
+                j["movie_title"] = movie_titles.get(j["movie_id"], f"movie {j['movie_id']}")
+            else:
+                j["movie_title"] = ep_titles.get(j["episode_id"], f"episode {j['episode_id']}")
             j["eta"] = _job_eta(j)
         return out
     finally:
@@ -787,71 +1300,86 @@ def get_stats():
         conn.close()
 
 
-def _verify_and_finalize(conn, job):
-    m = conn.execute("SELECT * FROM movies WHERE id=?", (job["movie_id"],)).fetchone()
-    kept = _kept_tracks(conn, job["movie_id"])
-    ok, msg = jobs.verify_output(m["output_file"], kept, m["duration"])
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+def _verify_and_finalize(conn, kind, owner_id, job):
+    owner = _owner_info(conn, kind, owner_id)
+    kept = _kept_tracks(conn, kind, owner_id)
+    ok, msg = jobs.verify_output(owner["output_file"], kept, owner["duration"])
     if ok:
         conn.execute("UPDATE jobs SET status='verified' WHERE id=?", (job["id"],))
-        conn.execute("UPDATE movies SET status='clean', updated_at=? WHERE id=?", (now, job["movie_id"]))
+        _set_owner_status(conn, kind, owner_id, "clean")
     else:
         conn.execute("UPDATE jobs SET status='failed', exit_code=-1 WHERE id=?", (job["id"],))
-        conn.execute("UPDATE movies SET status='error', updated_at=? WHERE id=?", (now, job["movie_id"]))
+        _set_owner_status(conn, kind, owner_id, "error")
     conn.commit()
     return ok, msg
+
+
+def _delete_original(conn, kind, owner_id):
+    owner = _owner_or_404(conn, kind, owner_id)
+    if owner["status"] != "clean":
+        raise HTTPException(400, "not verified clean yet")
+    folder = os.path.join(MEDIA_ROOT, owner["folder"])
+
+    # Resolve the job output BEFORE deleting anything. If there is no
+    # recorded output (already finalized) or it can't be found on disk,
+    # abort -- otherwise a repeat click would delete the only copy left.
+    out = owner["output_file"]
+    if not out:
+        raise HTTPException(400, "no job output recorded; original was already deleted")
+    if not os.path.exists(out):
+        # output_file can hold a pre-rename folder path; the file itself
+        # moved with the folder, so look for its basename in the current one
+        cand = os.path.join(folder, os.path.basename(out))
+        if not os.path.exists(cand):
+            raise HTTPException(404, "job output file not found on disk; refusing to delete original")
+        out = cand
+
+    old_path = os.path.join(folder, owner["file"]) if owner["file"] else None
+    freed = 0
+    if old_path and os.path.exists(old_path) and old_path != out:
+        freed = os.path.getsize(old_path) - os.path.getsize(out)
+        os.remove(old_path)
+    col = _owner_col(kind)
+    for t in conn.execute(f"SELECT ext_path FROM tracks WHERE {col}=? AND ext_path IS NOT NULL", (owner_id,)):
+        if t["ext_path"] and os.path.exists(t["ext_path"]):
+            os.remove(t["ext_path"])
+    # old source/subs are gone now, so keep only the job output plus any
+    # sibling episode's own files when sweeping junk (shared season folder)
+    keep = {os.path.basename(out)}
+    if kind == "episode":
+        for r in conn.execute(
+            "SELECT file, output_file FROM episodes WHERE show_id=? AND folder=? AND id!=?",
+            (owner["show_id"], owner["_raw_folder"], owner_id),
+        ).fetchall():
+            if r["file"]:
+                keep.add(r["file"])
+            if r["output_file"]:
+                keep.add(os.path.basename(r["output_file"]))
+    for junk in scan.find_movie_junk(folder, keep):
+        try:
+            os.remove(os.path.join(folder, junk))
+        except OSError:
+            pass
+    final_name = f"{owner['out_base']}.mkv"
+    final_path = os.path.join(folder, final_name)
+    if out != final_path:
+        os.rename(out, final_path)
+    table = _owner_table(kind)
+    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    conn.execute(f"UPDATE {table} SET file=?, output_file=NULL, updated_at=? WHERE id=?",
+                 (final_name, now, owner_id))
+    if freed > 0:
+        total = int(_get_setting(conn, "reclaimed_bytes", "0")) + freed
+        _set_setting(conn, "reclaimed_bytes", str(total))
+    conn.commit()
+    return {"ok": True, "file": final_name}
 
 
 @app.post("/api/movies/{movie_id}/delete-original")
 def delete_original(movie_id: int):
     conn = get_db()
     try:
-        m = _movie_or_404(conn, movie_id)
-        if m["status"] != "clean":
-            raise HTTPException(400, "movie is not verified clean yet")
-        folder = os.path.join(MEDIA_ROOT, m["folder"])
-
-        # Resolve the job output BEFORE deleting anything. If there is no
-        # recorded output (already finalized) or it can't be found on disk,
-        # abort -- otherwise a repeat click would delete the only copy left.
-        out = m["output_file"]
-        if not out:
-            raise HTTPException(400, "no job output recorded; original was already deleted")
-        if not os.path.exists(out):
-            # output_file can hold a pre-rename folder path; the file itself
-            # moved with the folder, so look for its basename in the current one
-            cand = os.path.join(folder, os.path.basename(out))
-            if not os.path.exists(cand):
-                raise HTTPException(404, "job output file not found on disk; refusing to delete original")
-            out = cand
-
-        old_path = os.path.join(folder, m["file"]) if m["file"] else None
-        freed = 0
-        if old_path and os.path.exists(old_path) and old_path != out:
-            freed = os.path.getsize(old_path) - os.path.getsize(out)
-            os.remove(old_path)
-        for t in conn.execute("SELECT ext_path FROM tracks WHERE movie_id=? AND ext_path IS NOT NULL", (movie_id,)):
-            if t["ext_path"] and os.path.exists(t["ext_path"]):
-                os.remove(t["ext_path"])
-        # old source/subs are gone now, so keep only the job output when sweeping junk
-        for junk in scan.find_movie_junk(folder, {os.path.basename(out)}):
-            try:
-                os.remove(os.path.join(folder, junk))
-            except OSError:
-                pass
-        title = f"{m['title']} ({m['year']})" if m["title"] else m["clean_title"]
-        final_name = f"{_safe_name(title)}.mkv"
-        final_path = os.path.join(folder, final_name)
-        if out != final_path:
-            os.rename(out, final_path)
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
-        conn.execute("UPDATE movies SET file=?, output_file=NULL, updated_at=? WHERE id=?",
-                     (final_name, now, movie_id))
-        if freed > 0:
-            total = int(_get_setting(conn, "reclaimed_bytes", "0")) + freed
-            _set_setting(conn, "reclaimed_bytes", str(total))
-        conn.commit()
-        return {"ok": True, "file": final_name}
+        return _delete_original(conn, "movie", movie_id)
     finally:
         conn.close()
 

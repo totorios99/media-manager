@@ -254,6 +254,15 @@ def suggest_tracks(conn, owner_id, table="movies", multi_audio=False):
     tracks = [dict(r) for r in conn.execute(f"SELECT * FROM tracks WHERE {col}=?", (owner_id,))]
     audio = [t for t in tracks if t["type"] == "audio"]
     subs = [t for t in tracks if t["type"] == "subtitle"]
+
+    # a bare "spa" is only in `wanted` as a stand-in for whichever Spanish
+    # variant(s) actually exist in the file -- swap it for the real ones found
+    # (Latino and Castellano both survive if both are present) instead of
+    # letting the one-per-language rule collapse them into a single pick
+    if "spa" in wanted:
+        spa_variants = sorted({t["lang"] for t in audio + subs if t["lang"].startswith("spa")})
+        i = wanted.index("spa")
+        wanted[i:i + 1] = spa_variants or ["spa"]
     if len(audio) == 1 and audio[0]["lang"] == "und":
         # only audio track available, no other choice -- always keep it even if
         # TMDB hasn't matched yet (orig3 unknown) or its language isn't eng/spa
@@ -266,7 +275,11 @@ def suggest_tracks(conn, owner_id, table="movies", multi_audio=False):
     order = {"audio": 0, "subtitle": 0}
 
     def mark(t, lang, default, forced):
-        plan[t["id"]] = {"out_order": order[t["type"]], "out_lang": lang,
+        # out_lang is muxed as a real mkv language tag -- "spa-mx"/"spa-es" are
+        # this module's internal grouping keys, not valid ISO codes, so they
+        # collapse back to "spa" here; the Latino/Castellano distinction is
+        # still visible from the source track's `lang` column in the UI
+        plan[t["id"]] = {"out_order": order[t["type"]], "out_lang": _spanish_base(lang),
                           "out_default": 1 if default else 0, "out_forced": 1 if forced else 0}
         order[t["type"]] += 1
 
@@ -602,6 +615,35 @@ def _detect_hdr(streams):
     return "SDR"
 
 
+# mkv's legacy language field is ISO 639-2 only -- "spa" carries no region, so
+# Latin American and European Spanish audio collide as one language and only
+# one survives the one-per-language rule. Rippers that care tag it in the
+# track NAME instead ("Latino" / "Castellano" / "Spain"), so that's the only
+# real signal available. This is a guess, not a real language code: it only
+# refines the internal `lang` used for matching/display, never what's written
+# to out_lang (mkvmerge/HandBrake need a real ISO code -- see _spanish_base).
+SPANISH_MX_RE = re.compile(r"\blatino\b|\blat(?:am)?\b|\bmex(?:ico)?\b|\b(?:es-)?419\b", re.IGNORECASE)
+SPANISH_ES_RE = re.compile(r"\bcastellano\b|\bespa[ñn]a\b|\bspain\b|\b(?:es-)?es\b", re.IGNORECASE)
+
+
+def _spanish_variant(lang, name):
+    """'spa'|'spa-mx'|'spa-es' -- refines a bare 'spa' using the track name's
+    Latino/Castellano wording. Non-Spanish or already-specific langs pass through."""
+    if lang != "spa" or not name:
+        return lang
+    if SPANISH_MX_RE.search(name):
+        return "spa-mx"
+    if SPANISH_ES_RE.search(name):
+        return "spa-es"
+    return lang
+
+
+def _spanish_base(lang):
+    """Real ISO code to actually write out (mkvmerge/mkvpropedit don't know
+    'spa-mx') -- strips the variant suffix this module adds internally."""
+    return lang.split("-")[0]
+
+
 def inspect_file(path):
     """Returns dict: container_title, duration, video_codec, width, height, bitrate,
     hdr, size_bytes, tracks (list of dicts w/ mkv_id/type/codec/lang/name/channels/default/forced)."""
@@ -611,10 +653,12 @@ def inspect_file(path):
     for t in mkv.get("tracks", []):
         ttype = "subtitle" if t["type"] == "subtitles" else t["type"]
         tp = t.get("properties", {})
+        name = tp.get("track_name") or ""
+        lang = tp.get("language") or tp.get("language_ietf") or "und"
         tracks.append({
             "mkv_id": t["id"], "type": ttype, "codec": t.get("codec"),
-            "lang": tp.get("language") or tp.get("language_ietf") or "und",
-            "name": tp.get("track_name") or "",
+            "lang": _spanish_variant(lang, name),
+            "name": name,
             "channels": tp.get("audio_channels"),
             "default_flag": 1 if tp.get("default_track") else 0,
             "forced_flag": 1 if tp.get("forced_track") else 0,
@@ -738,7 +782,9 @@ def _upsert_tracks(conn, owner_id, source_tracks, ext_subs, original_language, o
                 (codec, lang, name, channels, default_flag, forced_flag, prior["id"]),
             )
             return
-        out_lang = lang if lang in ("eng", "spa") or (orig_lang_3 and lang == orig_lang_3) else (
+        # lang may be a spa-mx/spa-es grouping key (see _spanish_variant) --
+        # out_lang always needs a real mkv language tag, never that suffix
+        out_lang = _spanish_base(lang) if lang == "eng" or lang.startswith("spa") or lang == orig_lang_3 else (
             orig_lang_3 if type_ == "audio" and orig_lang_3 else "")
         out_order = order_counters.get(type_, 0)
         if type_ in order_counters:
@@ -959,5 +1005,36 @@ if __name__ == "__main__":
         os.makedirs(os.path.join(d, "movie_one_ep_like"))
         open(os.path.join(d, "movie_one_ep_like", "Movie.S01E01.mkv"), "w").close()
         assert classify_folder(os.path.join(d, "movie_one_ep_like")) == "movie"
+
+    # Latino vs Castellano Spanish: differentiated by track name, one of each kept,
+    # out_lang written back as plain "spa" (not a real ISO code with the suffix)
+    assert _spanish_variant("spa", "Spanish (Latino)") == "spa-mx"
+    assert _spanish_variant("spa", "Español Latino 5.1") == "spa-mx"
+    assert _spanish_variant("spa", "Castellano") == "spa-es"
+    assert _spanish_variant("spa", "Spanish (Spain)") == "spa-es"
+    assert _spanish_variant("spa", "") == "spa", "no name -- can't tell, stays bare"
+    assert _spanish_variant("eng", "Latino") == "eng", "non-spanish langs pass through untouched"
+    assert _spanish_base("spa-mx") == "spa" and _spanish_base("spa") == "spa"
+
+    c3 = _sq.connect(":memory:")
+    c3.row_factory = _sq.Row
+    c3.executescript("""
+      CREATE TABLE movies (id INTEGER PRIMARY KEY, original_language TEXT, status TEXT, updated_at TEXT);
+      CREATE TABLE tracks (id INTEGER PRIMARY KEY, movie_id INT, mkv_id INT, type TEXT, codec TEXT,
+        lang TEXT, name TEXT, channels INT, default_flag INT DEFAULT 0, forced_flag INT DEFAULT 0,
+        ext_path TEXT, keep INT DEFAULT 1, out_order INT DEFAULT 0, out_lang TEXT DEFAULT '',
+        out_default INT DEFAULT 0, out_forced INT DEFAULT 0, out_name TEXT DEFAULT '');
+      INSERT INTO movies VALUES (1, 'en', 'unprocessed', NULL);
+      INSERT INTO tracks (id, movie_id, mkv_id, type, codec, lang, name, forced_flag) VALUES
+        (1,1,0,'video','HEVC','und','',0),
+        (2,1,1,'audio','AC-3','eng','',0),
+        (3,1,2,'audio','AC-3','spa-mx','Latino',0),
+        (4,1,3,'audio','AC-3','spa-es','Castellano',0);
+    """)
+    suggest_tracks(c3, 1)
+    got3 = {r["id"]: dict(r) for r in c3.execute("SELECT * FROM tracks")}
+    assert got3[3]["keep"] == 1 and got3[3]["out_lang"] == "spa", "Latino kept, out_lang normalized to real ISO code"
+    assert got3[4]["keep"] == 1 and got3[4]["out_lang"] == "spa", "Castellano kept too -- not collapsed into one spa slot"
+    assert got3[3]["out_order"] != got3[4]["out_order"], "distinct slots, not overwriting each other"
 
     print("scan.py self-check OK")

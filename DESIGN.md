@@ -24,6 +24,19 @@ colors:
   orchid-duplicate: "#b48ead"
   signal-error: "#ff5d5d"
 typography:
+  # The enumerated ramp. The named roles below describe intent; this is the
+  # complete set of sizes the interface is allowed to use, and it is what the
+  # detector checks against. Without it, every 11px and 12px in a deliberately
+  # dense instrument reads as drift.
+  scale:
+    micro: "9px"
+    label: "10px"
+    dataSm: "11px"
+    data: "12px"
+    body: "13px"
+    subtitle: "14px"
+    headline: "15px"
+    title: "19px"
   title:
     fontFamily: "-apple-system, system-ui, sans-serif"
     fontSize: "19px"
@@ -49,6 +62,11 @@ typography:
     fontWeight: 600
     letterSpacing: "0.12em"
 rounded:
+  # Bar caps are proportional to the bar, not part of the panel ramp: a 3px
+  # progress bar takes a 2px cap, a 5px axis takes 3px. Enumerated so they
+  # read as the rule they are.
+  barCapSm: "2px"
+  barCap: "3px"
   chip: "4px"
   control: "6px"
   button: "7px"
@@ -200,6 +218,13 @@ The monospace handles anything a machine produced or measured — sizes,
 bitrates, percentages, ETAs, codecs, filenames, status words, section labels.
 The pairing reads as equipment because the numbers line up in columns and
 never reflow as values change.
+
+**The ramp is deliberately shallow — 10px to 19px, a 1.9:1 range.** A mechanical
+detector reads that as a flat hierarchy, and on a marketing page it would be
+one. Here the largest thing on screen is a 19px title because the surface is an
+instrument: a dense grid of measurements where scale contrast would cost rows.
+Hierarchy is carried by weight, case, colour and the mono/sans split instead.
+Do not "fix" this by scaling titles up.
 
 ### Hierarchy
 - **Title** (700, 19px): movie and show names on detail pages.

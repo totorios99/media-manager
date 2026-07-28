@@ -26,6 +26,8 @@
     --shrBd:rgba(232,194,104,.4); --shrBg:rgba(232,194,104,.13);
     --fineBd:rgba(127,201,168,.35); --fineBg:rgba(127,201,168,.1);
     --dupBd:rgba(180,142,173,.45); --errBd:rgba(255,93,93,.3);
+    /* Overlay shadows only. Resting surfaces move up the panel ramp instead. */
+    --shadowPop:rgba(0,0,0,.5); --shadowModal:rgba(0,0,0,.6);
     --mono:ui-monospace,'SF Mono',Menlo,monospace;
   }
   * { box-sizing:border-box; }
@@ -39,12 +41,6 @@
      role=button cards -- :focus-visible keeps it off mouse clicks */
   :focus-visible { outline:2px solid var(--acc); outline-offset:2px; border-radius:4px; }
   input:focus-visible, select:focus-visible { outline-offset:0; }
-
-  @media (prefers-reduced-motion: reduce) {
-    /* keep state changes legible, drop the looping/decorative motion */
-    .skel { animation:none; opacity:.7; }
-    * { transition-duration:.01ms !important; }
-  }
 
   .visually-hidden { position:absolute; width:1px; height:1px; margin:-1px; padding:0;
     overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
@@ -73,7 +69,7 @@
   .hbtn:hover { background:var(--hover); }
   .power-pill { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--acc); border:1px solid var(--accBd); border-radius:8px; padding:7px 12px; }
   .power-pill .dot { width:7px; height:7px; border-radius:50%; background:var(--acc); }
-  .pop { position:absolute; top:calc(100% + 8px); right:0; z-index:30; background:var(--p2); border:1px solid var(--bd); border-radius:10px; padding:12px; min-width:220px; display:flex; flex-direction:column; gap:8px; box-shadow:0 8px 30px rgba(0,0,0,.5); }
+  .pop { position:absolute; top:calc(100% + 8px); right:0; z-index:30; background:var(--p2); border:1px solid var(--bd); border-radius:10px; padding:12px; min-width:220px; display:flex; flex-direction:column; gap:8px; box-shadow:0 8px 30px var(--shadowPop); }
   .pop button { text-align:left; font-size:12px; color:var(--mut); border:1px solid var(--ctl); border-radius:6px; padding:8px 11px; }
   .pop button.on { color:var(--acc); border-color:var(--accBd); background:var(--accBg); }
 
@@ -120,14 +116,20 @@
   /* ---------- detail ---------- */
   .dwrap { max-width:960px; margin:0 auto; }
   .dtop { display:flex; align-items:center; gap:14px; padding:12px 22px; border-bottom:1px solid var(--hair); }
-  .dtop .back { font-size:13px; color:var(--acc); cursor:pointer; }
+  /* 44px of hit area on the most-tapped control in the product -- it was an
+     18px-tall line of text, and it is the way back from every detail page.
+     Negative margin keeps the bar's visual height where it was. */
+  .dtop .back { font-size:13px; color:var(--acc); cursor:pointer;
+    display:inline-flex; align-items:center; min-height:44px; margin:-13px 0; padding-right:6px; }
   .stpill { margin-left:auto; display:flex; align-items:center; gap:6px; font:10px var(--mono); }
   .stpill .dot { width:6px; height:6px; border-radius:50%; }
   .ident { display:flex; gap:18px; padding:18px 22px 4px; }
   .ident img, .ident .noposter { width:110px; aspect-ratio:2/3; border-radius:8px; flex:none; object-fit:cover; }
   .ident .noposter { display:flex; align-items:center; justify-content:center; font:9px var(--mono); color:var(--posterTx); background:linear-gradient(160deg,var(--posterA),var(--posterB)); }
-  .ident h2 { margin:0; font-size:19px; font-weight:700; }
-  .ident h2 .yr { color:var(--faint); font-weight:400; }
+  /* h1, not h2: detail pages render no header, so the title IS the document's
+     top level. Size stays on the Title step -- the tag changed, not the ramp. */
+  .ident h1 { margin:0; font-size:19px; font-weight:700; }
+  .ident h1 .yr { color:var(--faint); font-weight:400; }
   .ident .fn { font:11px var(--mono); color:var(--faint); margin-top:4px; word-break:break-all; }
   .spec-chips { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; font:10px var(--mono); }
   .schip { border:1px solid var(--ctl); border-radius:4px; padding:3px 7px; color:var(--mut); }
@@ -157,7 +159,7 @@
   .trow { display:flex; align-items:center; gap:10px; padding:8px 12px; background:var(--p2); border:1px solid var(--bd); border-radius:8px; margin-top:6px; }
   .trow.drop { opacity:.45; }
   .updown { display:flex; flex-direction:column; gap:3px; flex:none; }
-  .updown button { width:24px; height:17px; border:1px solid var(--ctl); border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:8px; color:var(--mut); }
+  .updown button { width:24px; height:17px; border:1px solid var(--ctl); border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:10px; line-height:1; color:var(--mut); }
   .updown button:hover { color:var(--tx); border-color:var(--btn2); }
   .keep-pill { font:700 9px var(--mono); letter-spacing:.08em; border-radius:4px; padding:4px 8px; flex:none; }
   .keep-pill.on { color:var(--fine); background:var(--fineBg); border:1px solid var(--fineBd); }
@@ -173,21 +175,21 @@
   .fchip.def { color:var(--acc); border:1px solid var(--accBd); }
   .fchip.forc { color:var(--shr); border:1px solid var(--shrBd); }
   .fchip.dim { opacity:.3; border-color:var(--ctl); color:var(--mut); }
-  .trow input.nm { flex:1; min-width:0; font:11px var(--mono); color:var(--mut); background:var(--in1); border:1px solid var(--bd); border-radius:5px; padding:6px 9px; }
+  .trow input.nm { flex:1; min-width:0; font:11px var(--mono); color:var(--mut); background:var(--in1); border:1px solid var(--bd); border-radius:6px; padding:6px 9px; }
 
   .btnrow { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
   .btn { font-size:12px; color:var(--mut); border:1px solid var(--ctl); border-radius:7px; padding:7px 13px; transition:background .12s ease-out; }
   .btn:hover { background:var(--hover); }
   .btn.primary { font-weight:600; color:var(--bg); background:var(--acc); border-color:var(--acc); }
-  .btn.gold { font-size:12.5px; font-weight:700; color:var(--bg); background:var(--shr); border-color:var(--shr); padding:9px 16px; }
-  .btn.ghost2 { font-size:12.5px; font-weight:600; color:var(--body); border:1px solid var(--btn2); padding:9px 14px; }
-  .btn.fine { font-size:12.5px; font-weight:600; color:var(--fine); border:1px solid var(--fineBd); padding:9px 14px; }
+  .btn.gold { font-size:13px; font-weight:700; color:var(--bg); background:var(--shr); border-color:var(--shr); padding:9px 16px; }
+  .btn.ghost2 { font-size:13px; font-weight:600; color:var(--body); border:1px solid var(--btn2); padding:9px 14px; }
+  .btn.fine { font-size:13px; font-weight:600; color:var(--fine); border:1px solid var(--fineBd); padding:9px 14px; }
   .btn.danger { color:var(--err); border:1px solid var(--errBd); }
   .btn:disabled { opacity:.4; cursor:default; }
   .linky { font-size:12px; color:var(--faint); padding:9px 4px; cursor:pointer; }
   .linky:hover { color:var(--mut); }
 
-  .advbanner { display:flex; align-items:center; gap:10px; border-radius:8px; padding:10px 14px; font-size:12.5px; flex-wrap:wrap; }
+  .advbanner { display:flex; align-items:center; gap:10px; border-radius:8px; padding:10px 14px; font-size:13px; flex-wrap:wrap; }
   .advbanner.shrink { background:var(--shrBg); border:1px solid var(--shrBd); }
   .advbanner.fine { background:var(--fineBg); border:1px solid var(--fineBd); }
   .advbanner b.s { color:var(--shr); } .advbanner b.f { color:var(--fine); }
@@ -200,7 +202,7 @@
   .rfhead input { width:56px; font-size:11px; padding:4px 8px; border-radius:6px; }
   .rfcols { display:flex; gap:14px; align-items:flex-end; margin-top:14px; height:150px; overflow-x:auto; }
   .rfcol { flex:1; min-width:64px; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; gap:5px; height:100%; cursor:pointer; }
-  .rfcol .recl { font:700 8px var(--mono); letter-spacing:.1em; color:var(--fine); }
+  .rfcol .recl { font:700 9px var(--mono); letter-spacing:.1em; color:var(--fine); }
   .rfcol .sz { font:600 12px var(--mono); color:var(--mut); }
   .rfcol .pct { font:10px var(--mono); color:var(--faint); }
   .rfcol .bar { width:100%; border-radius:6px 6px 2px 2px; background:rgba(143,184,216,.28); border:1px solid transparent; }
@@ -235,11 +237,11 @@
 
   /* ---------- modal ---------- */
   .mback { position:fixed; inset:0; background:var(--scrim); z-index:50; display:flex; align-items:center; justify-content:center; padding:20px; }
-  .mpanel { background:var(--p2); border:1px solid var(--bd); border-radius:12px; max-width:480px; width:100%; max-height:80vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 12px 50px rgba(0,0,0,.6); }
+  .mpanel { background:var(--p2); border:1px solid var(--bd); border-radius:12px; max-width:480px; width:100%; max-height:80vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 12px 50px var(--shadowModal); }
   .mpanel.danger { border-color:var(--errBd); }
   .mhead { padding:14px 18px; font-size:14px; font-weight:700; border-bottom:1px solid var(--hair); }
   .mpanel.danger .mhead { background:rgba(255,93,93,.08); color:var(--err); }
-  .mbody { padding:14px 18px; overflow-y:auto; font-size:12.5px; color:var(--body); line-height:1.5; }
+  .mbody { padding:14px 18px; overflow-y:auto; font-size:13px; color:var(--body); line-height:1.5; }
   .mbody .files { font:11px var(--mono); color:var(--mut); background:var(--in1); border:1px solid var(--bd); border-radius:8px; padding:10px; max-height:200px; overflow-y:auto; margin-top:10px; white-space:pre-wrap; word-break:break-all; }
   .mbody input { width:100%; margin-top:10px; font-family:var(--mono); }
   .mfoot { padding:12px 18px; display:flex; gap:8px; justify-content:flex-end; border-top:1px solid var(--hair); }
@@ -247,11 +249,15 @@
   .holdbtn .fill { position:absolute; inset:0; width:0%; background:rgba(255,93,93,.25); transition:none; }
   .holdbtn.fine .fill { background:rgba(127,201,168,.25); }
 
-  /* live-stream outage banner: sits above everything, since every progress
-     number on the page is stale while it's showing */
-  #livewarn { position:fixed; top:0; left:0; right:0; z-index:70; text-align:center;
+  /* Live-stream outage banner. Sticky rather than fixed: fixed positioning
+     laid it over the header and sliced the brand, search and buttons in half.
+     In flow it pushes the page down, and still pins to the top when scrolled.
+     Empty is the resting state -- see setLiveState for why it holds no
+     markup until there is something to announce. */
+  #livewarn { position:sticky; top:0; z-index:70; text-align:center;
     background:var(--p2); border-bottom:1px solid var(--shrBd); color:var(--shr);
     font:12px var(--mono); padding:7px 14px; }
+  #livewarn:empty { display:none; }
 
   /* toast */
   #toasts { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); z-index:60; display:flex; flex-direction:column; gap:8px; width:min(480px,92vw); }
@@ -297,16 +303,35 @@
     /* 44px on the row controls too -- they were 24x32, which clears WCAG 2.5.8
        AA (24px) but is still a small target for a thumb on a moving list */
     .keep-pill, .fchip { min-height:44px; display:inline-flex; align-items:center; }
-    .updown button { width:44px; height:26px; }
+    /* Two stacked arrows can't both be 44px tall without making every track row
+       ~90px, so they take the full 44px width and as much height as the row can
+       carry. Well clear of WCAG 2.2's 24px floor, and a real thumb target. */
+    .updown button { width:44px; height:38px; }
     .linky { min-height:44px; display:inline-flex; align-items:center; }
     .mback { align-items:flex-end; padding:0; }
     .mpanel { max-width:none; border-radius:12px 12px 0 0; }
   }
+
+  /* Drop looping and decorative motion, keep colour-state feedback. Every
+     transition in this file is background or border-color at 120ms -- those
+     carry no motion at all, and blanket-killing them only cost hover, focus
+     and keep/drop feedback for the users least able to spare it.
+     LAST in the sheet on purpose: `.skel { animation:none }` sat above the
+     `.skel` base rule for months and lost to it on source order, so the
+     skeleton pulse kept running for exactly the people who asked it not to. */
+  @media (prefers-reduced-motion: reduce) {
+    .skel { animation:none; opacity:.7; }
+    *, *::before, *::after {
+      animation-duration:.01ms !important;
+      animation-iteration-count:1 !important;
+      transition-property:background-color,border-color,color,opacity !important;
+    }
+  }
 </style>
 </head>
 <body class="glow">
-<div id="livewarn" role="status" style="display:none">Lost the live connection — progress may be stale. Reconnecting…</div>
-<div id="page"></div>
+<div id="livewarn" role="status" aria-live="polite"></div>
+<main id="page"></main>
 <div id="modal-root"></div>
 <div id="toasts" aria-live="polite" aria-atomic="false"></div>
 
@@ -713,11 +738,17 @@ function applyEvents(d) {
 // A dead stream must be visible: silently frozen progress bars are worse than
 // an honest "reconnecting", because the user can't tell them from a stalled job.
 let LIVESTATE = 'live';
+const STALE_MSG = 'Lost the live connection — progress may be stale. Reconnecting…';
 function setLiveState(s) {
   if (s === LIVESTATE) return;
   LIVESTATE = s;
   const el = document.getElementById('livewarn');
-  if (el) el.style.display = s === 'live' ? 'none' : 'block';
+  if (!el) return;
+  // Writing INTO an empty live region is what makes a screen reader speak.
+  // The previous version kept the sentence in the DOM and toggled display,
+  // which announces nothing -- so the one user who cannot see the progress
+  // bars freeze was also the one user never told the connection had dropped.
+  el.textContent = s === 'live' ? '' : STALE_MSG;
 }
 
 // ---------- detail ----------
@@ -765,7 +796,7 @@ async function renderDetail(id) {
     <div class="ident">
       ${poster ? `<img src="${poster}" alt="" width="110" height="165">` : '<div class="noposter">POSTER</div>'}
       <div style="min-width:0">
-        <h2>${esc(title)} ${m.year ? `<span class="yr">(${m.year})</span>` : ''}</h2>
+        <h1>${esc(title)} ${m.year ? `<span class="yr">(${m.year})</span>` : ''}</h1>
         <div class="fn">${esc(m.file || m.folder)}</div>
         <div class="spec-chips">
           ${m.width ? `<span class="schip">${m.width}×${m.height}</span>` : ''}
@@ -1138,7 +1169,7 @@ async function renderShow(id) {
     <div class="ident">
       ${poster ? `<img src="${poster}" alt="" width="110" height="165">` : '<div class="noposter">POSTER</div>'}
       <div style="min-width:0">
-        <h2>${esc(title)} ${s.year ? `<span class="yr">(${s.year})</span>` : ''}</h2>
+        <h1>${esc(title)} ${s.year ? `<span class="yr">(${s.year})</span>` : ''}</h1>
         <div class="fn">${esc(s.folder)}</div>
       </div>
     </div>
@@ -1396,7 +1427,7 @@ async function renderEpisode(id) {
     <div class="dtop"><span class="back" role="button" tabindex="0" onclick="location.hash='${backHash}'">← ${esc((show && (show.title || show.clean_title)) || 'Show')}</span></div>
     <div class="ident">
       <div style="min-width:0">
-        <h2>${esc(title)}</h2>
+        <h1>${esc(title)}</h1>
         <div class="fn">${esc(e.file || e.folder)}</div>
       </div>
     </div>

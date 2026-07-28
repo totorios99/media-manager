@@ -247,6 +247,12 @@
   .holdbtn .fill { position:absolute; inset:0; width:0%; background:rgba(255,93,93,.25); transition:none; }
   .holdbtn.fine .fill { background:rgba(127,201,168,.25); }
 
+  /* live-stream outage banner: sits above everything, since every progress
+     number on the page is stale while it's showing */
+  #livewarn { position:fixed; top:0; left:0; right:0; z-index:70; text-align:center;
+    background:var(--p2); border-bottom:1px solid var(--shrBd); color:var(--shr);
+    font:12px var(--mono); padding:7px 14px; }
+
   /* toast */
   #toasts { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); z-index:60; display:flex; flex-direction:column; gap:8px; width:min(480px,92vw); }
   .toast { background:var(--p2); border:1px solid var(--errBd); border-radius:8px; padding:10px 14px; font:12px var(--mono); color:var(--err); cursor:pointer; word-break:break-word; }
@@ -299,6 +305,7 @@
 </style>
 </head>
 <body class="glow">
+<div id="livewarn" role="status" style="display:none">Lost the live connection — progress may be stale. Reconnecting…</div>
 <div id="page"></div>
 <div id="modal-root"></div>
 <div id="toasts" aria-live="polite" aria-atomic="false"></div>
@@ -431,8 +438,7 @@ let TRACKSTATE = null;   // {audio:[], subs:[]} while a detail page is open
 let TRACK_BASE = 'movies';  // 'movies' | 'episodes' -- which API the track editor writes to
 let TRACK_ID = null;        // owner id (movie or episode) for the open track editor
 let SELRF = null, SAMPLES = [], CURID = null, VIDEOTRACK = null;
-let WATCHGEN = 0;              // bumped on navigation; stale poll chains self-cancel
-const WATCHING = new Set();    // job ids with a live poll chain (one each)
+const WATCHING = new Map();    // job id -> what to refresh when it finishes; cleared on navigation
 let DASHSIG = '';              // last painted dashboard signature
 let CURSHOWID = null;   // set while a show/episode page is open (movie CURID stays null there)
 let powerPopOpen = false, maintPopOpen = false;
@@ -441,7 +447,7 @@ let powerPopOpen = false, maintPopOpen = false;
 window.onhashchange = route;
 window.onload = () => {
   route();
-  pollJobs();   // reschedules itself, cadence follows whether anything is running
+  connectEvents();   // job + scan progress arrive pushed, no polling
   api('/api/power').then(p => { POWER = p; paintHeaderPower(); }).catch(() => {});
   api('/api/stats').then(s => { STATS = s; if (!CURID) paintDash(); }).catch(() => {});
 };
@@ -450,7 +456,7 @@ function route() {
   const sh = location.hash.match(/^#\/show\/(\d+)/);
   const ep = location.hash.match(/^#\/episode\/(\d+)/);
   powerPopOpen = maintPopOpen = false;
-  WATCHGEN++;   // invalidates any poll chain started by the page we're leaving
+  WATCHING.clear();   // drops watchers belonging to the page we're leaving
   if (mv) { CURID = parseInt(mv[1]); CURSHOWID = null; TRACK_BASE = 'movies'; renderDetail(CURID); }
   else if (sh) { CURID = null; CURSHOWID = parseInt(sh[1]); renderShow(CURSHOWID); }
   else if (ep) { CURID = null; CURSHOWID = null; TRACK_BASE = 'episodes'; renderEpisode(parseInt(ep[1])); }
@@ -656,16 +662,8 @@ function cardHtml(m) {
 }
 
 // ---------- scan ----------
-async function doScan() {
-  await api('/api/scan', { method: 'POST' }).catch(oops);
-  pollScan();
-}
-async function pollScan() {
-  SCAN = await api('/api/scan/status').catch(() => ({ running: false }));
-  if (!CURID) paintDash();
-  if (SCAN.running) setTimeout(pollScan, 1000);
-  else if (!CURID) { await loadMovies(); paintHomeBody(); }
-}
+// progress and the reload-when-finished both arrive over the event stream
+async function doScan() { await api('/api/scan', { method: 'POST' }).catch(oops); }
 
 // ---------- junk ----------
 async function doCleanupJunk() {
@@ -683,21 +681,43 @@ async function doCleanupJunk() {
   if (r) toast(`Removed ${r.removed} junk file(s).${r.errors.length ? ' ' + r.errors.length + ' error(s).' : ''}`);
 }
 
-// ---------- jobs polling ----------
-// Self-scheduling instead of a fixed 3s interval: a 3s cadence only earns its
-// keep while something is actually moving. Idle, it backs off to 15s.
-let POLLTIMER = null;
-async function pollJobs() {
-  JOBS = await api('/api/jobs').catch(() => JOBS);
+// ---------- live state (SSE) ----------
+// One server-pushed stream replaces what used to be three poll chains: the job
+// list, the scan status, and a per-job completion watcher. EventSource handles
+// reconnection itself, so there is no retry logic here.
+let ES = null;
+function connectEvents() {
+  if (ES) ES.close();
+  ES = new EventSource('/api/events');
+  ES.onmessage = e => { applyEvents(JSON.parse(e.data)); };
+  // onerror fires on every reconnect attempt too, so it must not be noisy --
+  // the browser retries on its own and the next onmessage clears the banner
+  ES.onerror = () => { setLiveState(ES.readyState === 2 ? 'closed' : 'reconnecting'); };
+  ES.onopen = () => setLiveState('live');
+}
+function applyEvents(d) {
+  const wasScanning = SCAN.running;
+  JOBS = d.jobs;
+  SCAN = d.scan;
+  setLiveState('live');
   if (!CURID) paintDash();
   else paintDetailJob();
   // the show page's batch panel is plain markup inside renderShow -- repaint it
   // here so a 105-job queue doesn't sit at a frozen percentage
   const sp = document.getElementById('showJobPanel');
   if (sp && SHOWDATA) sp.innerHTML = showJobsHtml(SHOWDATA);
-  const busy = SCAN.running || JOBS.some(j => j.status === 'running' || j.status === 'queued');
-  clearTimeout(POLLTIMER);
-  POLLTIMER = setTimeout(pollJobs, busy ? 3000 : 15000);
+  reapWatched();
+  // a finished scan changes the library itself, not just its progress number
+  if (wasScanning && !SCAN.running && !CURID) loadMovies().then(paintHomeBody);
+}
+// A dead stream must be visible: silently frozen progress bars are worse than
+// an honest "reconnecting", because the user can't tell them from a stalled job.
+let LIVESTATE = 'live';
+function setLiveState(s) {
+  if (s === LIVESTATE) return;
+  LIVESTATE = s;
+  const el = document.getElementById('livewarn');
+  if (el) el.style.display = s === 'live' ? 'none' : 'block';
 }
 
 // ---------- detail ----------
@@ -1024,33 +1044,41 @@ function paintDetailJob() {
   const el = document.getElementById('step3body');
   if (el) { const h = jobProgressHtml(); if (h) el.innerHTML = h; }
 }
-// Poll chains used to outlive the page that started them: nothing cancelled on
-// navigation, and runJob + renderDetail each started one for the same job. Every
-// revisit stacked another permanent 3s poller. WATCHGEN kills stale chains on
-// navigation; WATCHING keeps one chain per job id.
-async function watchJob(jobId, movieId, gen) {
-  if (gen === undefined) {
-    if (WATCHING.has(jobId)) return;
-    WATCHING.add(jobId);
-    gen = WATCHGEN;
-  }
-  const stop = () => WATCHING.delete(jobId);
-  if (gen !== WATCHGEN) return stop();
-  const j = await api(`/api/jobs/${jobId}`).catch(() => null);
-  if (!j || gen !== WATCHGEN) return stop();
-  if (j.status === 'running' || j.status === 'queued') {
-    setTimeout(() => watchJob(jobId, movieId, gen), 3000);
-    return;
-  }
-  stop();
-  if (location.hash === `#/movie/${movieId}`) {
-    if (j.kind === 'sample') { SAMPLES = await api(`/api/movies/${movieId}/samples`).catch(() => []); refreshStep3(); }
-    else renderDetail(movieId);
-  }
+// Watching a job to completion is now a registry, not a poll chain: record what
+// to do when a job id stops being in flight, and let the SSE stream decide when
+// that happened. WATCHING is cleared on navigation, so a watcher can never fire
+// against a page the user already left.
+function watchJob(jobId, movieId) {
+  WATCHING.set(jobId, { hash: `#/movie/${movieId}`, ownerId: movieId, base: 'movies' });
 }
-async function watchMovieJob(id) {
+function watchMovieJob(id) {
   const mine = JOBS.filter(j => j.movie_id === id).sort((a, b) => b.id - a.id);
   if (mine.length) watchJob(mine[0].id, id);
+}
+// jobId is passed straight after enqueueing -- JOBS won't carry the new job
+// until the next stream tick, so looking it up there would silently no-op
+function watchEpisodeJob(id, jobId) {
+  if (jobId === undefined) {
+    const mine = JOBS.filter(j => j.episode_id === id).sort((a, b) => b.id - a.id);
+    if (!mine.length) return;
+    jobId = mine[0].id;
+  }
+  WATCHING.set(jobId, { hash: `#/episode/${id}`, ownerId: id, base: 'episodes' });
+}
+async function reapWatched() {
+  for (const [jobId, w] of [...WATCHING]) {
+    const j = JOBS.find(x => x.id === jobId);
+    // absent means it aged out of the job window -- treat as finished, since
+    // every running or queued job is always included in the payload
+    if (j && (j.status === 'running' || j.status === 'queued')) continue;
+    WATCHING.delete(jobId);
+    if (location.hash !== w.hash) continue;
+    if (w.base === 'episodes') { renderEpisode(w.ownerId); continue; }
+    if (j && j.kind === 'sample') {
+      SAMPLES = await api(`/api/movies/${w.ownerId}/samples`).catch(() => []);
+      refreshStep3();
+    } else renderDetail(w.ownerId);
+  }
 }
 
 // ---------- finalize / rename / tmdb ----------
@@ -1268,7 +1296,8 @@ async function cancelJob(jobId) {
     html: 'Stops the running job and deletes its partial output. The episode goes back to ready — the next queued job starts immediately.' });
   if (!ok) return;
   await api(`/api/jobs/${jobId}`, { method: 'DELETE' }).catch(oops);
-  await pollJobs();
+  // don't wait for the next stream tick to redraw the page the user is looking at
+  JOBS = await api('/api/jobs').catch(() => JOBS);
   if (location.hash.startsWith('#/show/') && SHOWDATA) renderShow(SHOWDATA.show.id);
 }
 async function cancelShowJobs(showId) {
@@ -1409,17 +1438,7 @@ async function runEpisodeJob(id, kind) {
   const r = await api(`/api/episodes/${id}/jobs`, { method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ kind, quality: 22 }) }).catch(e => { oops(e); throw e; });
   renderEpisode(id);
-  watchEpisodeJob(id);
-}
-async function watchEpisodeJob(id, gen) {
-  if (gen === undefined) gen = WATCHGEN;
-  if (gen !== WATCHGEN) return;
-  const mine = JOBS.filter(j => j.episode_id === id).sort((a, b) => b.id - a.id);
-  if (!mine.length) return;
-  const j = await api(`/api/jobs/${mine[0].id}`).catch(() => null);
-  if (!j || gen !== WATCHGEN) return;
-  if (j.status === 'running' || j.status === 'queued') setTimeout(() => watchEpisodeJob(id, gen), 3000);
-  else if (location.hash === `#/episode/${id}`) renderEpisode(id);
+  watchEpisodeJob(id, r.job_id);
 }
 async function deleteOriginalEpisode(id) {
   const ok = await modal({

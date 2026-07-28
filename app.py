@@ -1,13 +1,16 @@
+import asyncio
 import json
 import os
 import re
 import shlex
+import signal
 import sqlite3
 import threading
 import time
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import commands
@@ -214,6 +217,12 @@ app = FastAPI()
 
 scan_state = {"running": False, "done": 0, "total": 0, "current": ""}
 
+# How often the ticker advances jobs, and how often /api/events re-reads state.
+# Encode progress moves slowly; 2s is well under the "did that button work?"
+# threshold without making the log tail hot.
+TICK_SECONDS = 2
+QUOTA_EVERY_N_TICKS = 15  # -> 30s, the cadence quota re-application always had
+
 
 # ---------- owner abstraction (movie or episode) ----------
 # A "job owner" is either a movie or an episode. Both are one metadata row +
@@ -312,20 +321,53 @@ def _reap_stale_jobs():
         conn.close()
 
 
+# Set the moment a shutdown signal arrives, so open /api/events streams end
+# themselves. It has to be the SIGNAL and not the "shutdown" lifespan event:
+# uvicorn waits for in-flight requests FIRST and only runs lifespan shutdown
+# afterwards, so a handler there never gets the chance to release the stream
+# that is holding the shutdown up.
+_shutting_down = asyncio.Event()
+
+
+def _install_shutdown_signal():
+    loop = asyncio.get_running_loop()
+    previous = {}
+
+    def handler(signum, frame):
+        loop.call_soon_threadsafe(_shutting_down.set)
+        prev = previous.get(signum)
+        if callable(prev):  # uvicorn's own handler still has to run
+            prev(signum, frame)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            previous[sig] = signal.getsignal(sig)
+            signal.signal(sig, handler)
+        except (ValueError, OSError):
+            pass  # not the main thread, or a platform without these signals
+
+
 @app.on_event("startup")
 def _startup():
     os.makedirs(LOG_DIR, exist_ok=True)
     init_db()
     _reap_stale_jobs()
+    _install_shutdown_signal()
     threading.Thread(target=_job_ticker, daemon=True).start()
 
 
 def _job_ticker():
     """Server-side job driver (UI polling only works while a browser is open):
     advances running jobs, starts the next queued one, re-applies the CPU
-    quota schedule live to running scopes."""
+    quota schedule live to running scopes.
+
+    This is the ONLY place jobs are advanced on a timer. /api/events is a
+    read-only mirror of what this thread has already written, so finalization
+    can't race between the ticker and every open browser tab."""
+    n = 0
     while True:
-        time.sleep(30)
+        time.sleep(TICK_SECONDS)
+        n += 1
         try:
             conn = get_db()
             try:
@@ -335,9 +377,14 @@ def _job_ticker():
                     nxt = conn.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
                     if nxt:
                         jobs.launch_queued(conn, dict(nxt), LOG_DIR, cpu_quota=_current_quota(conn))
-                quota = _current_quota(conn)
-                for r in conn.execute("SELECT id FROM jobs WHERE status='running'").fetchall():
-                    jobs.set_cpu_quota(r["id"], quota)
+                # Quota stays on the old 30s cadence: every application is a
+                # `systemctl set-property` fork per running scope, and the tick
+                # is now 15x faster. Live changes still apply instantly --
+                # set_power() pushes them itself, and launch passes the quota in.
+                if n % QUOTA_EVERY_N_TICKS == 0:
+                    quota = _current_quota(conn)
+                    for r in conn.execute("SELECT id FROM jobs WHERE status='running'").fetchall():
+                        jobs.set_cpu_quota(r["id"], quota)
             finally:
                 conn.close()
         except Exception:
@@ -1541,63 +1588,127 @@ def _job_eta(j):
 _JOB_LIST_OMIT = ("cmd", "log_path", "tmux_session")
 
 
-@app.get("/api/jobs")
-def list_jobs():
+def _recent_and_active_jobs(conn):
     """The 50 most recent jobs PLUS every active one. A plain
     `ORDER BY id DESC LIMIT 50` drops the running job as soon as the queue is
     longer than the window -- the runner works oldest-first, so the running job
     has the LOWEST id of anything in flight. That made the dashboard render
     "idle" mid-encode and hid every progress bar."""
+    recent = conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT 50").fetchall()
+    seen = {r["id"] for r in recent}
+    active = conn.execute(
+        "SELECT * FROM jobs WHERE status IN ('running', 'queued') ORDER BY id DESC"
+    ).fetchall()
+    return sorted(list(recent) + [a for a in active if a["id"] not in seen],
+                  key=lambda r: r["id"], reverse=True)
+
+
+def _shape_jobs(conn, out):
+    """Attaches owner title + ETA and strips the operational columns. Mutates
+    and returns `out` (a list of plain job dicts)."""
+    # look up only the owners actually referenced -- the old version scanned
+    # the whole movies table and the whole episodes-join-shows every poll
+    movie_ids = {j["movie_id"] for j in out if j["movie_id"]}
+    ep_ids = {j["episode_id"] for j in out if j["episode_id"]}
+    movie_titles, ep_titles = {}, {}
+    if movie_ids:
+        qs = ",".join("?" * len(movie_ids))
+        for m in conn.execute(
+            f"SELECT id, title, year, clean_title, folder FROM movies WHERE id IN ({qs})",
+            list(movie_ids),
+        ):
+            movie_titles[m["id"]] = (f"{m['title']} ({m['year']})" if m["title"]
+                                     else m["clean_title"] or m["folder"])
+    if ep_ids:
+        qs = ",".join("?" * len(ep_ids))
+        for e in conn.execute(
+            f"SELECT e.id, e.season, e.episode, s.title, s.clean_title FROM episodes e "
+            f"JOIN shows s ON s.id = e.show_id WHERE e.id IN ({qs})",
+            list(ep_ids),
+        ):
+            show_title = e["title"] or e["clean_title"]
+            ep_titles[e["id"]] = f"{show_title} S{(e['season'] or 0):02d}E{(e['episode'] or 0):02d}"
+
+    for j in out:
+        if j["movie_id"]:
+            j["movie_title"] = movie_titles.get(j["movie_id"], f"movie {j['movie_id']}")
+        else:
+            j["movie_title"] = ep_titles.get(j["episode_id"], f"episode {j['episode_id']}")
+        j["eta"] = _job_eta(j)
+        for k in _JOB_LIST_OMIT:
+            j.pop(k, None)
+    return out
+
+
+@app.get("/api/jobs")
+def list_jobs():
+    """Advancing read of the job list. /api/events serves the same shape without
+    advancing; this endpoint stays for one-shot fetches and as the fallback when
+    a browser has no EventSource."""
     conn = get_db()
     try:
-        recent = conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT 50").fetchall()
-        seen = {r["id"] for r in recent}
-        active = conn.execute(
-            "SELECT * FROM jobs WHERE status IN ('running', 'queued') ORDER BY id DESC"
-        ).fetchall()
-        rows = sorted(list(recent) + [a for a in active if a["id"] not in seen],
-                      key=lambda r: r["id"], reverse=True)
-        out = []
-        for r in rows:
-            if r["status"] in ("running", "done"):
-                out.append(_poll_and_finalize(conn, r["id"]))
-            else:
-                out.append(dict(r))
-
-        # look up only the owners actually referenced -- the old version scanned
-        # the whole movies table and the whole episodes-join-shows every poll
-        movie_ids = {j["movie_id"] for j in out if j["movie_id"]}
-        ep_ids = {j["episode_id"] for j in out if j["episode_id"]}
-        movie_titles, ep_titles = {}, {}
-        if movie_ids:
-            qs = ",".join("?" * len(movie_ids))
-            for m in conn.execute(
-                f"SELECT id, title, year, clean_title, folder FROM movies WHERE id IN ({qs})",
-                list(movie_ids),
-            ):
-                movie_titles[m["id"]] = (f"{m['title']} ({m['year']})" if m["title"]
-                                         else m["clean_title"] or m["folder"])
-        if ep_ids:
-            qs = ",".join("?" * len(ep_ids))
-            for e in conn.execute(
-                f"SELECT e.id, e.season, e.episode, s.title, s.clean_title FROM episodes e "
-                f"JOIN shows s ON s.id = e.show_id WHERE e.id IN ({qs})",
-                list(ep_ids),
-            ):
-                show_title = e["title"] or e["clean_title"]
-                ep_titles[e["id"]] = f"{show_title} S{(e['season'] or 0):02d}E{(e['episode'] or 0):02d}"
-
-        for j in out:
-            if j["movie_id"]:
-                j["movie_title"] = movie_titles.get(j["movie_id"], f"movie {j['movie_id']}")
-            else:
-                j["movie_title"] = ep_titles.get(j["episode_id"], f"episode {j['episode_id']}")
-            j["eta"] = _job_eta(j)
-            for k in _JOB_LIST_OMIT:
-                j.pop(k, None)
-        return out
+        out = [_poll_and_finalize(conn, r["id"]) if r["status"] in ("running", "done") else dict(r)
+               for r in _recent_and_active_jobs(conn)]
+        return _shape_jobs(conn, out)
     finally:
         conn.close()
+
+
+def _events_payload(conn):
+    """Read-only snapshot for the SSE stream. Deliberately does NOT advance
+    jobs -- _job_ticker owns that."""
+    return {"jobs": _shape_jobs(conn, [dict(r) for r in _recent_and_active_jobs(conn)]),
+            "scan": dict(scan_state)}
+
+
+def _events_json():
+    conn = get_db()
+    try:
+        return json.dumps(_events_payload(conn), sort_keys=True)
+    finally:
+        conn.close()
+
+
+@app.get("/api/events")
+async def events(request: Request):
+    """Server-sent events: job progress and scan progress, pushed on change.
+
+    Replaces three separate client poll chains (job list, scan status, and a
+    per-job completion watcher). Each connection re-reads state on the ticker's
+    cadence and only sends when the payload actually differs, so an idle library
+    costs one comment line every few seconds.
+
+    ponytail: per-connection read rather than a shared pub/sub. One admin, maybe
+    ten -- a broadcast bus only earns its keep when the read itself starts to
+    hurt, and this one is a 1.3 MB local SQLite file.
+    """
+    async def gen():
+        last = None
+        while not _shutting_down.is_set() and not await request.is_disconnected():
+            payload = await run_in_threadpool(_events_json)
+            if payload != last:
+                last = payload
+                yield f"data: {payload}\n\n"
+            else:
+                # comment frame: keeps proxies from idling the connection out
+                # and gives the client something to notice a dead link by
+                yield ": keepalive\n\n"
+            # Waiting on the shutdown event instead of a plain sleep is what
+            # makes `./run.sh` restartable: uvicorn's graceful shutdown waits
+            # for in-flight requests, and a stream that only ends when the
+            # CLIENT leaves never ends -- one open browser tab hung the server
+            # indefinitely. The client reconnects on its own afterwards.
+            try:
+                await asyncio.wait_for(_shutting_down.wait(), timeout=TICK_SECONDS)
+                break
+            except asyncio.TimeoutError:
+                pass
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",  # nginx/CasaOS reverse proxy must not buffer this
+    })
 
 
 @app.get("/api/jobs/{job_id}")

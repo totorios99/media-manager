@@ -441,7 +441,7 @@ let powerPopOpen = false, maintPopOpen = false;
 window.onhashchange = route;
 window.onload = () => {
   route();
-  pollJobs(); setInterval(pollJobs, 3000);
+  pollJobs();   // reschedules itself, cadence follows whether anything is running
   api('/api/power').then(p => { POWER = p; paintHeaderPower(); }).catch(() => {});
   api('/api/stats').then(s => { STATS = s; if (!CURID) paintDash(); }).catch(() => {});
 };
@@ -681,10 +681,16 @@ async function doCleanupJunk() {
 }
 
 // ---------- jobs polling ----------
+// Self-scheduling instead of a fixed 3s interval: a 3s cadence only earns its
+// keep while something is actually moving. Idle, it backs off to 15s.
+let POLLTIMER = null;
 async function pollJobs() {
   JOBS = await api('/api/jobs').catch(() => JOBS);
   if (!CURID) paintDash();
   else paintDetailJob();
+  const busy = SCAN.running || JOBS.some(j => j.status === 'running' || j.status === 'queued');
+  clearTimeout(POLLTIMER);
+  POLLTIMER = setTimeout(pollJobs, busy ? 3000 : 15000);
 }
 
 // ---------- detail ----------

@@ -1,5 +1,8 @@
-<title>Media Manager</title>
+<!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
+<title>Media Manager</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="/static/apple-touch-icon.png">
@@ -12,7 +15,12 @@
     color-scheme: dark;
     --bg:#0b0d12; --p1:#0e1218; --p2:#10141c; --p3:#12161f; --in1:#0b0e14; --in2:#0d1015;
     --hair:#161b25; --bd:#1c2230; --ctl:#232a38; --btn2:#2c3648;
-    --tx:#dfe5ee; --body:#c9d2e0; --mut:#8a94a6; --faint:#5b6577; --ghost:#4a5568;
+    --track:#1a202c; --disc:#2a2e37; --foot:#0e1219; --dashTo:#0d1017;
+    --hover:rgba(255,255,255,.04); --scrim:rgba(4,5,8,.7);
+    --posterA:hsl(215 28% 22%); --posterB:hsl(215 35% 9%); --posterTx:rgba(255,255,255,.3);
+    /* --faint carries real content (filenames, ETAs, counts) at 10-12px, so it
+       has to clear 4.5:1 on every surface it sits on -- #5b6577 was 3.08:1 */
+    --tx:#dfe5ee; --body:#c9d2e0; --mut:#8a94a6; --faint:#7a8497; --ghost:#7a8497;
     --acc:#8fb8d8; --shr:#e8c268; --fine:#7fc9a8; --dup:#b48ead; --err:#ff5d5d;
     --accBd:rgba(143,184,216,.35); --accBg:rgba(143,184,216,.08);
     --shrBd:rgba(232,194,104,.4); --shrBg:rgba(232,194,104,.13);
@@ -26,6 +34,20 @@
   input, select { font:inherit; background:var(--p3); color:var(--tx); border:1px solid var(--ctl); border-radius:6px; padding:6px 10px; outline:none; }
   input:focus, select:focus { border-color:var(--acc); }
   ::placeholder { color:var(--faint); }
+
+  /* one visible focus ring for every interactive thing, including the
+     role=button cards -- :focus-visible keeps it off mouse clicks */
+  :focus-visible { outline:2px solid var(--acc); outline-offset:2px; border-radius:4px; }
+  input:focus-visible, select:focus-visible { outline-offset:0; }
+
+  @media (prefers-reduced-motion: reduce) {
+    /* keep state changes legible, drop the looping/decorative motion */
+    .skel { animation:none; opacity:.7; }
+    * { transition-duration:.01ms !important; }
+  }
+
+  .visually-hidden { position:absolute; width:1px; height:1px; margin:-1px; padding:0;
+    overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
   .mono { font-family:var(--mono); }
   .lbl { font:600 10px var(--mono); letter-spacing:.12em; color:var(--faint); text-transform:uppercase; }
 
@@ -42,13 +64,13 @@
 
   /* ---------- header ---------- */
   header { display:flex; align-items:center; gap:16px; padding:14px 22px; border-bottom:1px solid var(--hair); }
-  header .brand { font-size:15px; font-weight:700; letter-spacing:.02em; cursor:pointer; white-space:nowrap; }
+  header .brand { margin:0; font-size:15px; font-weight:700; letter-spacing:.02em; cursor:pointer; white-space:nowrap; }
   header .search { flex:1; max-width:340px; display:flex; align-items:center; gap:8px; background:var(--p3); border:1px solid var(--ctl); border-radius:8px; padding:0 14px; }
   header .search span { color:var(--ghost); }
   header .search input { flex:1; background:none; border:none; padding:8px 0; }
   header .hbtns { margin-left:auto; display:flex; gap:8px; align-items:center; position:relative; }
   .hbtn { font-size:12px; color:var(--mut); border:1px solid var(--ctl); border-radius:8px; padding:7px 12px; transition:background .12s ease-out; }
-  .hbtn:hover { background:rgba(255,255,255,.04); }
+  .hbtn:hover { background:var(--hover); }
   .power-pill { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--acc); border:1px solid var(--accBd); border-radius:8px; padding:7px 12px; }
   .power-pill .dot { width:7px; height:7px; border-radius:50%; background:var(--acc); }
   .pop { position:absolute; top:calc(100% + 8px); right:0; z-index:30; background:var(--p2); border:1px solid var(--bd); border-radius:10px; padding:12px; min-width:220px; display:flex; flex-direction:column; gap:8px; box-shadow:0 8px 30px rgba(0,0,0,.5); }
@@ -56,7 +78,7 @@
   .pop button.on { color:var(--acc); border-color:var(--accBd); background:var(--accBg); }
 
   /* ---------- dashboard ---------- */
-  .dash { display:flex; align-items:stretch; margin:16px 22px; background:linear-gradient(135deg,var(--p2),#0d1017); border:1px solid var(--bd); border-radius:12px; overflow:hidden; }
+  .dash { display:flex; align-items:stretch; margin:16px 22px; background:linear-gradient(135deg,var(--p2),var(--dashTo)); border:1px solid var(--bd); border-radius:12px; overflow:hidden; }
   .dash .ringzone { display:flex; align-items:center; gap:16px; padding:16px 22px; border-right:1px solid var(--hair); flex:none; }
   .ring { position:relative; width:72px; height:72px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex:none; }
   .ring .inner { width:56px; height:56px; border-radius:50%; background:var(--in2); display:flex; align-items:center; justify-content:center; font:700 14px var(--mono); color:var(--fine); }
@@ -65,7 +87,7 @@
   .dash .cell:last-child { border-right:none; }
   .dash .val { font:600 19px var(--mono); margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .dash .sub { font-size:12px; color:var(--faint); }
-  .jobbar { height:3px; background:#1a202c; border-radius:2px; margin-top:7px; overflow:hidden; }
+  .jobbar { height:3px; background:var(--track); border-radius:2px; margin-top:7px; overflow:hidden; }
   .jobbar > div { height:100%; background:var(--acc); }
 
   /* ---------- tabs ---------- */
@@ -82,15 +104,15 @@
   .mcard.shrink { border-color:var(--shrBd); }
   .mcard:hover { border-color:var(--acc); }
   .mcard.shrink:hover { border-color:var(--shr); }
-  .mcard .poster { aspect-ratio:2/3; width:100%; object-fit:cover; display:block; background:linear-gradient(160deg,hsl(215 28% 22%),hsl(215 35% 9%)); }
-  .mcard .noposter { aspect-ratio:2/3; display:flex; align-items:center; justify-content:center; font:10px var(--mono); color:rgba(255,255,255,.3); letter-spacing:.1em; text-align:center; padding:10px; background:linear-gradient(160deg,hsl(215 28% 22%),hsl(215 35% 9%)),repeating-linear-gradient(45deg,rgba(255,255,255,.04) 0 6px,transparent 6px 12px); }
+  .mcard .poster { aspect-ratio:2/3; width:100%; object-fit:cover; display:block; background:linear-gradient(160deg,var(--posterA),var(--posterB)); }
+  .mcard .noposter { aspect-ratio:2/3; display:flex; align-items:center; justify-content:center; font:10px var(--mono); color:var(--posterTx); letter-spacing:.1em; text-align:center; padding:10px; background:linear-gradient(160deg,var(--posterA),var(--posterB)),repeating-linear-gradient(45deg,var(--hover) 0 6px,transparent 6px 12px); }
   .adv-badge { position:absolute; top:8px; left:8px; font:700 10px var(--mono); letter-spacing:.08em; background:rgba(10,11,15,.9); border-radius:4px; padding:3px 7px; }
   .adv-badge.shrink { color:var(--shr); }
   .adv-badge.fine { color:var(--fine); }
   .dup-badge { position:absolute; top:8px; right:8px; font:700 9px var(--mono); color:var(--dup); background:rgba(15,8,14,.85); border:1px solid var(--dupBd); border-radius:4px; padding:2px 6px; }
-  .mcard .prog { position:absolute; left:0; right:0; height:3px; background:rgba(26,32,44,.9); }
+  .mcard .prog { position:absolute; left:0; right:0; height:3px; background:color-mix(in srgb, var(--track) 90%, transparent); }
   .mcard .prog > div { height:100%; background:var(--acc); }
-  .mcard .foot { padding:8px 10px 9px; background:linear-gradient(180deg,var(--p3),#0e1219); }
+  .mcard .foot { padding:8px 10px 9px; background:linear-gradient(180deg,var(--p3),var(--foot)); }
   .mcard .t { font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .mcard .row2 { display:flex; justify-content:space-between; margin-top:3px; font:11px var(--mono); color:var(--faint); }
   .mcard .spec { font:10px var(--mono); color:var(--faint); margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -103,7 +125,7 @@
   .stpill .dot { width:6px; height:6px; border-radius:50%; }
   .ident { display:flex; gap:18px; padding:18px 22px 4px; }
   .ident img, .ident .noposter { width:110px; aspect-ratio:2/3; border-radius:8px; flex:none; object-fit:cover; }
-  .ident .noposter { display:flex; align-items:center; justify-content:center; font:9px var(--mono); color:rgba(255,255,255,.3); background:linear-gradient(160deg,hsl(215 28% 22%),hsl(215 35% 9%)); }
+  .ident .noposter { display:flex; align-items:center; justify-content:center; font:9px var(--mono); color:var(--posterTx); background:linear-gradient(160deg,var(--posterA),var(--posterB)); }
   .ident h2 { margin:0; font-size:19px; font-weight:700; }
   .ident h2 .yr { color:var(--faint); font-weight:400; }
   .ident .fn { font:11px var(--mono); color:var(--faint); margin-top:4px; word-break:break-all; }
@@ -120,7 +142,7 @@
   .stepc.pending { opacity:.55; }
   .step-head { display:flex; align-items:center; gap:12px; padding:10px 14px; }
   .stepc.open .step-head, .stepc.active .step-head { border-bottom:1px solid var(--hair); }
-  .stepc .disc { width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex:none; background:#2a2e37; color:var(--mut); }
+  .stepc .disc { width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex:none; background:var(--disc); color:var(--mut); }
   .stepc.done .disc { background:var(--fine); color:var(--bg); }
   .stepc.active .disc { background:var(--acc); color:var(--bg); }
   .stepc .st { font-size:13px; font-weight:600; }
@@ -141,6 +163,9 @@
   .keep-pill.on { color:var(--fine); background:var(--fineBg); border:1px solid var(--fineBd); }
   .keep-pill.off { color:var(--mut); background:none; border:1px solid var(--btn2); }
   .trow .cinfo { width:170px; flex:none; min-width:0; }
+  .trow .cinfo.grow { width:auto; flex:1; }
+  .trow .cinfo .cc.wrap, .trow .cinfo .cm.wrap { white-space:normal; overflow:visible; text-overflow:clip; }
+  .trow.stacked { align-items:flex-start; }
   .trow .cinfo .cc { font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .trow .cinfo .cm { font:10px var(--mono); color:var(--faint); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .trow select.lang { font:10px var(--mono); color:var(--mut); border:1px solid var(--ctl); border-radius:4px; padding:4px 6px; background:none; flex:none; }
@@ -152,7 +177,7 @@
 
   .btnrow { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
   .btn { font-size:12px; color:var(--mut); border:1px solid var(--ctl); border-radius:7px; padding:7px 13px; transition:background .12s ease-out; }
-  .btn:hover { background:rgba(255,255,255,.04); }
+  .btn:hover { background:var(--hover); }
   .btn.primary { font-weight:600; color:var(--bg); background:var(--acc); border-color:var(--acc); }
   .btn.gold { font-size:12.5px; font-weight:700; color:var(--bg); background:var(--shr); border-color:var(--shr); padding:9px 16px; }
   .btn.ghost2 { font-size:12.5px; font-weight:600; color:var(--body); border:1px solid var(--btn2); padding:9px 14px; }
@@ -199,17 +224,17 @@
   .jprog { margin-top:12px; }
   .jprog .row { display:flex; align-items:baseline; gap:10px; font:600 13px var(--mono); color:var(--acc); }
   .jprog .eta { font:11px var(--mono); color:var(--faint); font-weight:400; }
-  .jprog .bar { height:6px; background:#1a202c; border-radius:3px; margin-top:8px; overflow:hidden; }
+  .jprog .bar { height:6px; background:var(--track); border-radius:3px; margin-top:8px; overflow:hidden; }
   .jprog .bar > div { height:100%; background:var(--acc); }
 
   /* tmdb candidates */
   .cand { display:flex; gap:10px; align-items:center; padding:8px 10px; border:1px solid var(--bd); border-radius:8px; margin-top:6px; cursor:pointer; background:var(--p2); }
   .cand:hover { border-color:var(--acc); }
-  .cand img { width:40px; border-radius:4px; }
+  .cand img { width:40px; height:60px; object-fit:cover; border-radius:4px; flex:none; }
   .cand .cl { color:var(--faint); font-size:11px; }
 
   /* ---------- modal ---------- */
-  .mback { position:fixed; inset:0; background:rgba(4,5,8,.7); z-index:50; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .mback { position:fixed; inset:0; background:var(--scrim); z-index:50; display:flex; align-items:center; justify-content:center; padding:20px; }
   .mpanel { background:var(--p2); border:1px solid var(--bd); border-radius:12px; max-width:480px; width:100%; max-height:80vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 12px 50px rgba(0,0,0,.6); }
   .mpanel.danger { border-color:var(--errBd); }
   .mhead { padding:14px 18px; font-size:14px; font-weight:700; border-bottom:1px solid var(--hair); }
@@ -230,6 +255,20 @@
   @keyframes pulse { 0%,100%{opacity:.5} 50%{opacity:.9} }
   .empty { padding:40px; text-align:center; color:var(--faint); font:12px var(--mono); letter-spacing:.08em; }
 
+  /* ---------- tablet / small laptop ----------
+     the brief's 6-column grid is sized for a wide desktop; between 700 and
+     1100px those columns collapse to ~110px and the footer text stops being
+     readable, so step the count down instead of holding 6 everywhere */
+  @media (min-width:701px) and (max-width:1100px) {
+    .grid { grid-template-columns:repeat(4,1fr); }
+    .dash .stats { grid-template-columns:repeat(2,1fr); }
+    .dash .cell:nth-child(2) { border-right:none; }
+    .dash .cell:nth-child(1), .dash .cell:nth-child(2) { border-bottom:1px solid var(--hair); }
+  }
+  @media (min-width:1101px) and (max-width:1320px) {
+    .grid { grid-template-columns:repeat(5,1fr); }
+  }
+
   /* ---------- mobile ---------- */
   @media (max-width:700px) {
     header { gap:10px; padding:12px 14px; flex-wrap:wrap; }
@@ -248,17 +287,21 @@
     .steps { padding:12px 14px 18px; }
     .trow { flex-wrap:wrap; }
     .trow input.nm { flex-basis:100%; order:9; }
-    .updown button, .keep-pill, .fchip { min-height:28px; }
     .btn, .hbtn { min-height:44px; display:inline-flex; align-items:center; }
-    .keep-pill, .fchip, .updown button { min-height:32px; }
+    /* 44px on the row controls too -- they were 24x32, which clears WCAG 2.5.8
+       AA (24px) but is still a small target for a thumb on a moving list */
+    .keep-pill, .fchip { min-height:44px; display:inline-flex; align-items:center; }
+    .updown button { width:44px; height:26px; }
+    .linky { min-height:44px; display:inline-flex; align-items:center; }
     .mback { align-items:flex-end; padding:0; }
     .mpanel { max-width:none; border-radius:12px 12px 0 0; }
   }
 </style>
+</head>
 <body class="glow">
 <div id="page"></div>
 <div id="modal-root"></div>
-<div id="toasts"></div>
+<div id="toasts" aria-live="polite" aria-atomic="false"></div>
 
 <script>
 // ---------- utils ----------
@@ -275,14 +318,17 @@ const barFor = m => (m.height || 0) >= 2000 ? 25 : (m.height || 0) >= 1000 ? 15 
 const KIND_LABEL = { remux: 'Quick Remux', encode: 'Heavy Encode', sample: 'Sample' };
 const INFLIGHT = ['cleaning', 'encoding', 'working'];
 
-function toast(msg) {
+function toast(msg, isError) {
   const el = document.createElement('div');
   el.className = 'toast'; el.textContent = msg;
+  // errors carry role=alert so they're announced even mid-utterance; the
+  // container's polite live region handles the routine confirmations
+  if (isError) el.setAttribute('role', 'alert');
   el.onclick = () => el.remove();
   document.getElementById('toasts').appendChild(el);
   setTimeout(() => el.remove(), 8000);
 }
-const oops = e => toast(e.message || String(e));
+const oops = e => toast(e.message || String(e), true);
 
 // ---------- modal ----------
 // modal({title, html, confirmLabel, mode:'plain'|'typed'|'hold', expect, danger, holdClass}) -> Promise<bool>
@@ -290,18 +336,43 @@ function modal(o) {
   return new Promise(resolve => {
     const root = document.getElementById('modal-root');
     const typed = o.mode === 'typed';
+    const returnFocus = document.activeElement;   // restored on close
+    const titleId = 'mtitle';
     root.innerHTML = `<div class="mback">
-      <div class="mpanel ${o.danger ? 'danger' : ''}">
-        <div class="mhead">${esc(o.title)}</div>
-        <div class="mbody">${o.html || ''}${typed ? `<input id="mtyped" placeholder="type: ${esc(o.expect)}" autocomplete="off">` : ''}</div>
+      <div class="mpanel ${o.danger ? 'danger' : ''}" role="dialog" aria-modal="true" aria-labelledby="${titleId}">
+        <div class="mhead" id="${titleId}">${esc(o.title)}</div>
+        <div class="mbody">${o.html || ''}${typed ? `<label class="visually-hidden" for="mtyped">Type ${esc(o.expect)} to confirm</label><input id="mtyped" placeholder="type: ${esc(o.expect)}" autocomplete="off">` : ''}</div>
         <div class="mfoot">
           <button class="btn" id="mcancel">Cancel</button>
-          <button class="btn ${o.danger ? 'danger' : 'fine'} ${o.mode === 'hold' ? 'holdbtn' + (o.danger ? '' : ' fine') : ''}" id="mok" ${typed ? 'disabled' : ''} style="padding:7px 16px">
+          <button class="btn ${o.danger ? 'danger' : 'fine'} ${o.mode === 'hold' ? 'holdbtn' + (o.danger ? '' : ' fine') : ''}" id="mok" ${typed ? 'disabled' : ''} style="padding:7px 16px"
+            ${o.mode === 'hold' ? 'aria-describedby="mholdhint"' : ''}>
             ${o.mode === 'hold' ? '<span class="fill"></span>' : ''}<span style="position:relative">${esc(o.confirmLabel || 'Confirm')}</span>
           </button>
+          ${o.mode === 'hold' ? '<span id="mholdhint" class="visually-hidden">Press and hold, or hold Enter or Space, for one second to confirm.</span>' : ''}
         </div>
       </div></div>`;
-    const done = v => { root.innerHTML = ''; resolve(v); };
+
+    const panel = root.querySelector('.mpanel');
+    const done = v => {
+      document.removeEventListener('keydown', onKey, true);
+      root.innerHTML = '';
+      if (returnFocus && returnFocus.focus) returnFocus.focus();
+      resolve(v);
+    };
+
+    // Escape closes; Tab is trapped inside the panel
+    const onKey = e => {
+      if (e.key === 'Escape') { e.preventDefault(); done(false); return; }
+      if (e.key !== 'Tab') return;
+      const f = [...panel.querySelectorAll('button,input,select,textarea,a[href]')]
+        .filter(el => !el.disabled && el.offsetParent !== null);
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey, true);
+
     root.querySelector('.mback').onclick = e => { if (e.target === e.currentTarget) done(false); };
     document.getElementById('mcancel').onclick = () => done(false);
     const ok = document.getElementById('mok');
@@ -311,8 +382,10 @@ function modal(o) {
       inp.focus();
       ok.onclick = () => done(true);
     } else if (o.mode === 'hold') {
-      // hold 0.8s to confirm — fill animates via rAF
-      let t0 = null, raf = null;
+      // hold 0.8s to confirm — fill animates via rAF. Keyboard gets the same
+      // deliberate friction by holding Enter/Space, rather than being locked
+      // out of every destructive action entirely.
+      let t0 = null, raf = null, holding = false;
       const fill = ok.querySelector('.fill');
       const step = ts => {
         if (!t0) t0 = ts;
@@ -321,15 +394,34 @@ function modal(o) {
         if (p >= 1) { done(true); return; }
         raf = requestAnimationFrame(step);
       };
-      const start = e => { e.preventDefault(); t0 = null; raf = requestAnimationFrame(step); };
-      const stop = () => { cancelAnimationFrame(raf); fill.style.width = '0%'; };
+      const start = e => {
+        if (e && e.preventDefault) e.preventDefault();
+        if (holding) return;            // ignore key auto-repeat
+        holding = true; t0 = null; raf = requestAnimationFrame(step);
+      };
+      const stop = () => { holding = false; cancelAnimationFrame(raf); fill.style.width = '0%'; };
       ok.onmousedown = start; ok.ontouchstart = start;
       ok.onmouseup = ok.onmouseleave = ok.ontouchend = stop;
+      ok.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') start(e); };
+      ok.onkeyup = e => { if (e.key === 'Enter' || e.key === ' ') stop(); };
+      ok.onblur = stop;
+      ok.focus();
     } else {
       ok.onclick = () => done(true);
+      ok.focus();
     }
   });
 }
+
+// Enter/Space activate any element we've marked role="button" (cards, links,
+// chart columns). One delegated listener instead of handlers on every node.
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = e.target.closest('[role="button"]');
+  if (!el || el.tagName === 'BUTTON' || el.tagName === 'INPUT') return;
+  e.preventDefault();
+  el.click();
+});
 
 // ---------- state ----------
 let MOVIES = [], SHOWS = [], JOBS = [], POWER = null, STATS = { reclaimed_bytes: 0 };
@@ -339,6 +431,9 @@ let TRACKSTATE = null;   // {audio:[], subs:[]} while a detail page is open
 let TRACK_BASE = 'movies';  // 'movies' | 'episodes' -- which API the track editor writes to
 let TRACK_ID = null;        // owner id (movie or episode) for the open track editor
 let SELRF = null, SAMPLES = [], CURID = null, VIDEOTRACK = null;
+let WATCHGEN = 0;              // bumped on navigation; stale poll chains self-cancel
+const WATCHING = new Set();    // job ids with a live poll chain (one each)
+let DASHSIG = '';              // last painted dashboard signature
 let CURSHOWID = null;   // set while a show/episode page is open (movie CURID stays null there)
 let powerPopOpen = false, maintPopOpen = false;
 
@@ -355,6 +450,7 @@ function route() {
   const sh = location.hash.match(/^#\/show\/(\d+)/);
   const ep = location.hash.match(/^#\/episode\/(\d+)/);
   powerPopOpen = maintPopOpen = false;
+  WATCHGEN++;   // invalidates any poll chain started by the page we're leaving
   if (mv) { CURID = parseInt(mv[1]); CURSHOWID = null; TRACK_BASE = 'movies'; renderDetail(CURID); }
   else if (sh) { CURID = null; CURSHOWID = parseInt(sh[1]); renderShow(CURSHOWID); }
   else if (ep) { CURID = null; CURSHOWID = null; TRACK_BASE = 'episodes'; renderEpisode(parseInt(ep[1])); }
@@ -364,8 +460,10 @@ function route() {
 // ---------- header ----------
 function headerHtml() {
   return `<header>
-    <div class="brand" onclick="location.hash=''">Media Manager</div>
-    <div class="search"><span>⌕</span><input id="q" placeholder="Search library" value="${esc(Q)}" oninput="qChanged(this.value)"></div>
+    <h1 class="brand" role="button" tabindex="0" onclick="location.hash=''">Media Manager</h1>
+    <div class="search"><span aria-hidden="true">⌕</span>
+      <label class="visually-hidden" for="q">Search library</label>
+      <input id="q" type="search" placeholder="Search library" value="${esc(Q)}" oninput="qChanged(this.value)"></div>
     <div class="hbtns">
       <button class="hbtn" onclick="doScan()">⟳ Scan</button>
       <button class="hbtn" onclick="toggleMaint(event)">Maintenance ▾</button>
@@ -461,14 +559,20 @@ function paintDash() {
     jobCell = `<div style="display:flex;align-items:baseline;gap:8px;margin-top:4px;min-width:0">
         <span class="mono" style="font-weight:600;font-size:13px;color:var(--acc);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(nm)} · ${(running.progress || 0).toFixed(0)}%</span>
         ${running.eta ? `<span class="mono" style="font-size:11px;color:var(--faint)">ETA ${esc(running.eta.toUpperCase())}</span>` : ''}</div>
-      <div class="jobbar"><div class="g-acc" style="width:${running.progress || 0}%"></div></div>
+      <div class="jobbar" role="progressbar" aria-valuenow="${Math.round(running.progress || 0)}" aria-valuemin="0" aria-valuemax="100" aria-label="Encode progress"><div class="g-acc" style="width:${running.progress || 0}%"></div></div>
       ${queued ? `<div class="sub mono" style="font-size:10px;margin-top:4px">+${queued} QUEUED</div>` : ''}`;
   } else {
     jobCell = `<div class="val" style="color:var(--faint)">idle</div>`;
   }
+  // polled every 3s -- skip the full innerHTML teardown when nothing moved
+  const sig = [total, totalB, done, queue.length, pct, STATS.reclaimed_bytes,
+               SCAN.running, SCAN.done, SCAN.total, SCAN.current,
+               running && running.id, running && running.progress, running && running.eta, queued].join('|');
+  if (sig === DASHSIG && el.firstElementChild) return;
+  DASHSIG = sig;
   el.innerHTML = `<div class="dash">
     <div class="ringzone">
-      <div class="ring" style="background:conic-gradient(var(--fine) 0 ${deg}deg,#1a202c ${deg}deg 360deg)"><div class="inner">${pct}%</div></div>
+      <div class="ring" role="img" aria-label="${pct} percent of the library triaged, ${done} of ${total}" style="background:conic-gradient(var(--fine) 0 ${deg}deg,var(--track) ${deg}deg 360deg)"><div class="inner" aria-hidden="true">${pct}%</div></div>
       <div>
         <div style="font-size:14px;font-weight:600">${done} of ${total} triaged</div>
         <div style="font-size:12px;color:var(--mut);margin-top:3px"><span style="color:var(--shr);font-weight:600">~${fmtTB(onTable)}</span> still on the table</div>
@@ -515,8 +619,10 @@ function showCardHtml(s) {
   const title = s.title || s.clean_title || s.folder;
   const poster = posterUrl(s.poster_path);
   const STMAP = { unprocessed: 'var(--mut)', ready: 'var(--fine)', encoding: 'var(--acc)', clean: 'var(--fine)', error: 'var(--err)' };
-  return `<div class="mcard" onclick="location.hash='#/show/${s.id}'">
-    ${poster ? `<img class="poster" src="${poster}" loading="lazy">` : `<div class="noposter">${esc(title)}</div>`}
+  return `<div class="mcard" role="button" tabindex="0"
+    aria-label="${esc(title)}, TV show, status ${esc(s.status || 'unknown')}"
+    onclick="location.hash='#/show/${s.id}'">
+    ${poster ? `<img class="poster" src="${poster}" alt="" loading="lazy">` : `<div class="noposter">${esc(title)}</div>`}
     <div class="foot">
       <div class="t">${esc(title)}</div>
       <div class="row2"><span style="color:${STMAP[s.status] || 'var(--faint)'}">${esc((s.status || '').toUpperCase())}</span><span></span></div>
@@ -530,11 +636,15 @@ function cardHtml(m) {
   const job = JOBS.find(j => j.movie_id === m.id && j.status === 'running');
   const specBits = [res, (m.video_codec || '').toUpperCase(), m.hdr && m.hdr !== 'SDR' ? m.hdr : null,
                     m.bitrate ? Math.round(m.bitrate / 1e6) + 'Mbps' : null].filter(Boolean);
-  return `<div class="mcard ${shrink ? 'shrink' : ''}" onclick="location.hash='#/movie/${m.id}'">
-    ${poster ? `<img class="poster" src="${poster}" loading="lazy">` : `<div class="noposter">${esc(title)}</div>`}
+  const aria = [title, res, m.size_bytes ? fmtG(m.size_bytes) : null,
+                shrink ? 'shrink advised' : null, m.dup ? 'has duplicates' : null,
+                m.status && m.status !== 'unprocessed' ? 'status ' + m.status : null].filter(Boolean).join(', ');
+  return `<div class="mcard ${shrink ? 'shrink' : ''}" role="button" tabindex="0"
+    aria-label="${esc(aria)}" onclick="location.hash='#/movie/${m.id}'">
+    ${poster ? `<img class="poster" src="${poster}" alt="" loading="lazy">` : `<div class="noposter">${esc(title)}</div>`}
     ${m.status !== 'clean' && m.advice ? `<div class="adv-badge ${shrink ? 'shrink g-shr-badge' : 'fine g-fine-badge'}">${shrink ? 'SHRINK' : 'FINE'}</div>` : ''}
     ${m.dup ? '<div class="dup-badge">DUP</div>' : ''}
-    ${job ? `<div class="prog" style="bottom:${document.body.clientWidth <= 700 ? 40 : 58}px"><div class="g-acc" style="width:${job.progress || 0}%"></div></div>` : ''}
+    ${job ? `<div class="prog" role="progressbar" aria-valuenow="${Math.round(job.progress || 0)}" aria-valuemin="0" aria-valuemax="100" aria-label="Job progress" style="bottom:${document.body.clientWidth <= 700 ? 40 : 58}px"><div class="g-acc" style="width:${job.progress || 0}%"></div></div>` : ''}
     <div class="foot">
       <div class="t">${esc(title)}</div>
       <div class="row2"><span>${res}${m.hdr && m.hdr !== 'SDR' ? ' ' + m.hdr : ''}</span><span style="color:${shrink ? 'var(--shr)' : 'var(--faint)'}">${fmtG(m.size_bytes)}</span></div>
@@ -616,11 +726,11 @@ async function renderDetail(id) {
 
   page.innerHTML = `<div class="dwrap">
     <div class="dtop">
-      <span class="back" onclick="location.hash=''">← Library</span>
+      <span class="back" role="button" tabindex="0" onclick="location.hash=''">← Library</span>
       <span class="stpill" style="color:${stC}"><span class="dot ${stC.includes('fine') ? 'g-fine-dot' : ''}" style="background:${stC}"></span>${stL}</span>
     </div>
     <div class="ident">
-      ${poster ? `<img src="${poster}">` : '<div class="noposter">POSTER</div>'}
+      ${poster ? `<img src="${poster}" alt="" width="110" height="165">` : '<div class="noposter">POSTER</div>'}
       <div style="min-width:0">
         <h2>${esc(title)} ${m.year ? `<span class="yr">(${m.year})</span>` : ''}</h2>
         <div class="fn">${esc(m.file || m.folder)}</div>
@@ -632,7 +742,7 @@ async function renderDetail(id) {
           ${m.size_bytes ? `<span class="schip ${shrink ? 'shr' : ''}">${fmtG(m.size_bytes)}</span>` : ''}
           ${m.original_language ? `<span class="schip">orig: ${esc(m.original_language)}</span>` : ''}
         </div>
-        ${data.duplicates.length ? `<div class="duprow">${data.duplicates.length} duplicate${data.duplicates.length > 1 ? 's' : ''}: ${data.duplicates.map(d => `<a onclick="location.hash='#/movie/${d.id}'">${esc(d.folder)}</a>`).join(', ')}</div>` : ''}
+        ${data.duplicates.length ? `<div class="duprow">${data.duplicates.length} duplicate${data.duplicates.length > 1 ? 's' : ''}: ${data.duplicates.map(d => `<a role="button" tabindex="0" onclick="location.hash='#/movie/${d.id}'">${esc(d.folder)}</a>`).join(', ')}</div>` : ''}
       </div>
     </div>
     <div class="steps">
@@ -657,16 +767,31 @@ async function renderDetail(id) {
           <button class="btn" onclick="doRename(${id})" ${m.tmdb_id ? '' : 'disabled'}>Rename only (keep original)</button>
         </div>`)}
     </div></div>`;
-  document.querySelectorAll('.stepc.done .step-head').forEach(h =>
-    h.onclick = e => { if (e.target.closest('input,button,select')) return; h.parentElement.classList.toggle('open'); });
+  wireStepToggles();
   window._m = m;
   if (running) watchMovieJob(id);
+}
+
+// A 'done' step collapses its body; this makes the header reopen it. Must run
+// after EVERY page that renders step cards -- when only renderDetail called it,
+// the show page's completed steps were permanently sealed shut.
+function wireStepToggles() {
+  document.querySelectorAll('.stepc.done .step-head').forEach(h => {
+    h.setAttribute('role', 'button');
+    h.setAttribute('tabindex', '0');
+    h.setAttribute('aria-expanded', h.parentElement.classList.contains('open') ? 'true' : 'false');
+    h.onclick = e => {
+      if (e.target.closest('input,button,select')) return;
+      const open = h.parentElement.classList.toggle('open');
+      h.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+  });
 }
 
 function stepCard(n, state, title, summary, action, body, glowIt) {
   return `<div class="stepc ${state} ${glowIt ? 'g-acc-panel' : ''}" id="step${n}">
     <div class="step-head">
-      <span class="disc ${state === 'active' ? 'g-acc' : ''}">${state === 'done' ? '✓' : n}</span>
+      <span class="disc ${state === 'active' ? 'g-acc' : ''}" aria-hidden="true">${state === 'done' ? '✓' : n}</span>
       <span class="st">${title}</span>
       <span class="ssum">${summary}</span>
       ${action ? `<span class="sact">${action}</span>` : ''}
@@ -776,7 +901,7 @@ function step3Html(m, running) {
       <button class="btn gold ${shrink ? 'g-shr' : ''}" onclick="runJob(${m.id}, 'encode')">Heavy Encode @ RF <span id="encRf">${SELRF}</span><span id="encEst">${est}</span></button>
       <button class="btn ghost2" onclick="runJob(${m.id}, 'remux')">Quick Remux <span style="color:var(--faint);font-weight:400">(minutes)</span></button>
       <button class="btn fine" onclick="acceptAsIs(${m.id}, '${esc(m.title || m.clean_title || '')}')">Accept as-is</button>
-      <span class="linky" onclick="previewCmd(${m.id})">view command ›</span>
+      <span class="linky" role="button" tabindex="0" onclick="previewCmd(${m.id})">view command ›</span>
     </div>
     <pre class="cmd" id="cmdPreview" style="display:none"></pre>
     ${rfChartHtml(m)}
@@ -801,7 +926,7 @@ function rfChartHtml(m) {
     </div>
     ${cols.length ? `
     <div class="rfcols">${cols.map(c => `
-      <div class="rfcol ${c.isRec ? 'rec' : ''} ${c.isSel ? 'sel' : ''}" onclick="selectRF(${c.s.rf})">
+      <div class="rfcol ${c.isRec ? 'rec' : ''} ${c.isSel ? 'sel' : ''}" role="button" tabindex="0" aria-label="Select RF ${c.s.rf}" onclick="selectRF(${c.s.rf})">
         ${c.isRec ? '<div class="recl g-txt-fine">RECOMMENDED</div>' : ''}
         <div class="sz">${fmtG(c.s.est_full_bytes)}</div>
         <div class="pct">${src && c.s.est_full_bytes ? Math.round(100 * c.s.est_full_bytes / src) + '%' : '?'} of source</div>
@@ -812,7 +937,7 @@ function rfChartHtml(m) {
       <div class="rflab ${c.isRec ? 'rec' : ''}">
         <div class="rf">RF ${c.s.rf}</div>
         <div class="tag">${tagForRF(c.s.rf)}</div>
-        <div class="lnk"><a href="/api/movies/${m.id}/samples/file?file=${encodeURIComponent(c.s.file)}" target="_blank">▶ play</a> · <span class="x" onclick="delSample(${m.id},'${encodeURIComponent(c.s.file)}')">✕</span></div>
+        <div class="lnk"><a href="/api/movies/${m.id}/samples/file?file=${encodeURIComponent(c.s.file)}" target="_blank">▶ play</a> · <span class="x" role="button" tabindex="0" aria-label="Delete this sample" onclick="delSample(${m.id},'${encodeURIComponent(c.s.file)}')">✕</span></div>
       </div>`).join('')}
     </div>
     <div class="qaxis"></div>
@@ -879,19 +1004,33 @@ function jobProgressHtml() {
   return `<div class="jprog">
     <div class="row">${esc(KIND_LABEL[j.kind] || j.kind).toUpperCase()} · ${(j.progress || 0).toFixed(1)}%
       ${j.eta ? `<span class="eta">ETA ${esc(j.eta.toUpperCase())}</span>` : ''}</div>
-    <div class="bar"><div class="g-acc" style="width:${j.progress || 0}%"></div></div></div>`;
+    <div class="bar" role="progressbar" aria-valuenow="${Math.round(j.progress || 0)}" aria-valuemin="0" aria-valuemax="100"><div class="g-acc" style="width:${j.progress || 0}%"></div></div></div>`;
 }
 function paintDetailJob() {
   if (!CURID || !window._m || !INFLIGHT.includes(window._m.status)) return;
   const el = document.getElementById('step3body');
   if (el) { const h = jobProgressHtml(); if (h) el.innerHTML = h; }
 }
-async function watchJob(jobId, movieId) {
+// Poll chains used to outlive the page that started them: nothing cancelled on
+// navigation, and runJob + renderDetail each started one for the same job. Every
+// revisit stacked another permanent 3s poller. WATCHGEN kills stale chains on
+// navigation; WATCHING keeps one chain per job id.
+async function watchJob(jobId, movieId, gen) {
+  if (gen === undefined) {
+    if (WATCHING.has(jobId)) return;
+    WATCHING.add(jobId);
+    gen = WATCHGEN;
+  }
+  const stop = () => WATCHING.delete(jobId);
+  if (gen !== WATCHGEN) return stop();
   const j = await api(`/api/jobs/${jobId}`).catch(() => null);
-  if (!j) return;
+  if (!j || gen !== WATCHGEN) return stop();
   if (j.status === 'running' || j.status === 'queued') {
-    setTimeout(() => watchJob(jobId, movieId), 3000);
-  } else if (location.hash === `#/movie/${movieId}`) {
+    setTimeout(() => watchJob(jobId, movieId, gen), 3000);
+    return;
+  }
+  stop();
+  if (location.hash === `#/movie/${movieId}`) {
     if (j.kind === 'sample') { SAMPLES = await api(`/api/movies/${movieId}/samples`).catch(() => []); refreshStep3(); }
     else renderDetail(movieId);
   }
@@ -925,8 +1064,8 @@ async function tmdbSearch(id) {
   const q = document.getElementById('tmdbQ').value;
   const results = await api(`/api/tmdb/search?q=${encodeURIComponent(q)}`).catch(e => { oops(e); return []; });
   document.getElementById('tmdbResults').innerHTML = results.map(r => `
-    <div class="cand" onclick="pickTmdb(${id}, ${r.tmdb_id})">
-      ${r.poster_path ? `<img src="${posterUrl(r.poster_path)}">` : ''}
+    <div class="cand" role="button" tabindex="0" onclick="pickTmdb(${id}, ${r.tmdb_id})">
+      ${r.poster_path ? `<img src="${posterUrl(r.poster_path)}" alt="" width="40" height="60" loading="lazy">` : ''}
       <span>${esc(r.title)} (${r.year || '?'}) <span class="cl">${esc(r.original_language || '')}</span></span>
     </div>`).join('') || '<div class="empty" style="padding:14px">NO RESULTS</div>';
 }
@@ -936,11 +1075,12 @@ async function pickTmdb(id, tmdbId) {
 }
 
 // ---------- show detail ----------
-let SHOWDATA = null;
+let SHOWDATA = null, LASTSHOW = null;
 async function renderShow(id) {
   const page = document.getElementById('page');
   page.innerHTML = '<div class="dwrap"><div class="skel" style="height:60px;margin:20px 22px"></div><div class="skel" style="height:180px;margin:20px 22px"></div></div>';
   const data = await api(`/api/shows/${id}`).catch(e => { page.innerHTML = `<div class="empty">${esc(e.message)}</div>`; throw e; });
+  if (id !== LASTSHOW) { EPSHOWALL = CONFSHOWALL = false; LASTSHOW = id; }   // don't carry expanded lists to another show
   SHOWDATA = data;
   const s = data.show;
   const title = s.title || s.clean_title || s.folder;
@@ -953,9 +1093,9 @@ async function renderShow(id) {
     ]);
   }
   page.innerHTML = `<div class="dwrap">
-    <div class="dtop"><span class="back" onclick="location.hash=''">← Library</span></div>
+    <div class="dtop"><span class="back" role="button" tabindex="0" onclick="location.hash=''">← Library</span></div>
     <div class="ident">
-      ${poster ? `<img src="${poster}">` : '<div class="noposter">POSTER</div>'}
+      ${poster ? `<img src="${poster}" alt="" width="110" height="165">` : '<div class="noposter">POSTER</div>'}
       <div style="min-width:0">
         <h2>${esc(title)} ${s.year ? `<span class="yr">(${s.year})</span>` : ''}</h2>
         <div class="fn">${esc(s.folder)}</div>
@@ -970,25 +1110,61 @@ async function renderShow(id) {
           <button class="btn" onclick="tmdbSearchShow(${id})">Search</button>
         </div><div id="showTmdbResults"></div>`)}
       ${stepCard(2, 'active', 'Episodes', `${data.episodes.length} episode(s)`, null, episodesHtml(data))}
-      ${s.tmdb_id ? stepCard(3, cfg && Object.keys(cfg.config || {}).length ? 'done' : 'active', 'Show configuration',
-        cfg && Object.keys(cfg.config || {}).length
-          ? `${cfg.applicable} applicable · ${cfg.conflicts.length} conflict(s)` : 'pick one episode\'s config for the whole show',
-        null, showConfigHtml(id, cfg)) : ''}
+      ${s.tmdb_id ? stepCard(3, cfgState(cfg), 'Show configuration', cfgSummary(cfg),
+        cfgState(cfg) === 'done' ? '▾ reopen' : null, showConfigHtml(id, cfg)) : ''}
       ${s.tmdb_id ? stepCard(4, 'active', 'Rename & organize', seasons ? seasonSummary(seasons) : '', null, seasonHtml(id, s, seasons)) : ''}
     </div></div>`;
+  wireStepToggles();
+}
+// 'done' means nothing is left to decide. A green check beside "80 differ" was
+// telling the user two opposite things at once.
+function cfgState(cfg) {
+  if (!cfg || !Object.keys(cfg.config || {}).length) return 'active';
+  return cfg.conflicts.length ? 'active' : 'done';
+}
+function cfgSummary(cfg) {
+  if (!cfg || !Object.keys(cfg.config || {}).length) return 'apply one episode\'s track setup to the whole show';
+  const n = cfg.conflicts.length;
+  // the diff is over which tracks EXIST, not over your keep/drop choices --
+  // say so, because "conflict" read as "your settings are broken"
+  return n ? `${cfg.applicable} episodes carry the same tracks · ${n} have a different track list`
+           : `all ${cfg.applicable} episodes carry the same tracks`;
+}
+// "111, 112, 113, …, 131" is 21 numbers of noise; "111–131" is the same fact.
+function rangeList(nums) {
+  const out = [];
+  let i = 0;
+  while (i < nums.length) {
+    let j = i;
+    while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
+    out.push(j - i >= 2 ? `${nums[i]}–${nums[j]}` : nums.slice(i, j + 1).join(', '));
+    i = j + 1;
+  }
+  return out.join(', ');
 }
 function seasonSummary(seasons) {
   const missing = seasons.seasons.reduce((n, sn) => n + sn.missing.length, 0);
   return missing || seasons.out_of_range.length ? `${missing} missing · ${seasons.out_of_range.length} out-of-range` : 'all episodes present';
 }
+// track_sig is "type|lang|codec|name" -- readable to the code, not to a person.
+// Lead with the release's own track name, which is what the user recognises.
+function sigLabel(sig) {
+  const [type, lang, codec, ...rest] = String(sig).split('|');
+  const name = rest.join('|').trim();
+  return (name || `${codec || ''} ${type || ''}`.trim()) + (lang ? ` (${lang})` : '');
+}
 function showConfigHtml(showId, cfg) {
   if (!cfg) return '<div style="color:var(--faint);font-size:12px">TMDB match required</div>';
-  const conflicts = cfg.conflicts.map(c => `
-    <div class="trow">
-      <div class="cinfo" style="width:110px"><div class="cc">S${String(c.season||0).padStart(2,'0')}E${String(c.episode||0).padStart(2,'0')}</div></div>
-      <div class="cinfo"><div class="cc">${c.missing.length ? 'missing: ' + c.missing.map(esc).join(', ') : ''}</div>
-        <div class="cm">${c.extra.length ? 'extra: ' + c.extra.map(esc).join(', ') : ''}${c.ambiguous.length ? ' ambiguous: ' + c.ambiguous.map(esc).join(', ') : ''}</div></div>
-      <span class="linky" onclick="location.hash='#/episode/${c.episode_id}'">configure ›</span>
+  const allConf = cfg.conflicts;
+  const conflicts = (CONFSHOWALL ? allConf : allConf.slice(0, CONF_PAGE)).map(c => `
+    <div class="trow stacked">
+      <div class="cinfo" style="width:78px"><div class="cc">S${String(c.season||0).padStart(2,'0')}E${String(c.episode||0).padStart(2,'0')}</div></div>
+      <div class="cinfo grow">
+        ${c.missing.length ? `<div class="cc wrap">doesn't have: ${c.missing.map(sigLabel).map(esc).join(', ')}</div>` : ''}
+        ${c.extra.length ? `<div class="cm wrap">also has: ${c.extra.map(sigLabel).map(esc).join(', ')}</div>` : ''}
+        ${c.ambiguous.length ? `<div class="cm wrap">duplicated: ${c.ambiguous.map(sigLabel).map(esc).join(', ')}</div>` : ''}
+      </div>
+      <span class="linky" role="button" tabindex="0" onclick="location.hash='#/episode/${c.episode_id}'">configure ›</span>
     </div>`).join('');
   return `
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -997,7 +1173,11 @@ function showConfigHtml(showId, cfg) {
       <button class="btn" onclick="useEpisodeAsShowConfig(${showId})">as config for all</button>
       <button class="btn primary g-acc-lg" onclick="applyShowConfig(${showId})" ${Object.keys(cfg.config||{}).length ? '' : 'disabled'}>Apply to all (${cfg.applicable})</button>
     </div>
-    ${conflicts ? `<div class="lbl" style="margin-top:12px">CONFLICTS — handle individually</div>${conflicts}` : ''}`;
+    ${conflicts ? `<div class="lbl" style="margin-top:12px">DIFFERENT TRACK LIST — HANDLE INDIVIDUALLY</div>${conflicts}
+      ${allConf.length > CONF_PAGE ? `<div class="btnrow" style="margin-top:8px">
+        <button class="btn" onclick="CONFSHOWALL=!CONFSHOWALL;renderShow(${showId})">${CONFSHOWALL ? `Collapse to first ${CONF_PAGE}` : `Show all ${allConf.length}`}</button>
+        <span style="align-self:center;font:11px var(--mono);color:var(--faint)">${CONFSHOWALL ? allConf.length : CONF_PAGE} of ${allConf.length} shown</span>
+      </div>` : ''}` : ''}`;
 }
 async function useEpisodeAsShowConfig(showId) {
   const n = parseInt(document.getElementById('cfgSourceEp').value, 10);
@@ -1015,9 +1195,9 @@ async function applyShowConfig(showId) {
 function seasonHtml(showId, s, seasons) {
   if (!seasons) return '<div style="color:var(--faint);font-size:12px">TMDB match required</div>';
   const rows = seasons.seasons.map(sn => `
-    <div class="trow"><div class="cinfo" style="width:110px"><div class="cc">Season ${String(sn.season).padStart(2,'0')}</div></div>
-    <div class="cinfo"><div class="cc">${sn.present}/${sn.expected} present</div>
-      <div class="cm">${sn.missing.length ? 'missing: ' + sn.missing.join(', ') : ''}</div></div></div>`).join('');
+    <div class="trow stacked"><div class="cinfo" style="width:96px"><div class="cc">Season ${String(sn.season).padStart(2,'0')}</div></div>
+    <div class="cinfo grow"><div class="cc">${sn.present}/${sn.expected} present</div>
+      <div class="cm wrap">${sn.missing.length ? 'missing: ' + esc(rangeList(sn.missing)) : 'complete'}</div></div></div>`).join('');
   const blocked = seasons.out_of_range.length > 0;
   return `${rows}
     ${blocked ? `<div style="color:var(--err);font-size:12px;margin-top:8px">out of TMDB's range, resolve before renaming: ${seasons.out_of_range.map(o => `S${String(o.season).padStart(2,'0')}E${String(o.episode).padStart(2,'0')}`).join(', ')}</div>` : ''}
@@ -1032,19 +1212,49 @@ async function renameShow(showId, title) {
   await api(`/api/shows/${showId}/rename`, { method: 'POST' }).catch(e => { oops(e); throw e; });
   renderShow(showId);
 }
+// Longest shared leading run across all filenames. After a rename every episode
+// starts with "Show (Year) - S01E", so a fixed-width column rendered the exact
+// same truncated string on all 110 rows -- the distinguishing tail was the part
+// being cut off. Strip the shared head and show what actually differs.
+function commonPrefix(list) {
+  if (list.length < 2) return '';
+  let p = list[0] || '';
+  for (const s of list) {
+    let i = 0;
+    while (i < p.length && i < s.length && p[i] === s[i]) i++;
+    p = p.slice(0, i);
+    if (!p) break;
+  }
+  return p;
+}
+let EPSHOWALL = false, CONFSHOWALL = false;
+const EP_PAGE = 24, CONF_PAGE = 10;
 function episodesHtml(data) {
-  const rows = data.episodes.map(e => {
+  const all = data.episodes;
+  const prefix = commonPrefix(all.map(e => e.file || ''));
+  const shown = EPSHOWALL ? all : all.slice(0, EP_PAGE);
+  const rows = shown.map(e => {
     const running = INFLIGHT.includes(e.status);
     const job = JOBS.find(j => j.episode_id === e.id && (j.status === 'running' || j.status === 'queued'));
+    const tail = (e.file || '').slice(prefix.length) || (e.file || '');
+    const spec = [resOf(e) || null, (e.video_codec || '').toUpperCase() || null,
+                  fmtG(e.size_bytes) || null].filter(Boolean).join(' · ');
+    const col = (job || running) ? 'var(--acc)' : e.status === 'clean' ? 'var(--fine)'
+              : e.status === 'error' ? 'var(--err)' : 'var(--faint)';
     return `<div class="trow ${e.excluded ? 'drop' : ''}">
-      <button class="keep-pill ${e.excluded ? 'off' : 'on'}" onclick="toggleExcluded(${data.show.id},${e.id})">${e.excluded ? 'EXCLUDED' : 'INCLUDED'}</button>
-      <div class="cinfo" style="width:110px"><div class="cc">S${String(e.season||0).padStart(2,'0')}E${String(e.episode||0).padStart(2,'0')}</div></div>
-      <div class="cinfo"><div class="cc">${esc(e.file || '')}</div><div class="cm">${fmtG(e.size_bytes)}</div></div>
-      <span style="font:10px var(--mono);color:${job ? 'var(--acc)' : running ? 'var(--acc)' : e.status === 'clean' ? 'var(--fine)' : e.status === 'error' ? 'var(--err)' : 'var(--faint)'}">${job ? (job.status.toUpperCase() + ' ' + (job.progress||0).toFixed(0) + '%') : e.status.toUpperCase()}</span>
-      <span class="linky" onclick="location.hash='#/episode/${e.id}'">configure ›</span>
+      <button class="keep-pill ${e.excluded ? 'off' : 'on'}" aria-pressed="${e.excluded ? 'false' : 'true'}" onclick="toggleExcluded(${data.show.id},${e.id})">${e.excluded ? 'EXCLUDED' : 'INCLUDED'}</button>
+      <div class="cinfo" style="width:78px"><div class="cc">S${String(e.season||0).padStart(2,'0')}E${String(e.episode||0).padStart(2,'0')}</div></div>
+      <div class="cinfo grow" title="${esc(e.file || '')}"><div class="cc">${esc(tail)}</div><div class="cm">${esc(spec)}</div></div>
+      <span style="font:10px var(--mono);color:${col}">${job ? (job.status.toUpperCase() + ' ' + (job.progress||0).toFixed(0) + '%') : e.status.toUpperCase()}</span>
+      <span class="linky" role="button" tabindex="0" onclick="location.hash='#/episode/${e.id}'">configure ›</span>
     </div>`;
   }).join('');
+  const more = all.length > EP_PAGE ? `<div class="btnrow" style="margin-top:8px">
+      <button class="btn" onclick="EPSHOWALL=!EPSHOWALL;renderShow(${data.show.id})">${EPSHOWALL ? `Collapse to first ${EP_PAGE}` : `Show all ${all.length} episodes`}</button>
+      <span style="align-self:center;font:11px var(--mono);color:var(--faint)">${EPSHOWALL ? all.length : EP_PAGE} of ${all.length} shown</span>
+    </div>` : '';
   return `${rows || '<div style="color:var(--faint);font-size:12px">no episodes found</div>'}
+    ${more}
     <div class="btnrow">
       <button class="btn" onclick="suggestShow(${data.show.id})">Suggest all (non-excluded)</button>
       <button class="btn ghost2" onclick="runShowJob(${data.show.id},'remux')">Remux all configured</button>
@@ -1075,8 +1285,8 @@ async function tmdbSearchShow(id) {
   const q = document.getElementById('showTmdbQ').value;
   const results = await api(`/api/tmdb/search?q=${encodeURIComponent(q)}&kind=tv`).catch(e => { oops(e); return []; });
   document.getElementById('showTmdbResults').innerHTML = results.map(r => `
-    <div class="cand" onclick="pickTmdbShow(${id}, ${r.tmdb_id})">
-      ${r.poster_path ? `<img src="${posterUrl(r.poster_path)}">` : ''}
+    <div class="cand" role="button" tabindex="0" onclick="pickTmdbShow(${id}, ${r.tmdb_id})">
+      ${r.poster_path ? `<img src="${posterUrl(r.poster_path)}" alt="" width="40" height="60" loading="lazy">` : ''}
       <span>${esc(r.title)} (${r.year || '?'}) <span class="cl">${esc(r.original_language || '')}</span></span>
     </div>`).join('') || '<div class="empty" style="padding:14px">NO RESULTS</div>';
 }
@@ -1103,7 +1313,7 @@ async function renderEpisode(id) {
   const backHash = show ? `#/show/${show.id}` : '';
 
   page.innerHTML = `<div class="dwrap">
-    <div class="dtop"><span class="back" onclick="location.hash='${backHash}'">← ${esc((show && (show.title || show.clean_title)) || 'Show')}</span></div>
+    <div class="dtop"><span class="back" role="button" tabindex="0" onclick="location.hash='${backHash}'">← ${esc((show && (show.title || show.clean_title)) || 'Show')}</span></div>
     <div class="ident">
       <div style="min-width:0">
         <h2>${esc(title)}</h2>
@@ -1120,6 +1330,7 @@ async function renderEpisode(id) {
       ${e.status === 'clean' ? stepCard(3, 'active', 'Finalize', 'delete original source file', null, `
         <div class="btnrow" style="margin:0"><button class="btn danger" onclick="deleteOriginalEpisode(${id})">Delete original</button></div>`) : ''}
     </div></div>`;
+  wireStepToggles();
   window._ep = e;
   if (running) watchEpisodeJob(id);
 }
@@ -1128,7 +1339,7 @@ function episodeJobHtml(e, running) {
     const j = JOBS.find(x => x.episode_id === e.id && (x.status === 'running' || x.status === 'queued'));
     if (j && j.status === 'queued') return `<div class="jprog"><div class="row" style="color:var(--faint)">QUEUED — waiting for the runner</div></div>`;
     if (j) return `<div class="jprog"><div class="row">${esc(KIND_LABEL[j.kind] || j.kind).toUpperCase()} · ${(j.progress || 0).toFixed(1)}%</div>
-      <div class="bar"><div class="g-acc" style="width:${j.progress || 0}%"></div></div></div>`;
+      <div class="bar" role="progressbar" aria-valuenow="${Math.round(j.progress || 0)}" aria-valuemin="0" aria-valuemax="100"><div class="g-acc" style="width:${j.progress || 0}%"></div></div></div>`;
     return '<div class="jprog"><div class="row">job starting…</div></div>';
   }
   return `<div class="btnrow" style="margin-top:0">
@@ -1149,12 +1360,14 @@ async function runEpisodeJob(id, kind) {
   renderEpisode(id);
   watchEpisodeJob(id);
 }
-async function watchEpisodeJob(id) {
+async function watchEpisodeJob(id, gen) {
+  if (gen === undefined) gen = WATCHGEN;
+  if (gen !== WATCHGEN) return;
   const mine = JOBS.filter(j => j.episode_id === id).sort((a, b) => b.id - a.id);
   if (!mine.length) return;
   const j = await api(`/api/jobs/${mine[0].id}`).catch(() => null);
-  if (!j) return;
-  if (j.status === 'running' || j.status === 'queued') setTimeout(() => watchEpisodeJob(id), 3000);
+  if (!j || gen !== WATCHGEN) return;
+  if (j.status === 'running' || j.status === 'queued') setTimeout(() => watchEpisodeJob(id, gen), 3000);
   else if (location.hash === `#/episode/${id}`) renderEpisode(id);
 }
 async function deleteOriginalEpisode(id) {
@@ -1168,3 +1381,4 @@ async function deleteOriginalEpisode(id) {
 }
 </script>
 </body>
+</html>

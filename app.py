@@ -1464,32 +1464,65 @@ def _job_eta(j):
     return None
 
 
+# Polled every few seconds by every open page. The UI reads only
+# status/progress/eta/title, so the bulky operational columns never ship.
+_JOB_LIST_OMIT = ("cmd", "log_path", "tmux_session")
+
+
 @app.get("/api/jobs")
 def list_jobs():
+    """The 50 most recent jobs PLUS every active one. A plain
+    `ORDER BY id DESC LIMIT 50` drops the running job as soon as the queue is
+    longer than the window -- the runner works oldest-first, so the running job
+    has the LOWEST id of anything in flight. That made the dashboard render
+    "idle" mid-encode and hid every progress bar."""
     conn = get_db()
     try:
-        rows = conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT 50").fetchall()
+        recent = conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT 50").fetchall()
+        seen = {r["id"] for r in recent}
+        active = conn.execute(
+            "SELECT * FROM jobs WHERE status IN ('running', 'queued') ORDER BY id DESC"
+        ).fetchall()
+        rows = sorted(list(recent) + [a for a in active if a["id"] not in seen],
+                      key=lambda r: r["id"], reverse=True)
         out = []
         for r in rows:
             if r["status"] in ("running", "done"):
                 out.append(_poll_and_finalize(conn, r["id"]))
             else:
                 out.append(dict(r))
-        movie_titles = {m["id"]: (f"{m['title']} ({m['year']})" if m["title"] else m["clean_title"] or m["folder"])
-                        for m in conn.execute("SELECT id, title, year, clean_title, folder FROM movies")}
-        ep_titles = {}
-        for e in conn.execute(
-            "SELECT e.id, e.season, e.episode, s.title, s.clean_title FROM episodes e "
-            "JOIN shows s ON s.id = e.show_id"
-        ):
-            show_title = e["title"] or e["clean_title"]
-            ep_titles[e["id"]] = f"{show_title} S{(e['season'] or 0):02d}E{(e['episode'] or 0):02d}"
+
+        # look up only the owners actually referenced -- the old version scanned
+        # the whole movies table and the whole episodes-join-shows every poll
+        movie_ids = {j["movie_id"] for j in out if j["movie_id"]}
+        ep_ids = {j["episode_id"] for j in out if j["episode_id"]}
+        movie_titles, ep_titles = {}, {}
+        if movie_ids:
+            qs = ",".join("?" * len(movie_ids))
+            for m in conn.execute(
+                f"SELECT id, title, year, clean_title, folder FROM movies WHERE id IN ({qs})",
+                list(movie_ids),
+            ):
+                movie_titles[m["id"]] = (f"{m['title']} ({m['year']})" if m["title"]
+                                         else m["clean_title"] or m["folder"])
+        if ep_ids:
+            qs = ",".join("?" * len(ep_ids))
+            for e in conn.execute(
+                f"SELECT e.id, e.season, e.episode, s.title, s.clean_title FROM episodes e "
+                f"JOIN shows s ON s.id = e.show_id WHERE e.id IN ({qs})",
+                list(ep_ids),
+            ):
+                show_title = e["title"] or e["clean_title"]
+                ep_titles[e["id"]] = f"{show_title} S{(e['season'] or 0):02d}E{(e['episode'] or 0):02d}"
+
         for j in out:
             if j["movie_id"]:
                 j["movie_title"] = movie_titles.get(j["movie_id"], f"movie {j['movie_id']}")
             else:
                 j["movie_title"] = ep_titles.get(j["episode_id"], f"episode {j['episode_id']}")
             j["eta"] = _job_eta(j)
+            for k in _JOB_LIST_OMIT:
+                j.pop(k, None)
         return out
     finally:
         conn.close()

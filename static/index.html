@@ -591,14 +591,14 @@ function paintTabs() {
   if (!el) return;
   const counts = { needs: 0, flight: 0, done: 0 };
   MOVIES.forEach(m => { const b = bucketOf(m); if (counts[b] !== undefined) counts[b]++; });
-  const t = (id, label, n) => `<button class="tab ${TAB === id ? 'on' : ''}" onclick="TAB='${id}';paintTabs();paintGrid()">${label} ${n}</button>`;
+  const t = (id, label, n) => `<button class="tab ${TAB === id ? 'on' : ''}" aria-pressed="${TAB === id}" onclick="TAB='${id}';paintTabs();paintGrid()">${label} ${n}</button>`;
   el.innerHTML = `<div class="tabs">
     ${t('needs', 'NEEDS DECISION', counts.needs)}${t('flight', 'IN FLIGHT', counts.flight)}${t('done', 'DONE', counts.done)}${t('all', 'ALL', MOVIES.length)}${t('shows', 'TV SHOWS', SHOWS.length)}
     <div class="right">
-      <span>SORT:</span><select onchange="SORT=this.value;paintGrid()">
+      <span aria-hidden="true">SORT:</span><select aria-label="Sort library by" onchange="SORT=this.value;paintGrid()">
         <option value="size" ${SORT === 'size' ? 'selected' : ''}>SIZE ▾</option>
         <option value="title" ${SORT === 'title' ? 'selected' : ''}>TITLE</option></select>
-      <label>DUP <input type="checkbox" ${DUPONLY ? 'checked' : ''} onchange="DUPONLY=this.checked;paintGrid()"></label>
+      <label>DUP <input type="checkbox" aria-label="Show only duplicates" ${DUPONLY ? 'checked' : ''} onchange="DUPONLY=this.checked;paintGrid()"></label>
     </div></div>`;
 }
 function paintGrid() {

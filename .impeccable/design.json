@@ -1,0 +1,341 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-28T11:36:05.035385-06:00",
+  "title": "Design System: Media Manager",
+  "extensions": {
+    "colorMeta": {
+      "glacier-accent": {
+        "role": "primary",
+        "displayName": "Glacier Accent",
+        "canonical": "#8fb8d8",
+        "tonalRamp": [
+          "#12202b",
+          "#1b3243",
+          "#26475e",
+          "#33607c",
+          "#4a7c9c",
+          "#6a9ac0",
+          "#8fb8d8",
+          "#c3daeb"
+        ]
+      },
+      "amber-attention": {
+        "role": "secondary",
+        "displayName": "Amber Attention",
+        "canonical": "#e8c268",
+        "tonalRamp": [
+          "#2b2110",
+          "#43331a",
+          "#5e4926",
+          "#7c6133",
+          "#9c7c45",
+          "#c09f57",
+          "#e8c268",
+          "#f3dfae"
+        ]
+      },
+      "jade-resolved": {
+        "role": "tertiary",
+        "displayName": "Jade Resolved",
+        "canonical": "#7fc9a8",
+        "tonalRamp": [
+          "#0f2419",
+          "#183827",
+          "#234f37",
+          "#2f6a4a",
+          "#43895f",
+          "#5da77f",
+          "#7fc9a8",
+          "#b6e2cd"
+        ]
+      },
+      "orchid-duplicate": {
+        "role": "tertiary",
+        "displayName": "Orchid Duplicate",
+        "canonical": "#b48ead",
+        "tonalRamp": [
+          "#241a23",
+          "#372838",
+          "#4e394e",
+          "#684d68",
+          "#876585",
+          "#9d799b",
+          "#b48ead",
+          "#d7c2d6"
+        ]
+      },
+      "signal-error": {
+        "role": "tertiary",
+        "displayName": "Signal Error",
+        "canonical": "#ff5d5d",
+        "tonalRamp": [
+          "#2e1212",
+          "#471a1a",
+          "#642424",
+          "#853030",
+          "#ab3e3e",
+          "#d44e4e",
+          "#ff5d5d",
+          "#ffa8a8"
+        ]
+      },
+      "page-void": {
+        "role": "neutral",
+        "displayName": "Page Void",
+        "canonical": "#0b0d12",
+        "tonalRamp": [
+          "#0b0d12",
+          "#12161f",
+          "#1c2230",
+          "#232a38",
+          "#2c3648",
+          "#5b6577",
+          "#8a94a6",
+          "#dfe5ee"
+        ]
+      },
+      "text-faint": {
+        "role": "neutral",
+        "displayName": "Faint Readout",
+        "canonical": "#7a8497",
+        "tonalRamp": [
+          "#12161f",
+          "#232a38",
+          "#3a4354",
+          "#4f596c",
+          "#646f84",
+          "#7a8497",
+          "#a3abba",
+          "#dfe5ee"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "readout": {
+        "displayName": "Readout",
+        "purpose": "Dashboard stat numbers; the largest mono in the product."
+      },
+      "label": {
+        "displayName": "Section Label",
+        "purpose": "Uppercase mono labels above grouped content."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Human-written prose: advice banners, modal copy."
+      }
+    },
+    "shadows": [
+      {
+        "name": "overlay-lift",
+        "value": "0 12px 50px rgba(0,0,0,.6)",
+        "purpose": "Modal panel; the only true float."
+      },
+      {
+        "name": "popover-lift",
+        "value": "0 8px 30px rgba(0,0,0,.5)",
+        "purpose": "Header dropdowns."
+      },
+      {
+        "name": "glow-live",
+        "value": "0 0 8px rgba(143,184,216,.5)",
+        "purpose": "Liveness halo on active elements. Behind body.glow only."
+      },
+      {
+        "name": "glow-commit",
+        "value": "0 0 16px rgba(232,194,104,.3)",
+        "purpose": "Heavy Encode button; the expensive commitment."
+      },
+      {
+        "name": "glow-panel",
+        "value": "0 0 20px rgba(143,184,216,.08)",
+        "purpose": "Faint aura on the active step card."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-ui",
+        "value": "120ms ease-out",
+        "purpose": "The only transition; background and border-color exclusively."
+      },
+      {
+        "name": "hold-confirm",
+        "value": "800ms linear fill",
+        "purpose": "Hold-to-confirm progress on destructive actions."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "mobile",
+        "value": "700px"
+      },
+      {
+        "name": "tablet",
+        "value": "1100px"
+      },
+      {
+        "name": "desktop",
+        "value": "1320px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The system's recommended action; carries the liveness glow.",
+      "html": "<button class=\"ds-btn-primary\">Save configuration</button>",
+      "css": ".ds-btn-primary{background:#8fb8d8;color:#0b0d12;border:1px solid #8fb8d8;border-radius:7px;padding:7px 13px;font:600 12px -apple-system,system-ui,sans-serif;cursor:pointer;box-shadow:0 0 14px rgba(143,184,216,.5);transition:background .12s ease-out}.ds-btn-primary:hover{background:#a5c7e0}.ds-btn-primary:focus-visible{outline:2px solid #8fb8d8;outline-offset:2px}"
+    },
+    {
+      "name": "Commit Button",
+      "kind": "button",
+      "refersTo": "button-commit",
+      "description": "Starts a heavy encode: hours of machine time, so it gets its own color.",
+      "html": "<button class=\"ds-btn-commit\">Heavy Encode @ RF 22 · est ~17.9 G</button>",
+      "css": ".ds-btn-commit{background:#e8c268;color:#0b0d12;border:1px solid #e8c268;border-radius:7px;padding:9px 16px;font:700 12.5px -apple-system,system-ui,sans-serif;cursor:pointer;box-shadow:0 0 16px rgba(232,194,104,.3)}.ds-btn-commit:hover{background:#efd08a}.ds-btn-commit:focus-visible{outline:2px solid #8fb8d8;outline-offset:2px}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "The default for routine actions.",
+      "html": "<button class=\"ds-btn-ghost\">Quick Remux</button>",
+      "css": ".ds-btn-ghost{background:none;color:#8a94a6;border:1px solid #232a38;border-radius:7px;padding:7px 13px;font:12px -apple-system,system-ui,sans-serif;cursor:pointer;transition:background .12s ease-out}.ds-btn-ghost:hover{background:rgba(255,255,255,.04)}.ds-btn-ghost:focus-visible{outline:2px solid #8fb8d8;outline-offset:2px}"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive actions: outlined, never filled.",
+      "html": "<button class=\"ds-btn-danger\">Delete original…</button>",
+      "css": ".ds-btn-danger{background:none;color:#ff5d5d;border:1px solid rgba(255,93,93,.3);border-radius:7px;padding:7px 13px;font:12px -apple-system,system-ui,sans-serif;cursor:pointer}.ds-btn-danger:hover{background:rgba(255,93,93,.08)}.ds-btn-danger:focus-visible{outline:2px solid #8fb8d8;outline-offset:2px}"
+    },
+    {
+      "name": "Keep / Drop Pill",
+      "kind": "chip",
+      "refersTo": "chip-keep",
+      "description": "Toggles whether a track survives the mux. Carries aria-pressed.",
+      "html": "<button class=\"ds-pill-keep\" aria-pressed=\"true\">KEEP</button> <button class=\"ds-pill-drop\" aria-pressed=\"false\">DROP</button>",
+      "css": ".ds-pill-keep,.ds-pill-drop{font:700 9px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.08em;border-radius:4px;padding:4px 8px;cursor:pointer}.ds-pill-keep{color:#7fc9a8;background:rgba(127,201,168,.1);border:1px solid rgba(127,201,168,.35)}.ds-pill-drop{color:#8a94a6;background:none;border:1px solid #2c3648}.ds-pill-keep:focus-visible,.ds-pill-drop:focus-visible{outline:2px solid #8fb8d8;outline-offset:2px}"
+    },
+    {
+      "name": "Spec Chip",
+      "kind": "chip",
+      "refersTo": "chip-drop",
+      "description": "Read-only file facts; amber when a value exceeds its bar.",
+      "html": "<span class=\"ds-chip\">3840×2160</span> <span class=\"ds-chip ds-chip-hot\">52 Mbps</span>",
+      "css": ".ds-chip{display:inline-block;font:10px ui-monospace,'SF Mono',Menlo,monospace;border:1px solid #232a38;border-radius:4px;padding:3px 7px;color:#8a94a6}.ds-chip-hot{border-color:rgba(232,194,104,.4);color:#e8c268}"
+    },
+    {
+      "name": "Poster Card",
+      "kind": "card",
+      "refersTo": "card-poster",
+      "description": "Library grid unit. Border carries the advice state; 2/3 poster ratio prevents load-time shift.",
+      "html": "<div class=\"ds-card\" role=\"button\" tabindex=\"0\" aria-label=\"Oppenheimer, 4K, 89.5 G, shrink advised\"><div class=\"ds-poster\"></div><div class=\"ds-foot\"><div class=\"ds-title\">Oppenheimer</div><div class=\"ds-row\"><span>4K HDR10</span><span class=\"ds-size\">89.5 G</span></div></div><span class=\"ds-badge\">SHRINK</span></div>",
+      "css": ".ds-card{position:relative;width:190px;border-radius:10px;overflow:hidden;border:1px solid rgba(232,194,104,.4);background:#12161f;cursor:pointer;transition:border-color .12s ease-out}.ds-card:hover{border-color:#e8c268}.ds-card:focus-visible{outline:2px solid #8fb8d8;outline-offset:2px}.ds-poster{aspect-ratio:2/3;background:linear-gradient(160deg,hsl(215 28% 22%),hsl(215 35% 9%))}.ds-foot{padding:8px 10px 9px;background:linear-gradient(180deg,#12161f,#0e1219)}.ds-title{font:600 12px -apple-system,system-ui,sans-serif;color:#dfe5ee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ds-row{display:flex;justify-content:space-between;margin-top:3px;font:11px ui-monospace,'SF Mono',Menlo,monospace;color:#7a8497}.ds-size{color:#e8c268}.ds-badge{position:absolute;top:8px;left:8px;font:700 10px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.08em;background:rgba(10,11,15,.9);color:#e8c268;border-radius:4px;padding:3px 7px;box-shadow:0 0 12px rgba(232,194,104,.45),inset 0 0 0 1px rgba(232,194,104,.6)}"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Header search; focus shifts the border to accent.",
+      "html": "<label class=\"ds-sr\" for=\"ds-q\">Search library</label><div class=\"ds-search\"><span aria-hidden=\"true\">⌕</span><input id=\"ds-q\" type=\"search\" placeholder=\"Search library\"></div>",
+      "css": ".ds-search{display:inline-flex;align-items:center;gap:8px;background:#12161f;border:1px solid #232a38;border-radius:8px;padding:0 14px;width:320px}.ds-search span{color:#7a8497}.ds-search input{flex:1;background:none;border:none;outline:none;padding:8px 0;color:#dfe5ee;font:13px -apple-system,system-ui,sans-serif}.ds-search input::placeholder{color:#7a8497}.ds-search:focus-within{border-color:#8fb8d8}.ds-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}"
+    },
+    {
+      "name": "Filter Tab",
+      "kind": "nav",
+      "refersTo": "button-ghost",
+      "description": "Library filters with live counts; active tab uses the amber tint.",
+      "html": "<button class=\"ds-tab ds-tab-on\" aria-pressed=\"true\">NEEDS DECISION 67</button> <button class=\"ds-tab\" aria-pressed=\"false\">IN FLIGHT 0</button>",
+      "css": ".ds-tab{font:11px ui-monospace,'SF Mono',Menlo,monospace;padding:6px 13px;border-radius:6px;border:1px solid #232a38;color:#8a94a6;background:none;cursor:pointer;white-space:nowrap;transition:background .12s ease-out}.ds-tab:hover{background:rgba(255,255,255,.04)}.ds-tab-on{background:rgba(232,194,104,.13);border-color:rgba(232,194,104,.4);color:#e8c268}.ds-tab:focus-visible{outline:2px solid #8fb8d8;outline-offset:2px}"
+    },
+    {
+      "name": "Step Card",
+      "kind": "custom",
+      "refersTo": "card-poster",
+      "description": "Wizard stage. Active carries an accent border and faint aura; done collapses behind a jade tick.",
+      "html": "<div class=\"ds-step\"><div class=\"ds-step-head\"><span class=\"ds-disc\" aria-hidden=\"true\">3</span><span class=\"ds-st\">Process</span><span class=\"ds-ssum\">pick a route, then commit</span></div></div>",
+      "css": ".ds-step{border:1px solid rgba(143,184,216,.35);border-radius:10px;background:#0e1218;box-shadow:0 0 20px rgba(143,184,216,.08);width:520px}.ds-step-head{display:flex;align-items:center;gap:12px;padding:10px 14px}.ds-disc{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:700 12px -apple-system,system-ui,sans-serif;background:#8fb8d8;color:#0b0d12;box-shadow:0 0 8px rgba(143,184,216,.5)}.ds-st{font:600 13px -apple-system,system-ui,sans-serif;color:#dfe5ee}.ds-ssum{font:12px -apple-system,system-ui,sans-serif;color:#7a8497}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Broadcast Control Room",
+    "overview": "This is an instrument panel, not a media browser. The operator is watching machine work that runs for hours and committing to decisions that cannot be taken back, so the interface behaves like broadcast equipment: a dark chassis that never competes with the content, numeric readouts in monospace, semantic colors that mean one thing each, and light that appears only where something is genuinely live.\n\nThe density is deliberate and high. Posters carry the recognition load; every other surface is compressed data. Text is small because the operator is scanning many items to find the few that need action. Where the design does spend space, it spends it on the two moments that deserve deliberation: choosing an encode quality, and destroying an original.\n\nThe palette is called Ice mono and was owner-selected. It is cool, desaturated, and almost monochrome until a status needs to speak.",
+    "keyCharacteristics": [
+      "Near-monochrome cool dark, with color reserved for status meaning",
+      "Monospace for every number, label, and machine string",
+      "Glow strictly as a liveness signal, behind one toggle class",
+      "High information density; small type; tight rows",
+      "Flat, tonal depth — layered surfaces rather than drop shadows",
+      "Progressive disclosure through numbered, collapsing step cards"
+    ],
+    "rules": [
+      {
+        "name": "The One Meaning Rule",
+        "body": "Each accent maps to exactly one state: blue = live, amber = undecided, jade = resolved, orchid = duplicate, red = failed or destructive. A color never borrows another's job for visual variety.",
+        "section": "colors"
+      },
+      {
+        "name": "The 4.5 Floor",
+        "body": "Every text token clears 4.5:1 on every surface it can land on. text-faint sits at 4.80:1 and is the darkest text permitted; anything dimmer is a border or a fill, never type.",
+        "section": "colors"
+      },
+      {
+        "name": "The Poster Supremacy Rule",
+        "body": "Artwork is the only saturated thing on screen. Chrome stays desaturated so 300 posters can be scanned without fatigue.",
+        "section": "colors"
+      },
+      {
+        "name": "The Machine Voice Rule",
+        "body": "If a value came from a file, a probe, an encoder, or a clock, it is monospace. If a person wrote it, it is the system sans. Monospace is a signal of provenance, never a costume.",
+        "section": "typography"
+      },
+      {
+        "name": "The Steady Column Rule",
+        "body": "Live-updating numbers are monospace and fixed-width so a changing value never shifts the layout around it.",
+        "section": "typography"
+      },
+      {
+        "name": "The Reachable Action Rule",
+        "body": "A list never grows so long that the controls belonging to its container leave the screen. Cap it and offer an expander.",
+        "section": "layout"
+      },
+      {
+        "name": "The Glow Means Live Rule",
+        "body": "A colored glow marks something happening now or the single action being urged. Never applied for emphasis or polish. Every glow lives behind the body.glow class.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Flat Chassis Rule",
+        "body": "Surfaces at rest have no shadow. If something needs to feel raised, move it one step up the surface ramp and give it a border.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Dim-Don't-Move Rule",
+        "body": "Deselected, dropped, and excluded items lose opacity, never size or position.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do keep the entire interface in one self-contained static/index.html with inline CSS and vanilla JS — no framework, no build step, no external fonts or CDNs.",
+      "Do put every machine-produced value in monospace and every human-written string in the system sans.",
+      "Do reserve glow for what is live, and keep it behind body.glow.",
+      "Do define colors as tokens in :root. There are currently zero raw hex or hsl() literals outside that block.",
+      "Do give every interactive element a visible :focus-visible ring, an accessible name, and a keyboard path.",
+      "Do state the consequence and the size before any irreversible action.",
+      "Do cap long lists and provide an expander.",
+      "Do honor prefers-reduced-motion."
+    ],
+    "donts": [
+      "Don't use alert() or confirm(). Errors are toasts in a live region; confirmations are the in-page modal with dialog semantics, a focus trap, Escape, and focus restore.",
+      "Don't add a shadow to a resting surface. Move it up the surface ramp instead.",
+      "Don't let a color take on a second meaning. Amber is undecided, not warning-ish.",
+      "Don't use text-faint or dimmer for anything below 4.5:1 on the surface it lands on.",
+      "Don't animate layout properties. Transitions are limited to background and border-color at ~120ms ease-out.",
+      "Don't introduce a light theme, an icon font, gradient text, or a decorative glass/blur effect.",
+      "Don't render an unbounded list of episodes, tracks, or conflicts."
+    ]
+  }
+}

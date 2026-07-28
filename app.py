@@ -259,7 +259,12 @@ def _owner_info(conn, kind, owner_id):
     d["_raw_folder"] = d["folder"]  # season subdir (or '') relative to the show folder
     d["folder"] = os.path.join(show["folder"], d["folder"]) if d["folder"] else show["folder"]
     d["title_display"] = f"{show_title} - S{(d['season'] or 0):02d}E{(d['episode'] or 0):02d}"
-    d["out_base"] = _safe_name(d["title_display"])
+    # The filename stem must match what rename_show writes, year included --
+    # finalizing an episode used to drop the year and leave it named
+    # differently from every sibling that had only been renamed.
+    show_year = show["year"] if show else None
+    named = f"{show_title} ({show_year})" if show_year else show_title
+    d["out_base"] = _safe_name(f"{named} - S{(d['season'] or 0):02d}E{(d['episode'] or 0):02d}")
     return d
 
 

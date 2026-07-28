@@ -560,7 +560,10 @@ function paintDash() {
         <span class="mono" style="font-weight:600;font-size:13px;color:var(--acc);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(nm)} · ${(running.progress || 0).toFixed(0)}%</span>
         ${running.eta ? `<span class="mono" style="font-size:11px;color:var(--faint)">ETA ${esc(running.eta.toUpperCase())}</span>` : ''}</div>
       <div class="jobbar" role="progressbar" aria-valuenow="${Math.round(running.progress || 0)}" aria-valuemin="0" aria-valuemax="100" aria-label="Encode progress"><div class="g-acc" style="width:${running.progress || 0}%"></div></div>
-      ${queued ? `<div class="sub mono" style="font-size:10px;margin-top:4px">+${queued} QUEUED</div>` : ''}`;
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+        ${queued ? `<span class="sub mono" style="font-size:10px">+${queued} QUEUED</span>` : ''}
+        <button class="btn danger" style="padding:2px 8px;font-size:10px" onclick="cancelJob(${running.id})">Cancel</button>
+      </div>`;
   } else {
     jobCell = `<div class="val" style="color:var(--faint)">idle</div>`;
   }
@@ -688,6 +691,10 @@ async function pollJobs() {
   JOBS = await api('/api/jobs').catch(() => JOBS);
   if (!CURID) paintDash();
   else paintDetailJob();
+  // the show page's batch panel is plain markup inside renderShow -- repaint it
+  // here so a 105-job queue doesn't sit at a frozen percentage
+  const sp = document.getElementById('showJobPanel');
+  if (sp && SHOWDATA) sp.innerHTML = showJobsHtml(SHOWDATA);
   const busy = SCAN.running || JOBS.some(j => j.status === 'running' || j.status === 'queued');
   clearTimeout(POLLTIMER);
   POLLTIMER = setTimeout(pollJobs, busy ? 3000 : 15000);
@@ -1115,9 +1122,9 @@ async function renderShow(id) {
           <input id="showTmdbQ" aria-label="Search TMDB for this show" placeholder="Search TMDB…" style="width:240px" value="${esc(s.clean_title || '')}">
           <button class="btn" onclick="tmdbSearchShow(${id})">Search</button>
         </div><div id="showTmdbResults"></div>`)}
-      ${stepCard(2, 'active', 'Episodes', `${data.episodes.length} episode(s)`, null, episodesHtml(data))}
-      ${s.tmdb_id ? stepCard(3, cfgState(cfg), 'Show configuration', cfgSummary(cfg),
+      ${s.tmdb_id ? stepCard(2, cfgState(cfg), 'Show configuration', cfgSummary(cfg),
         cfgState(cfg) === 'done' ? '▾ reopen' : null, showConfigHtml(id, cfg)) : ''}
+      ${stepCard(3, 'active', 'Episodes & processing', `${data.episodes.length} episode(s)`, null, episodesHtml(data))}
       ${s.tmdb_id ? stepCard(4, 'active', 'Rename & organize', seasons ? seasonSummary(seasons) : '', null, seasonHtml(id, s, seasons)) : ''}
     </div></div>`;
   wireStepToggles();
@@ -1235,6 +1242,43 @@ function commonPrefix(list) {
 }
 let EPSHOWALL = false, CONFSHOWALL = false;
 const EP_PAGE = 24, CONF_PAGE = 10;
+// A 105-episode batch is one decision, so it needs one place to watch it and one
+// place to stop it -- the dashboard strip only ever shows the single running job.
+function showJobsHtml(data) {
+  const ids = new Set(data.episodes.map(e => e.id));
+  const mine = JOBS.filter(j => ids.has(j.episode_id) && (j.status === 'running' || j.status === 'queued'));
+  const run = mine.find(j => j.status === 'running');
+  const queued = mine.filter(j => j.status === 'queued').length;
+  if (!mine.length) return '';
+  const ep = run && data.episodes.find(e => e.id === run.episode_id);
+  const label = ep ? `S${String(ep.season||0).padStart(2,'0')}E${String(ep.episode||0).padStart(2,'0')}` : '';
+  return `<div class="trow stacked" style="border-color:var(--accBd)">
+    <div class="cinfo grow">
+      <div class="cc">${run ? `${esc(run.kind.toUpperCase())} ${esc(label)} · ${(run.progress||0).toFixed(0)}%${run.eta ? ' · ETA ' + esc(run.eta) : ''}` : 'waiting for the runner'}</div>
+      <div class="jobbar" role="progressbar" aria-valuenow="${Math.round(run ? run.progress||0 : 0)}" aria-valuemin="0" aria-valuemax="100" aria-label="Batch job progress"><div class="g-acc" style="width:${run ? run.progress||0 : 0}%"></div></div>
+      <div class="cm">${queued} queued after this one</div>
+    </div>
+    <div class="btnrow" style="margin:0">
+      ${run ? `<button class="btn danger" onclick="cancelJob(${run.id})">Cancel this</button>` : ''}
+      <button class="btn danger" onclick="cancelShowJobs(${data.show.id})">Cancel all ${mine.length}</button>
+    </div></div>`;
+}
+async function cancelJob(jobId) {
+  const ok = await modal({ title: 'Cancel this job', danger: true, mode: 'plain', confirmLabel: 'Cancel job',
+    html: 'Stops the running job and deletes its partial output. The episode goes back to ready — the next queued job starts immediately.' });
+  if (!ok) return;
+  await api(`/api/jobs/${jobId}`, { method: 'DELETE' }).catch(oops);
+  await pollJobs();
+  if (location.hash.startsWith('#/show/') && SHOWDATA) renderShow(SHOWDATA.show.id);
+}
+async function cancelShowJobs(showId) {
+  const ok = await modal({ title: 'Cancel the whole batch', danger: true, mode: 'plain', confirmLabel: 'Cancel all',
+    html: 'Drops every queued job for this show and stops the one running. Episodes already finished keep their output.' });
+  if (!ok) return;
+  const r = await api(`/api/shows/${showId}/jobs/cancel`, { method: 'POST' }).catch(oops);
+  if (r) toast(`${r.cancelled} job(s) cancelled.`);
+  renderShow(showId);
+}
 function episodesHtml(data) {
   const all = data.episodes;
   const prefix = commonPrefix(all.map(e => e.file || ''));
@@ -1259,7 +1303,8 @@ function episodesHtml(data) {
       <button class="btn" onclick="EPSHOWALL=!EPSHOWALL;renderShow(${data.show.id})">${EPSHOWALL ? `Collapse to first ${EP_PAGE}` : `Show all ${all.length} episodes`}</button>
       <span style="align-self:center;font:11px var(--mono);color:var(--faint)">${EPSHOWALL ? all.length : EP_PAGE} of ${all.length} shown</span>
     </div>` : '';
-  return `${rows || '<div style="color:var(--faint);font-size:12px">no episodes found</div>'}
+  return `<div id="showJobPanel">${showJobsHtml(data)}</div>
+    ${rows || '<div style="color:var(--faint);font-size:12px">no episodes found</div>'}
     ${more}
     <div class="btnrow">
       <button class="btn" onclick="suggestShow(${data.show.id})">Suggest all (non-excluded)</button>

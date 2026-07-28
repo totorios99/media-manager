@@ -1073,8 +1073,13 @@ def launch_show_jobs(show_id: int, body: dict):
     conn = get_db()
     try:
         _show_or_404(conn, show_id)
+        # 'clean' is deliberately NOT included. A batch launch is "do the rest of
+        # the show", and re-running it over finished episodes re-does verified
+        # work -- worse, _enqueue overwrites their output_file, so a later cancel
+        # strands the output they already produced. Redoing one is a per-episode
+        # decision, made on that episode's own page.
         eps = conn.execute(
-            "SELECT id, size_bytes FROM episodes WHERE show_id=? AND excluded=0 AND status IN ('ready','clean')",
+            "SELECT id, size_bytes FROM episodes WHERE show_id=? AND excluded=0 AND status='ready'",
             (show_id,),
         ).fetchall()
         if not eps:
@@ -1461,6 +1466,68 @@ def _poll_and_finalize(conn, job_id):
     return job
 
 
+def _cancel_job(conn, job):
+    """A queued job is simply forgotten; a running one is killed and its partial
+    output deleted. The owner returns to 'ready', NOT 'error' -- cancelling is a
+    decision, and an errored episode is excluded from the next batch launch."""
+    job = dict(job)
+    if job["status"] not in ("running", "queued"):
+        return False
+    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    if job["status"] == "running":
+        jobs.kill_job(job)
+        conn.execute("UPDATE jobs SET status='cancelled', exit_code=-2, finished_at=? WHERE id=?",
+                     (now, job["id"]))
+    else:
+        conn.execute("DELETE FROM jobs WHERE id=?", (job["id"],))
+    if job["kind"] != "sample":
+        kind, oid = _job_owner_kind_id(job)
+        owner = _owner_info(conn, kind, oid)
+        if owner and job["status"] == "running" and owner["output_file"]:
+            try:
+                os.remove(owner["output_file"])
+            except OSError:
+                pass
+        # never knock a finished episode off 'clean' because a later job was cancelled
+        if owner and owner["status"] != "clean":
+            _set_owner_status(conn, kind, oid, "ready", output_file="")
+    conn.commit()
+    return True
+
+
+@app.delete("/api/jobs/{job_id}")
+def cancel_job(job_id: int):
+    conn = get_db()
+    try:
+        job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if not job:
+            raise HTTPException(404, "not found")
+        if not _cancel_job(conn, job):
+            raise HTTPException(409, f"job is {job['status']}, nothing to cancel")
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+@app.post("/api/shows/{show_id}/jobs/cancel")
+def cancel_show_jobs(show_id: int):
+    """Cancels this show's whole in-flight batch: the running job plus the queue
+    behind it. Cancel the running one LAST -- the ticker starts the next queued
+    job the moment the runner frees up, so draining the queue first stops it."""
+    conn = get_db()
+    try:
+        _show_or_404(conn, show_id)
+        rows = conn.execute(
+            "SELECT j.* FROM jobs j JOIN episodes e ON e.id = j.episode_id "
+            "WHERE e.show_id=? AND j.status IN ('running','queued') "
+            "ORDER BY CASE j.status WHEN 'queued' THEN 0 ELSE 1 END, j.id", (show_id,)
+        ).fetchall()
+        n = sum(1 for r in rows if _cancel_job(conn, r))
+        return {"cancelled": n}
+    finally:
+        conn.close()
+
+
 def _job_eta(j):
     """Last ETA HandBrake printed, parsed from the log tail (running jobs only)."""
     if j.get("status") == "running" and j.get("log_path"):
@@ -1558,7 +1625,8 @@ def get_stats():
 def _verify_and_finalize(conn, kind, owner_id, job):
     owner = _owner_info(conn, kind, owner_id)
     kept = _kept_tracks(conn, kind, owner_id)
-    ok, msg = jobs.verify_output(owner["output_file"], kept, owner["duration"])
+    src = os.path.join(_root_for(kind), owner["folder"], owner["file"]) if owner["file"] else None
+    ok, msg = jobs.verify_output(owner["output_file"], kept, owner["duration"], source_path=src)
     if ok:
         conn.execute("UPDATE jobs SET status='verified' WHERE id=?", (job["id"],))
         _set_owner_status(conn, kind, owner_id, "clean")

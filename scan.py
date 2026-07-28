@@ -693,9 +693,25 @@ def inspect_file(path):
     except (TypeError, ValueError):
         pass
 
+    # mkv rarely puts a duration on the stream itself; it lives in a DURATION tag
+    video_duration = None
+    for src in (vstream.get("duration"), (vstream.get("tags") or {}).get("DURATION")):
+        if not src:
+            continue
+        try:
+            if ":" in str(src):
+                h, m, s = str(src).split(":")
+                video_duration = int(h) * 3600 + int(m) * 60 + float(s)
+            else:
+                video_duration = float(src)
+            break
+        except (TypeError, ValueError):
+            pass
+
     return {
         "container_title": props.get("title"),
         "duration": duration,
+        "video_duration": video_duration,
         "video_codec": vstream.get("codec_name"),
         "width": vstream.get("width"),
         "height": vstream.get("height"),

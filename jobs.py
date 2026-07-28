@@ -120,6 +120,17 @@ def set_cpu_quota(job_id, quota):
                         f"CPUQuota={quota}", f"CPUWeight={CPU_WEIGHT}"], capture_output=True)
 
 
+def kill_job(job):
+    """Kill the tmux session AND the systemd scope. Killing only the session
+    leaves mkvmerge/HandBrake reparented to the scope, still burning CPU and
+    still writing the output file we are about to delete."""
+    if job.get("tmux_session"):
+        subprocess.run(["tmux", "kill-session", "-t", job["tmux_session"]], capture_output=True)
+    if not NO_SYSTEMD:
+        for unit in [f"mm-job-{job['id']}.scope", *_handbrake_scopes()]:
+            subprocess.run(["systemctl", "--user", "stop", unit], capture_output=True)
+
+
 def tail(path, n=4096):
     try:
         with open(path, "rb") as f:
@@ -174,9 +185,12 @@ def poll_job(conn, job_id):
     return conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
 
 
-def verify_output(out_path, kept_tracks, source_duration=None):
+def verify_output(out_path, kept_tracks, source_duration=None, source_path=None):
     """kept_tracks: rows (dicts) from `tracks` table with keep=1, already the config
-    we asked for. Compares output-order sequence of type/lang/default/forced."""
+    we asked for. Compares output-order sequence of type/lang/default/forced.
+
+    source_path, when given, is preferred over source_duration for the length
+    check -- see the duration block below for why the stored number lies."""
     if not os.path.exists(out_path):
         return False, "output file missing"
     info = inspect_file(out_path)
@@ -195,9 +209,19 @@ def verify_output(out_path, kept_tracks, source_duration=None):
             return False, f"default flag mismatch on {e['type']}"
         if e["type"] == "subtitle" and bool(e["out_forced"]) != bool(g["forced_flag"]):
             return False, "forced flag mismatch"
-    if source_duration and info["duration"]:
-        if abs(info["duration"] - source_duration) > 2:
-            return False, f"duration mismatch: {info['duration']:.1f}s vs {source_duration:.1f}s"
+    # Container duration is the LONGEST track, so dropping tracks shortens it
+    # legitimately: these Castellano dubs run ~14s past the video, and every
+    # remux that stripped one got failed as "truncated". Compare video duration
+    # instead -- the only length a broken output would actually lose.
+    ref, got_dur = source_duration, info["duration"]
+    if source_path and os.path.exists(source_path):
+        src = inspect_file(source_path)
+        if src.get("video_duration") and info.get("video_duration"):
+            ref, got_dur = src["video_duration"], info["video_duration"]
+        elif src.get("duration"):
+            ref = src["duration"]
+    if ref and got_dur and abs(got_dur - ref) > 2:
+        return False, f"duration mismatch: {got_dur:.1f}s vs {ref:.1f}s"
     return True, "ok"
 
 

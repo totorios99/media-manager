@@ -945,6 +945,13 @@ async function renderShow(id) {
   const s = data.show;
   const title = s.title || s.clean_title || s.folder;
   const poster = posterUrl(s.poster_path);
+  let cfg = null, seasons = null;
+  if (s.tmdb_id) {
+    [cfg, seasons] = await Promise.all([
+      api(`/api/shows/${id}/config`).catch(() => null),
+      api(`/api/shows/${id}/seasons`).catch(() => null),
+    ]);
+  }
   page.innerHTML = `<div class="dwrap">
     <div class="dtop"><span class="back" onclick="location.hash=''">← Library</span></div>
     <div class="ident">
@@ -963,7 +970,67 @@ async function renderShow(id) {
           <button class="btn" onclick="tmdbSearchShow(${id})">Search</button>
         </div><div id="showTmdbResults"></div>`)}
       ${stepCard(2, 'active', 'Episodes', `${data.episodes.length} episode(s)`, null, episodesHtml(data))}
+      ${s.tmdb_id ? stepCard(3, cfg && Object.keys(cfg.config || {}).length ? 'done' : 'active', 'Show configuration',
+        cfg && Object.keys(cfg.config || {}).length
+          ? `${cfg.applicable} applicable · ${cfg.conflicts.length} conflict(s)` : 'pick one episode\'s config for the whole show',
+        null, showConfigHtml(id, cfg)) : ''}
+      ${s.tmdb_id ? stepCard(4, 'active', 'Rename & organize', seasons ? seasonSummary(seasons) : '', null, seasonHtml(id, s, seasons)) : ''}
     </div></div>`;
+}
+function seasonSummary(seasons) {
+  const missing = seasons.seasons.reduce((n, sn) => n + sn.missing.length, 0);
+  return missing || seasons.out_of_range.length ? `${missing} missing · ${seasons.out_of_range.length} out-of-range` : 'all episodes present';
+}
+function showConfigHtml(showId, cfg) {
+  if (!cfg) return '<div style="color:var(--faint);font-size:12px">TMDB match required</div>';
+  const conflicts = cfg.conflicts.map(c => `
+    <div class="trow">
+      <div class="cinfo" style="width:110px"><div class="cc">S${String(c.season||0).padStart(2,'0')}E${String(c.episode||0).padStart(2,'0')}</div></div>
+      <div class="cinfo"><div class="cc">${c.missing.length ? 'missing: ' + c.missing.map(esc).join(', ') : ''}</div>
+        <div class="cm">${c.extra.length ? 'extra: ' + c.extra.map(esc).join(', ') : ''}${c.ambiguous.length ? ' ambiguous: ' + c.ambiguous.map(esc).join(', ') : ''}</div></div>
+      <span class="linky" onclick="location.hash='#/episode/${c.episode_id}'">configure ›</span>
+    </div>`).join('');
+  return `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:12px;color:var(--faint)">Use episode:</span>
+      <input id="cfgSourceEp" type="number" placeholder="episode #" style="width:100px">
+      <button class="btn" onclick="useEpisodeAsShowConfig(${showId})">as config for all</button>
+      <button class="btn primary g-acc-lg" onclick="applyShowConfig(${showId})" ${Object.keys(cfg.config||{}).length ? '' : 'disabled'}>Apply to all (${cfg.applicable})</button>
+    </div>
+    ${conflicts ? `<div class="lbl" style="margin-top:12px">CONFLICTS — handle individually</div>${conflicts}` : ''}`;
+}
+async function useEpisodeAsShowConfig(showId) {
+  const n = parseInt(document.getElementById('cfgSourceEp').value, 10);
+  const ep = SHOWDATA.episodes.find(e => e.episode === n);
+  if (!ep) return oops({message: 'no episode with that number'});
+  await api(`/api/shows/${showId}/config/from-episode`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ episode_id: ep.id }) }).catch(oops);
+  renderShow(showId);
+}
+async function applyShowConfig(showId) {
+  const r = await api(`/api/shows/${showId}/config/apply`, { method: 'POST' }).catch(oops);
+  if (r) alert(`Applied to ${r.applied} episode(s). ${r.conflicts.length} conflict(s) left for individual handling.`);
+  renderShow(showId);
+}
+function seasonHtml(showId, s, seasons) {
+  if (!seasons) return '<div style="color:var(--faint);font-size:12px">TMDB match required</div>';
+  const rows = seasons.seasons.map(sn => `
+    <div class="trow"><div class="cinfo" style="width:110px"><div class="cc">Season ${String(sn.season).padStart(2,'0')}</div></div>
+    <div class="cinfo"><div class="cc">${sn.present}/${sn.expected} present</div>
+      <div class="cm">${sn.missing.length ? 'missing: ' + sn.missing.join(', ') : ''}</div></div></div>`).join('');
+  const blocked = seasons.out_of_range.length > 0;
+  return `${rows}
+    ${blocked ? `<div style="color:var(--err);font-size:12px;margin-top:8px">out of TMDB's range, resolve before renaming: ${seasons.out_of_range.map(o => `S${String(o.season).padStart(2,'0')}E${String(o.episode).padStart(2,'0')}`).join(', ')}</div>` : ''}
+    <div class="btnrow"><button class="btn primary g-acc-lg" onclick="renameShow(${showId}, '${esc(s.title)}')" ${blocked ? 'disabled' : ''}>Rename for Jellyfin</button></div>`;
+}
+async function renameShow(showId, title) {
+  const ok = await modal({
+    title: 'Rename & organize', mode: 'typed', expect: title, confirmLabel: 'Rename',
+    html: `Moves every episode into "Season NN/" and renames to "${esc(title)} (Year) - SxxEyy". Type the show title to confirm:`,
+  });
+  if (!ok) return;
+  await api(`/api/shows/${showId}/rename`, { method: 'POST' }).catch(e => { oops(e); throw e; });
+  renderShow(showId);
 }
 function episodesHtml(data) {
   const rows = data.episodes.map(e => {

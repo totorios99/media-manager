@@ -229,6 +229,13 @@ def _sub_class(t):
     return "other"
 
 
+def track_sig(t):
+    """Stable identity for a track across sibling episodes: type + language +
+    codec + the release's own track name. mkv_id/order is NOT part of it --
+    sibling episodes routinely carry the same tracks in a different order."""
+    return "|".join([t["type"], t["lang"] or "", t["codec"] or "", (t["name"] or "").strip()])
+
+
 def suggest_tracks(conn, owner_id, table="movies", multi_audio=False):
     """One audio track per language (orig lang first + default), best codec that
     isn't TrueHD/Atmos; TrueHD/Atmos kept after the compatible picks, never default.
@@ -496,6 +503,10 @@ def tmdb_get_tv(tmdb_id, api_key):
         "tmdb_id": d["id"], "title": d.get("name"),
         "year": int(d["first_air_date"][:4]) if d.get("first_air_date") else None,
         "original_language": d.get("original_language"), "poster_path": d.get("poster_path"),
+        "seasons": [
+            {"season_number": sn["season_number"], "episode_count": sn["episode_count"]}
+            for sn in d.get("seasons") or [] if sn["season_number"] != 0 or sn["episode_count"]
+        ],
     }
 
 

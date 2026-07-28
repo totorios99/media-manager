@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import shlex
@@ -80,6 +81,7 @@ CREATE TABLE IF NOT EXISTS shows (
     clean_title TEXT, guess_year INTEGER,
     tmdb_id INTEGER, title TEXT, year INTEGER,
     original_language TEXT, poster_path TEXT,
+    track_config TEXT,
     updated_at TEXT
 );
 CREATE TABLE IF NOT EXISTS episodes (
@@ -143,6 +145,12 @@ def _migrate(conn):
     SQLite can't alter away, so the table must be recreated. Gated on
     PRAGMA user_version (not a column sniff) so a crash mid-migration can't be
     mistaken for "done" on the next startup."""
+    shows_exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='shows'").fetchone()
+    if shows_exists:
+        show_cols = {r["name"] for r in conn.execute("PRAGMA table_info(shows)")}
+        if "track_config" not in show_cols:
+            conn.execute("ALTER TABLE shows ADD COLUMN track_config TEXT")
+            conn.commit()
     if conn.execute("PRAGMA user_version").fetchone()[0] >= 1:
         return
     jobs_exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='jobs'").fetchone()
@@ -895,6 +903,159 @@ def suggest_show(show_id: int):
         conn.close()
 
 
+def _episode_track_sig_map(conn, episode_id):
+    """{sig: track_row} for one episode. Raises via caller if a sig repeats --
+    ambiguous tracks can't be matched by identity."""
+    # video is always kept (see tracksHtml in the UI) and its "name" is really
+    # the episode's own title burned into the container -- unique per episode,
+    # never a useful identity for a show-wide config. Audio/subtitles only.
+    rows = [dict(r) for r in conn.execute(
+        "SELECT * FROM tracks WHERE episode_id=? AND type != 'video'", (episode_id,)
+    )]
+    sigs = {}
+    ambiguous = set()
+    for r in rows:
+        sig = scan.track_sig(r)
+        if sig in sigs:
+            ambiguous.add(sig)
+        sigs[sig] = r
+    return sigs, ambiguous
+
+
+def _show_config_conflicts(conn, show_id, config):
+    """Dry-run diff of the stored config against every non-excluded episode.
+    Returns (clean: [{episode_id, track_updates}], conflicts: [{...}])."""
+    clean, conflicts = [], []
+    eps = conn.execute(
+        "SELECT id, season, episode FROM episodes WHERE show_id=? AND excluded=0 ORDER BY season, episode",
+        (show_id,),
+    ).fetchall()
+    for e in eps:
+        sigs, ambiguous = _episode_track_sig_map(conn, e["id"])
+        missing = [sig for sig, settings in config.items() if settings.get("keep") and sig not in sigs]
+        extra = [sig for sig in sigs if sig not in config]
+        if missing or extra or ambiguous:
+            conflicts.append({
+                "episode_id": e["id"], "season": e["season"], "episode": e["episode"],
+                "missing": missing, "extra": extra, "ambiguous": sorted(ambiguous),
+            })
+        else:
+            updates = [
+                {"id": sigs[sig]["id"], "keep": settings["keep"], "out_order": settings["out_order"],
+                 "out_lang": settings["out_lang"], "out_default": settings["out_default"],
+                 "out_forced": settings["out_forced"], "out_name": settings.get("out_name", "")}
+                for sig, settings in config.items() if sig in sigs
+            ]
+            clean.append({"episode_id": e["id"], "track_updates": updates})
+    return clean, conflicts
+
+
+@app.get("/api/shows/{show_id}/config")
+def get_show_config(show_id: int):
+    conn = get_db()
+    try:
+        s = _show_or_404(conn, show_id)
+        config = json.loads(s["track_config"]) if s["track_config"] else {}
+        clean, conflicts = _show_config_conflicts(conn, show_id, config)
+        return {"config": config, "applicable": len(clean), "conflicts": conflicts}
+    finally:
+        conn.close()
+
+
+@app.post("/api/shows/{show_id}/config/from-episode")
+def set_show_config_from_episode(show_id: int, body: dict):
+    """Selects one already-configured episode as the show's canonical
+    configuration, keyed by track identity (scan.track_sig) not track id/order."""
+    episode_id = body.get("episode_id")
+    if not episode_id:
+        raise HTTPException(400, "episode_id required")
+    conn = get_db()
+    try:
+        _show_or_404(conn, show_id)
+        ep = conn.execute("SELECT id FROM episodes WHERE id=? AND show_id=?", (episode_id, show_id)).fetchone()
+        if not ep:
+            raise HTTPException(404, "episode not found on this show")
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM tracks WHERE episode_id=? AND type != 'video'", (episode_id,)
+        )]
+        config = {
+            scan.track_sig(r): {
+                "keep": r["keep"], "out_order": r["out_order"], "out_lang": r["out_lang"],
+                "out_default": r["out_default"], "out_forced": r["out_forced"], "out_name": r["out_name"],
+            }
+            for r in rows
+        }
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        conn.execute("UPDATE shows SET track_config=?, updated_at=? WHERE id=?",
+                     (json.dumps(config), now, show_id))
+        conn.commit()
+        return {"ok": True, "config": config}
+    finally:
+        conn.close()
+
+
+@app.post("/api/shows/{show_id}/config/apply")
+def apply_show_config(show_id: int):
+    """Applies the stored show config to every non-excluded episode whose
+    tracks match it exactly. Episodes with a missing/extra/ambiguous track are
+    left untouched (not set to 'ready') and reported back for individual
+    handling on their own episode page -- never a partial apply."""
+    conn = get_db()
+    try:
+        s = _show_or_404(conn, show_id)
+        config = json.loads(s["track_config"]) if s["track_config"] else {}
+        if not config:
+            raise HTTPException(400, "no show config set -- POST .../config/from-episode first")
+        clean, conflicts = _show_config_conflicts(conn, show_id, config)
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        for item in clean:
+            _apply_track_settings(conn, item["episode_id"], item["track_updates"])
+            conn.execute(
+                "UPDATE episodes SET status='ready', updated_at=? WHERE id=? AND status NOT IN ('working','clean')",
+                (now, item["episode_id"]),
+            )
+        conn.commit()
+        return {"applied": len(clean), "conflicts": conflicts}
+    finally:
+        conn.close()
+
+
+@app.get("/api/shows/{show_id}/seasons")
+def show_seasons(show_id: int):
+    """TMDB's expected season/episode counts vs. what's actually on disk --
+    missing episodes and any file numbered outside TMDB's known range."""
+    conn = get_db()
+    try:
+        s = _show_or_404(conn, show_id)
+        if not s["tmdb_id"]:
+            raise HTTPException(400, "show not TMDB-matched yet")
+        info = scan.tmdb_get_tv(s["tmdb_id"], TMDB_API_KEY)
+        if not info:
+            raise HTTPException(502, "TMDB lookup failed")
+        tmdb_seasons = {sn["season_number"]: sn["episode_count"] for sn in info.get("seasons", [])}
+        rows = conn.execute(
+            "SELECT season, episode FROM episodes WHERE show_id=? AND file IS NOT NULL", (show_id,)
+        ).fetchall()
+        present = {}
+        out_of_range = []
+        for r in rows:
+            present.setdefault(r["season"], set()).add(r["episode"])
+            expected = tmdb_seasons.get(r["season"])
+            if expected is None or not (1 <= r["episode"] <= expected):
+                out_of_range.append({"season": r["season"], "episode": r["episode"]})
+        seasons = []
+        for season_number, episode_count in sorted(tmdb_seasons.items()):
+            have = present.get(season_number, set())
+            missing = [n for n in range(1, episode_count + 1) if n not in have]
+            seasons.append({
+                "season": season_number, "expected": episode_count,
+                "present": len(have), "missing": missing,
+            })
+        return {"seasons": seasons, "out_of_range": out_of_range}
+    finally:
+        conn.close()
+
+
 @app.post("/api/shows/{show_id}/jobs")
 def launch_show_jobs(show_id: int, body: dict):
     """Enqueues one job per included, configured episode. Space is checked
@@ -932,10 +1093,11 @@ def launch_show_jobs(show_id: int, body: dict):
 
 @app.post("/api/shows/{show_id}/rename")
 def rename_show(show_id: int):
-    """Folder -> "Title (Year)", then each episode's video (and sidecars) to
-    its own S01E03-style out_base. Season-directory names are left as-is --
-    Jellyfin reads season/episode numbers from the filename, so the directory
-    name is cosmetic."""
+    """Folder -> "Title (Year)", each episode moved into "Season NN/" (or
+    "Specials" for season 0) and renamed to "Title (Year) - SxxEyy" --
+    Jellyfin's recommended TV layout. Refuses episodes TMDB doesn't recognize
+    (season/episode outside its known range) rather than bake a wrong SxxEyy
+    into a filename; those show up in GET .../seasons as out_of_range."""
     conn = get_db()
     try:
         s = _show_or_404(conn, show_id)
@@ -947,6 +1109,16 @@ def rename_show(show_id: int):
         ).fetchone()
         if running:
             raise HTTPException(409, "a job is running for this show; rename after it finishes")
+
+        info = scan.tmdb_get_tv(s["tmdb_id"], TMDB_API_KEY) if s["tmdb_id"] else None
+        tmdb_seasons = {sn["season_number"]: sn["episode_count"] for sn in (info or {}).get("seasons", [])}
+        episodes = conn.execute("SELECT * FROM episodes WHERE show_id=? AND file IS NOT NULL", (show_id,)).fetchall()
+        out_of_range = [
+            f"S{(e['season'] or 0):02d}E{(e['episode'] or 0):02d}" for e in episodes
+            if tmdb_seasons.get(e["season"]) is None or not (1 <= e["episode"] <= tmdb_seasons[e["season"]])
+        ]
+        if out_of_range:
+            raise HTTPException(409, f"episodes outside TMDB's known range, resolve first: {', '.join(out_of_range)}")
 
         target = _safe_name(f"{s['title']} ({s['year']})")
         old_folder = os.path.join(SHOWS_ROOT, s["folder"])
@@ -962,28 +1134,47 @@ def rename_show(show_id: int):
             conn.execute("UPDATE shows SET folder=?, updated_at=? WHERE id=?", (target, now, show_id))
             conn.commit()
 
-        for e in conn.execute("SELECT * FROM episodes WHERE show_id=?", (show_id,)).fetchall():
-            if not e["file"]:
-                continue
-            ep_folder = os.path.join(new_folder, e["folder"]) if e["folder"] else new_folder
-            out_base = _safe_name(f"{s['title']} - S{(e['season'] or 0):02d}E{(e['episode'] or 0):02d}")
+        old_season_dirs = set()
+        for e in episodes:
+            season = e["season"] or 0
+            old_ep_folder = os.path.join(new_folder, e["folder"]) if e["folder"] else new_folder
+            if e["folder"]:
+                old_season_dirs.add(old_ep_folder)
+            season_dir_name = "Specials" if season == 0 else f"Season {season:02d}"
+            new_ep_folder = os.path.join(new_folder, season_dir_name)
+            os.makedirs(new_ep_folder, exist_ok=True)
+
+            out_base = _safe_name(f"{s['title']} ({s['year']}) - S{season:02d}E{(e['episode'] or 0):02d}")
             old_stem, ext = os.path.splitext(e["file"])
             new_file = out_base + ext
-            if new_file != e["file"] and os.path.exists(os.path.join(ep_folder, e["file"])):
-                dst = os.path.join(ep_folder, new_file)
-                if not os.path.exists(dst):
-                    os.rename(os.path.join(ep_folder, e["file"]), dst)
-                    for f in os.listdir(ep_folder):
-                        if f.startswith(old_stem) and f != new_file:
-                            new_name = out_base + f[len(old_stem):]
-                            if not os.path.exists(os.path.join(ep_folder, new_name)):
-                                os.rename(os.path.join(ep_folder, f), os.path.join(ep_folder, new_name))
-                    conn.execute(
-                        "UPDATE tracks SET ext_path=REPLACE(ext_path, ?, ?) WHERE episode_id=? AND ext_path IS NOT NULL",
-                        (os.path.join(ep_folder, old_stem), os.path.join(ep_folder, out_base), e["id"]),
-                    )
-                    conn.execute("UPDATE episodes SET file=?, updated_at=? WHERE id=?", (new_file, now, e["id"]))
+            src = os.path.join(old_ep_folder, e["file"])
+            if (new_file == e["file"] and old_ep_folder == new_ep_folder) or not os.path.exists(src):
+                continue
+            dst = os.path.join(new_ep_folder, new_file)
+            if os.path.exists(dst):
+                continue
+            os.rename(src, dst)
+            for f in list(os.listdir(old_ep_folder)) if os.path.isdir(old_ep_folder) else []:
+                if f.startswith(old_stem) and f != new_file:
+                    new_name = out_base + f[len(old_stem):]
+                    sidecar_dst = os.path.join(new_ep_folder, new_name)
+                    if not os.path.exists(sidecar_dst):
+                        os.rename(os.path.join(old_ep_folder, f), sidecar_dst)
+            conn.execute(
+                "UPDATE tracks SET ext_path=REPLACE(ext_path, ?, ?) WHERE episode_id=? AND ext_path IS NOT NULL",
+                (os.path.join(old_ep_folder, old_stem), os.path.join(new_ep_folder, out_base), e["id"]),
+            )
+            conn.execute(
+                "UPDATE episodes SET folder=?, file=?, updated_at=? WHERE id=?",
+                (season_dir_name, new_file, now, e["id"]),
+            )
         conn.commit()
+
+        for d in old_season_dirs:
+            try:
+                os.rmdir(d)
+            except OSError:
+                pass
         return {"ok": True, "folder": target}
     finally:
         conn.close()
@@ -1035,18 +1226,24 @@ def strip_names_episode(episode_id: int):
         conn.close()
 
 
+def _apply_track_settings(conn, episode_id, tracks):
+    """tracks: [{id, keep, out_order, out_lang, out_default, out_forced, out_name?}].
+    Shared by the per-episode config save and the show-level config apply."""
+    for t in tracks:
+        conn.execute(
+            "UPDATE tracks SET keep=?, out_order=?, out_lang=?, out_default=?, out_forced=?, out_name=? "
+            "WHERE id=? AND episode_id=?",
+            (int(t["keep"]), int(t["out_order"]), t["out_lang"], int(t["out_default"]),
+             int(t["out_forced"]), t.get("out_name", ""), t["id"], episode_id),
+        )
+
+
 @app.put("/api/episodes/{episode_id}/config")
 def save_config_episode(episode_id: int, body: dict):
     conn = get_db()
     try:
         _owner_or_404(conn, "episode", episode_id)
-        for t in body.get("tracks", []):
-            conn.execute(
-                "UPDATE tracks SET keep=?, out_order=?, out_lang=?, out_default=?, out_forced=?, out_name=? "
-                "WHERE id=? AND episode_id=?",
-                (int(t["keep"]), int(t["out_order"]), t["out_lang"], int(t["out_default"]),
-                 int(t["out_forced"]), t.get("out_name", ""), t["id"], episode_id),
-            )
+        _apply_track_settings(conn, episode_id, body.get("tracks", []))
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
         conn.execute(
             "UPDATE episodes SET status='ready', updated_at=? WHERE id=? AND status NOT IN ('working','clean')",

@@ -477,7 +477,7 @@ function headerHtml() {
         <button class="${POWER?.mode === 'full' ? 'on' : ''}" onclick="setPowerMode('full')">⚡ Full power</button>
         <button class="${POWER?.mode === 'throttle' ? 'on' : ''}" onclick="setPowerMode('throttle')">🐢 Throttle</button>
         ${POWER?.mode === 'auto' ? `<div style="display:flex;gap:8px;align-items:center"><span class="lbl">Hours</span>
-          <input id="workHours" value="${esc(POWER?.work_hours || '')}" style="width:80px;font-family:var(--mono);font-size:12px" onchange="setWorkHours(this.value)"></div>` : ''}
+          <input id="workHours" aria-label="Work hours range, for example 9-23" value="${esc(POWER?.work_hours || '')}" style="width:80px;font-family:var(--mono);font-size:12px" onchange="setWorkHours(this.value)"></div>` : ''}
       </div>
     </div>
   </header>`;
@@ -750,7 +750,7 @@ async function renderDetail(id) {
         m.tmdb_id ? `${esc(m.title)} (${m.year}) · tmdb ${m.tmdb_id}` : 'find the canonical title',
         s1 === 'done' ? 'Re-match' : null, `
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <input id="tmdbQ" placeholder="Search TMDB…" style="width:240px" value="${esc(m.clean_title || '')}">
+          <input id="tmdbQ" aria-label="Search TMDB for this movie" placeholder="Search TMDB…" style="width:240px" value="${esc(m.clean_title || '')}">
           <button class="btn" onclick="tmdbSearch(${id})">Search</button>
         </div><div id="tmdbResults"></div>`)}
       ${stepCard(2, s2, 'Configure tracks',
@@ -829,7 +829,7 @@ function trackRowHtml(t, i, type, n) {
       ${langs.map(l => `<option value="${l}" ${t.out_lang === l ? 'selected' : ''}>${l}</option>`).join('')}</select>
     <button class="fchip def ${t.keep && t.out_default ? '' : 'dim'}" onclick="toggleDefault('${type}',${i})">DEFAULT</button>
     ${type === 'subs' ? `<button class="fchip forc ${t.keep && t.out_forced ? '' : 'dim'}" onclick="toggleForced(${i})">FORCED</button>` : ''}
-    <input class="nm" ${t.keep ? '' : 'disabled'} value="${esc(t.out_name || '')}" placeholder="track name (empty = none)"
+    <input class="nm" ${t.keep ? '' : 'disabled'} value="${esc(t.out_name || '')}" aria-label="Output name for the ${type === 'subs' ? 'subtitle' : 'audio'} track ${esc(t.codec || '')}${t.lang ? ' ' + esc(t.lang) : ''}" placeholder="track name (empty = none)"
       oninput="TRACKSTATE.${type}[${i}].out_name=this.value">
   </div>`;
 }
@@ -1106,7 +1106,7 @@ async function renderShow(id) {
         s.tmdb_id ? `${esc(s.title)} (${s.year}) · tmdb ${s.tmdb_id}` : 'find the canonical title',
         s.tmdb_id ? 'Re-match' : null, `
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <input id="showTmdbQ" placeholder="Search TMDB…" style="width:240px" value="${esc(s.clean_title || '')}">
+          <input id="showTmdbQ" aria-label="Search TMDB for this show" placeholder="Search TMDB…" style="width:240px" value="${esc(s.clean_title || '')}">
           <button class="btn" onclick="tmdbSearchShow(${id})">Search</button>
         </div><div id="showTmdbResults"></div>`)}
       ${stepCard(2, 'active', 'Episodes', `${data.episodes.length} episode(s)`, null, episodesHtml(data))}
@@ -1169,7 +1169,7 @@ function showConfigHtml(showId, cfg) {
   return `
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <span style="font-size:12px;color:var(--faint)">Use episode:</span>
-      <input id="cfgSourceEp" type="number" placeholder="episode #" style="width:100px">
+      <input id="cfgSourceEp" type="number" aria-label="Episode number to copy the track setup from" placeholder="episode #" style="width:100px">
       <button class="btn" onclick="useEpisodeAsShowConfig(${showId})">as config for all</button>
       <button class="btn primary g-acc-lg" onclick="applyShowConfig(${showId})" ${Object.keys(cfg.config||{}).length ? '' : 'disabled'}>Apply to all (${cfg.applicable})</button>
     </div>

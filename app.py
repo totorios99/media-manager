@@ -675,6 +675,17 @@ def _safe_name(s):
     return "".join(c for c in s if c not in '<>:"/\\|?*').strip()
 
 
+def _canonical_name(f, old_stem, new_base):
+    """Re-stem a sibling file from `old_stem` to `new_base`, keeping its suffix.
+
+    A file already carrying `new_base` comes back unchanged: a job output named
+    "Title (Year).hevc.mkv" written next to a source stem of "Title" is a prefix
+    match, and blindly re-stemming it appends the year a second time."""
+    if f.startswith(new_base) or not f.startswith(old_stem):
+        return f
+    return new_base + f[len(old_stem):]
+
+
 @app.post("/api/movies/{movie_id}/rename")
 def rename_movie(movie_id: int):
     conn = get_db()
@@ -740,12 +751,18 @@ def rename_movie(movie_id: int):
                     raise HTTPException(409, f"file already exists: {new_file}")
                 os.rename(os.path.join(new_folder, cur_file), dst)
             for f in os.listdir(new_folder):
-                if f.startswith(old_stem) and f != new_file:
-                    new_name = target + f[len(old_stem):]
-                    if not os.path.exists(os.path.join(new_folder, new_name)):
-                        os.rename(os.path.join(new_folder, f), os.path.join(new_folder, new_name))
+                new_name = _canonical_name(f, old_stem, target)
+                if new_name != f and not os.path.exists(os.path.join(new_folder, new_name)):
+                    os.rename(os.path.join(new_folder, f), os.path.join(new_folder, new_name))
             conn.execute("UPDATE tracks SET ext_path=REPLACE(ext_path, ?, ?) WHERE movie_id=? AND ext_path IS NOT NULL",
                          (os.path.join(new_folder, old_stem), os.path.join(new_folder, target), movie_id))
+            # the job output is one of those files, so output_file has to follow it
+            # or delete-original can't find the copy it must keep and refuses to run
+            if m["output_file"]:
+                conn.execute("UPDATE movies SET output_file=? WHERE id=?",
+                             (os.path.join(new_folder,
+                                           _canonical_name(os.path.basename(m["output_file"]), old_stem, target)),
+                              movie_id))
         conn.execute("UPDATE movies SET file=?, updated_at=? WHERE id=?", (new_file, now, movie_id))
         conn.commit()
         return {"ok": True, "folder": target, "file": new_file}
@@ -1212,8 +1229,8 @@ def rename_show(show_id: int):
                 continue
             os.rename(src, dst)
             for f in list(os.listdir(old_ep_folder)) if os.path.isdir(old_ep_folder) else []:
-                if f.startswith(old_stem) and f != new_file:
-                    new_name = out_base + f[len(old_stem):]
+                new_name = _canonical_name(f, old_stem, out_base)
+                if new_name != f:
                     sidecar_dst = os.path.join(new_ep_folder, new_name)
                     if not os.path.exists(sidecar_dst):
                         os.rename(os.path.join(old_ep_folder, f), sidecar_dst)
@@ -1221,6 +1238,13 @@ def rename_show(show_id: int):
                 "UPDATE tracks SET ext_path=REPLACE(ext_path, ?, ?) WHERE episode_id=? AND ext_path IS NOT NULL",
                 (os.path.join(old_ep_folder, old_stem), os.path.join(new_ep_folder, out_base), e["id"]),
             )
+            if e["output_file"]:
+                conn.execute(
+                    "UPDATE episodes SET output_file=? WHERE id=?",
+                    (os.path.join(new_ep_folder,
+                                  _canonical_name(os.path.basename(e["output_file"]), old_stem, out_base)),
+                     e["id"]),
+                )
             conn.execute(
                 "UPDATE episodes SET folder=?, file=?, updated_at=? WHERE id=?",
                 (season_dir_name, new_file, now, e["id"]),

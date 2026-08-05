@@ -848,7 +848,7 @@ def scan_library(conn, media_root, api_key, progress_cb=None, include_shows=True
     scan_shows_root() below. Without this, every top-level name here would be
     treated as this root's complete set of shows, and any show actually
     living under the other root would look "vanished" and get pruned."""
-    entries = sorted(e.name for e in os.scandir(media_root) if e.is_dir() and not e.name.startswith("._"))
+    entries = sorted(e.name for e in os.scandir(media_root) if e.is_dir() and not e.name.startswith("."))
     kinds = {name: (classify_folder(os.path.join(media_root, name)) if include_shows else "movie")
              for name in entries}
     movie_folders = {n for n, k in kinds.items() if k == "movie"}
@@ -898,7 +898,7 @@ def scan_shows_root(conn, shows_root, api_key, progress_cb=None):
     MEDIA_ROOT's movies. Every top-level folder here is expected to be a
     show; classify_folder is still consulted as a safety net so a stray
     non-show folder is skipped rather than miscreated as an empty show."""
-    entries = sorted(e.name for e in os.scandir(shows_root) if e.is_dir() and not e.name.startswith("._"))
+    entries = sorted(e.name for e in os.scandir(shows_root) if e.is_dir() and not e.name.startswith("."))
     on_disk = set(entries)
     for r in conn.execute("SELECT id, folder FROM shows").fetchall():
         if r["folder"] not in on_disk:

@@ -345,7 +345,16 @@ const esc = s => (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>'
 const posterUrl = p => p ? `https://image.tmdb.org/t/p/w342${p}` : null;
 const fmtG = b => !b ? '' : (b / 1e9 >= 1 ? (b / 1e9).toFixed(1) + ' G' : (b / 1e6).toFixed(0) + ' M');
 const fmtTB = b => b >= 1e12 ? (b / 1e12).toFixed(2) + ' TB' : (b / 1e9).toFixed(0) + ' GB';
-const resOf = m => m.height ? (m.height >= 2000 ? '4K' : m.height >= 1000 ? '1080p' : m.height + 'p') : '';
+// Width first: a 2.39:1 scope transfer is 3840x1608, and going by height alone
+// reads that as 1080p. Height stays as the fallback for pillarboxed sources.
+const resOf = m => {
+  const w = m.width || 0, h = m.height || 0;
+  if (!w && !h) return '';
+  if (w >= 3000 || h >= 2000) return '4K';
+  if (w >= 1800 || h >= 1000) return '1080p';
+  if (w >= 1200 || h >= 700) return '720p';
+  return h ? h + 'p' : '';
+};
 const barFor = m => (m.height || 0) >= 2000 ? 25 : (m.height || 0) >= 1000 ? 15 : 8;
 const KIND_LABEL = { remux: 'Quick Remux', encode: 'Heavy Encode', sample: 'Sample' };
 const INFLIGHT = ['cleaning', 'encoding', 'working'];

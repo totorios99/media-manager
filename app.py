@@ -532,10 +532,17 @@ ADVICE_MBPS_UHD, ADVICE_MBPS_FHD, ADVICE_MBPS_SD = 25, 15, 8
 
 def _advice(d):
     """'encode' | 'keep' | None (no data). Advisory only — never blocks a job."""
-    br, h = d.get("bitrate"), d.get("height") or 0
+    br, w, h = d.get("bitrate"), d.get("width") or 0, d.get("height") or 0
     if not br:
         return None
-    cap = ADVICE_MBPS_UHD if h >= 2000 else ADVICE_MBPS_FHD if h >= 1000 else ADVICE_MBPS_SD
+    # width first: a 2.39:1 scope UHD is 3840x1608, and a height-only test rates
+    # it FHD -- then 23 Mbps looks bloated and every scope 4K begs for an encode
+    if w >= 3000 or h >= 2000:
+        cap = ADVICE_MBPS_UHD
+    elif w >= 1800 or h >= 1000:
+        cap = ADVICE_MBPS_FHD
+    else:
+        cap = ADVICE_MBPS_SD
     return "encode" if br > cap * 1e6 else "keep"
 
 

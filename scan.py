@@ -548,10 +548,14 @@ def upsert_show(conn, media_root, folder_name, api_key):
         ep_folder_name = os.path.dirname(rel_path)  # '' or a season subdir name
         ep_file = os.path.basename(rel_path)
         ep_row = conn.execute(
-            "SELECT id, status FROM episodes WHERE show_id=? AND folder=? AND file=?",
+            "SELECT id, status, updated_at FROM episodes WHERE show_id=? AND folder=? AND file=?",
             (show_id, ep_folder_name, ep_file),
         ).fetchone()
         abs_path = os.path.join(folder_path, rel_path)
+        # a show's own folder mtime says nothing about a file inside a season
+        # subdir, so episodes are skipped per file instead of per show
+        if path_unchanged(ep_row, abs_path):
+            continue
         info = inspect_file(abs_path)
         stem = os.path.splitext(ep_file)[0]
         ext_subs = find_external_subs(os.path.join(folder_path, ep_folder_name), stem=stem)
@@ -838,6 +842,25 @@ def _upsert_tracks(conn, owner_id, source_tracks, ext_subs, original_language, o
             conn.execute("DELETE FROM tracks WHERE id=?", (prior["id"],))
 
 
+def path_unchanged(row, path):
+    """True when a movie folder / episode file needs no re-inspect: its row is
+    healthy and the path has not been touched since the row was written. A file
+    added or removed inside a folder bumps that directory's mtime, so new and
+    deleted media is always picked up.
+
+    ponytail: mtime-only. An in-place edit that keeps the entry list identical
+    (mkvpropedit retagging a track) leaves mtime alone and is missed -- MM
+    updates the DB itself after its own jobs, so this only bites external edits.
+    Upgrade path: a force flag on /api/scan that bypasses this check."""
+    if row is None or row["status"] in ("stub", "error"):
+        return False
+    try:
+        mtime = os.stat(path).st_mtime
+    except OSError:
+        return False
+    return row["updated_at"] > time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(mtime))
+
+
 def scan_library(conn, media_root, api_key, progress_cb=None, include_shows=True):
     """Scans all top-level entries, classifying each as a movie or a show
     before pruning -- a folder reclassified between scans (or one that just
@@ -863,12 +886,17 @@ def scan_library(conn, media_root, api_key, progress_cb=None, include_shows=True
                 conn.execute("DELETE FROM shows WHERE id=?", (r["id"],))
     conn.commit()
 
+    # shows are deliberately not skipped: an episode added under a season
+    # subfolder leaves the show's own directory mtime untouched
+    seen = {r["folder"]: r for r in
+            conn.execute("SELECT folder, status, updated_at FROM movies").fetchall()}
+
     total = len(entries)
     for i, name in enumerate(entries, start=1):
         try:
             if kinds[name] == "show":
                 upsert_show(conn, media_root, name, api_key)
-            else:
+            elif not path_unchanged(seen.get(name), os.path.join(media_root, name)):
                 upsert_movie(conn, media_root, name, api_key)
         except Exception:
             now = time.strftime("%Y-%m-%dT%H:%M:%S")

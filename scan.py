@@ -795,11 +795,26 @@ def upsert_movie(conn, media_root, folder_name, api_key):
 
 
 def _upsert_tracks(conn, owner_id, source_tracks, ext_subs, original_language, owner_col="movie_id"):
-    existing = {}
-    for r in conn.execute(f"SELECT * FROM tracks WHERE {owner_col}=?", (owner_id,)):
-        key = ("mkv", r["mkv_id"]) if r["mkv_id"] is not None else ("ext", r["ext_path"])
+    # Internal tracks are matched by track_sig, NOT by mkv_id: adding or dropping
+    # a track shifts every later index, and an mkv_id key would then paste one
+    # track's saved config (keep/out_*) onto a different physical track. The
+    # counter disambiguates a file carrying two identical signatures.
+    #
+    # ponytail: a track whose codec or name changes (a re-encode) reads as a new
+    # track and falls back to suggest_tracks defaults. Losing config on a track
+    # that no longer exists as-configured beats silently keeping the wrong one.
+    def sig_key(t, counts):
+        sig = track_sig(t)
+        n = counts.get(sig, 0)
+        counts[sig] = n + 1
+        return ("mkv", sig, n)
+
+    existing, prior_counts = {}, {}
+    for r in conn.execute(f"SELECT * FROM tracks WHERE {owner_col}=? ORDER BY mkv_id", (owner_id,)):
+        key = sig_key(r, prior_counts) if r["mkv_id"] is not None else ("ext", r["ext_path"])
         existing[key] = r
 
+    source_counts = {}
     seen_keys = set()
     order_counters = {"audio": 0, "subtitle": 0}
     orig_lang_3 = LANG_ISO1_TO_3.get(original_language or "", None)
@@ -808,9 +823,12 @@ def _upsert_tracks(conn, owner_id, source_tracks, ext_subs, original_language, o
         seen_keys.add(key)
         prior = existing.get(key)
         if prior:
+            # mkv_id and type are refreshed too: the track kept its identity but
+            # may sit at a new index in the remuxed file
             conn.execute(
-                "UPDATE tracks SET codec=?, lang=?, name=?, channels=?, default_flag=?, forced_flag=? WHERE id=?",
-                (codec, lang, name, channels, default_flag, forced_flag, prior["id"]),
+                "UPDATE tracks SET mkv_id=?, type=?, codec=?, lang=?, name=?, channels=?, "
+                "default_flag=?, forced_flag=? WHERE id=?",
+                (mkv_id, type_, codec, lang, name, channels, default_flag, forced_flag, prior["id"]),
             )
             return
         # lang may be a spa-mx/spa-es grouping key (see _spanish_variant) --
@@ -829,7 +847,7 @@ def _upsert_tracks(conn, owner_id, source_tracks, ext_subs, original_language, o
         )
 
     for t in source_tracks:
-        key = ("mkv", t["mkv_id"])
+        key = sig_key(t, source_counts)
         upsert_one(key, t["type"], t["codec"], t["lang"], t["name"], t["channels"],
                    t["default_flag"], t["forced_flag"], None, t["mkv_id"])
 

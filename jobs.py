@@ -165,7 +165,9 @@ def poll_job(conn, job_id):
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     if exit_matches:
         code = int(exit_matches[-1])
-        status = "done" if code == 0 else "failed"
+        # mkvmerge exit codes: 0 ok, 1 warnings only (still wrote full output), 2 real error.
+        ok_codes = (0, 1) if job["kind"] == "remux" else (0,)
+        status = "done" if code in ok_codes else "failed"
         conn.execute("UPDATE jobs SET status=?, exit_code=?, finished_at=?, progress=100 WHERE id=?",
                      (status, code, now, job_id))
         conn.commit()
@@ -253,4 +255,12 @@ if __name__ == "__main__":
         text2 = tail(log2)
         assert MKV_PROGRESS_RE.findall(text2)[-1] == "42"
         assert EXIT_RE.findall(text2)[-1] == "1"
+
+        # mkvmerge exit 1 = warnings only: a remux still finished, anything else did not
+        def status_for(kind, code):
+            return "done" if code in ((0, 1) if kind == "remux" else (0,)) else "failed"
+        assert status_for("remux", 1) == "done"
+        assert status_for("remux", 2) == "failed"
+        assert status_for("encode", 1) == "failed"
+        assert status_for("remux", 0) == "done"
     print("jobs.py self-check OK")

@@ -97,7 +97,36 @@
   .tabs .right label { cursor:pointer; }
 
   /* ---------- grid ---------- */
-  .grid { display:grid; grid-template-columns:repeat(6,1fr); gap:14px; padding:18px 22px 22px; }
+  .grid { display:grid; grid-template-columns:repeat(8,1fr); gap:12px; padding:18px 22px 22px; }
+
+  /* ---------- rows view ---------- */
+  .rows { padding:6px 22px 22px; }
+  .lrow { display:grid; grid-template-columns:minmax(0,1fr) 190px 74px 84px 78px 74px;
+          align-items:center; gap:14px; padding:7px 10px; border-bottom:1px solid var(--hair);
+          cursor:pointer; font:11px var(--mono); color:var(--mut); }
+  .lrow:hover { background:var(--p2); }
+  .lrow:focus-visible { outline:2px solid var(--acc); outline-offset:-2px; }
+  /* the header is a row too, so a column can never drift out of alignment */
+  .lhead { position:sticky; top:0; z-index:2; background:var(--p1); color:var(--faint);
+           font-size:9px; letter-spacing:.12em; cursor:default; border-bottom:1px solid var(--bd); }
+  .lhead:hover { background:var(--p1); }
+  .lt { font:600 12px var(--ui); color:var(--tx); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lyr { color:var(--faint); font-weight:400; }
+  .ldup { color:var(--dup); font:700 9px var(--mono); }
+  .lfmt { display:flex; align-items:center; }
+  .lbr, .lsize { text-align:right; }
+  .lsize.shr { color:var(--shr); }
+  .lst { text-align:right; }
+  .ltier { font:700 8.5px var(--mono); letter-spacing:.08em; padding:2px 5px; border-radius:3px; }
+  .ltier.shrink { color:var(--shr); background:rgba(232,194,104,.1); }
+  .ltier.fine { color:var(--fine); background:rgba(127,201,168,.1); }
+  .ltier.lean { color:var(--mut); }
+  .lrow .g-shr-badge, .lrow .g-fine-badge { box-shadow:none; }
+  .lrun { color:var(--acc); }
+  .vtog { display:inline-flex; border:1px solid var(--ctl); border-radius:4px; overflow:hidden; }
+  .vbtn { background:none; border:none; color:var(--mut); font-size:12px; line-height:1;
+          padding:4px 7px; cursor:pointer; }
+  .vbtn.on { background:var(--ctl); color:var(--tx); }
   .mcard { position:relative; border-radius:10px; overflow:hidden; border:1px solid var(--bd); background:var(--p3); cursor:pointer; transition:border-color .12s ease-out; }
   .mcard.shrink { border-color:var(--shrBd); }
   .mcard:hover { border-color:var(--acc); }
@@ -115,8 +144,10 @@
      also why they stay legible a size smaller than they did on a poster. */
   /* card tokens: outlined, mono, the same weight as the rest of the line */
   .toks { display:inline-flex; align-items:center; gap:5px; margin-left:7px; }
-  .tok { font:700 8.5px var(--mono); letter-spacing:.05em; color:var(--mut);
-         border:1px solid var(--ctl); border-radius:3px; padding:1px 4px; white-space:nowrap; }
+  .tok { display:inline-flex; align-items:center; gap:3px; font:700 8.5px var(--mono);
+         letter-spacing:.05em; color:var(--mut); border:1px solid var(--ctl);
+         border-radius:3px; padding:1px 4px; white-space:nowrap; }
+  .dd { height:8px; width:8px; fill:currentColor; flex:none; }
   /* detail marks */
   .pills { display:inline-flex; align-items:center; gap:10px; vertical-align:-3px; }
   .mk { height:17px; width:auto; color:var(--body); }
@@ -297,12 +328,17 @@
      readable, so step the count down instead of holding 6 everywhere */
   @media (min-width:701px) and (max-width:1100px) {
     .grid { grid-template-columns:repeat(4,1fr); }
+    .lrow { grid-template-columns:minmax(0,1fr) 150px 70px 74px; gap:10px; }
+    .lrow > .lbr, .lhead > :nth-child(4) { display:none; }
     .dash .stats { grid-template-columns:repeat(2,1fr); }
     .dash .cell:nth-child(2) { border-right:none; }
     .dash .cell:nth-child(1), .dash .cell:nth-child(2) { border-bottom:1px solid var(--hair); }
   }
   @media (min-width:1101px) and (max-width:1320px) {
     .grid { grid-template-columns:repeat(5,1fr); }
+  }
+  @media (min-width:1321px) and (max-width:1700px) {
+    .grid { grid-template-columns:repeat(6,1fr); }
   }
 
   /* ---------- mobile ---------- */
@@ -317,6 +353,10 @@
     .dash .cell:nth-child(3), .dash .cell:nth-child(4) { border-bottom:none; }
     .tabs { margin:0 14px; }
     .grid { grid-template-columns:repeat(3,1fr); gap:10px; padding:14px; }
+    .rows { padding:4px 14px 18px; }
+    .lrow { grid-template-columns:minmax(0,1fr) 70px 62px; gap:10px; }
+    .lrow > .lfmt, .lrow > .lcodec, .lrow > .lbr { display:none; }
+    .lhead > :nth-child(2), .lhead > :nth-child(3), .lhead > :nth-child(4) { display:none; }
     .mcard .spec { display:none; }
     .dtop, .ident { padding-left:14px; padding-right:14px; }
     .steps { padding:12px 14px 18px; }
@@ -493,6 +533,9 @@ document.addEventListener('keydown', e => {
 // ---------- state ----------
 let MOVIES = [], SHOWS = [], JOBS = [], POWER = null, STATS = { reclaimed_bytes: 0 };
 let TAB = 'needs', SORT = 'size', DUPONLY = false, Q = '', RES = 'all';
+// grid reads like a shelf; rows read like a worklist -- same data, and the
+// choice survives a reload because it is a working preference, not a filter
+let VIEW = localStorage.getItem('view') || 'grid';
 let SCAN = { running: false };
 let TRACKSTATE = null;   // {audio:[], subs:[]} while a detail page is open
 let TRACK_BASE = 'movies';  // 'movies' | 'episodes' -- which API the track editor writes to
@@ -630,7 +673,10 @@ const MARKS = {
 // gives the whole metadata line ~190px. Rendered at card scale the wordmark
 // turns into a smudge, so cards get short tokens and the real marks live in
 // the detail view, which has the room.
-const TOKENS = { dv: 'DV', hdr10: 'HDR10', hlg: 'HLG', atmos: 'ATMOS' };
+const DD = `<svg class="dd" viewBox="0 0 40 40" aria-hidden="true">
+  <path d="M2 4h6a10 16 0 0 1 0 32H2z"/><path d="M38 4h-6a10 16 0 0 0 0 32h6z"/></svg>`;
+// Only the Dolby formats take the glyph; HDR10 is not theirs.
+const TOKENS = { dv: DD + 'DV', hdr10: 'HDR10', hlg: 'HLG', atmos: DD + 'ATMOS' };
 
 function formatKeys(m) {
   const k = [];
@@ -730,6 +776,11 @@ function paintTabs() {
         <option value="size" ${SORT === 'size' ? 'selected' : ''}>SIZE ▾</option>
         <option value="title" ${SORT === 'title' ? 'selected' : ''}>TITLE</option></select>
       <label>DUP <input type="checkbox" aria-label="Show only duplicates" ${DUPONLY ? 'checked' : ''} onchange="DUPONLY=this.checked;paintGrid()"></label>
+      <span class="vtog" role="group" aria-label="View">
+        ${['grid', 'rows'].map(v => `<button class="vbtn ${VIEW === v ? 'on' : ''}" aria-pressed="${VIEW === v}"
+          title="${v === 'grid' ? 'Poster grid' : 'Compact rows'}"
+          onclick="VIEW='${v}';localStorage.setItem('view','${v}');paintTabs();paintGrid()">${v === 'grid' ? '▦' : '☰'}</button>`).join('')}
+      </span>
     </div></div>`;
 }
 function paintGrid() {
@@ -744,7 +795,12 @@ function paintGrid() {
   if (DUPONLY) ms = ms.filter(m => m.dup);
   ms.sort(SORT === 'size' ? (a, b) => (b.size_bytes || 0) - (a.size_bytes || 0)
                           : (a, b) => (a.title || a.clean_title || a.folder).localeCompare(b.title || b.clean_title || b.folder));
-  el.innerHTML = ms.length ? `<div class="grid">${ms.map(cardHtml).join('')}</div>` : '<div class="empty">NOTHING HERE</div>';
+  if (!ms.length) { el.innerHTML = '<div class="empty">NOTHING HERE</div>'; return; }
+  el.innerHTML = VIEW === 'rows'
+    ? `<div class="rows"><div class="lrow lhead" aria-hidden="true">
+         <div>TITLE</div><div>FORMAT</div><div>CODEC</div><div>BITRATE</div><div>SIZE</div><div></div></div>
+       ${ms.map(rowHtml).join('')}</div>`
+    : `<div class="grid">${ms.map(cardHtml).join('')}</div>`;
 }
 function showCardHtml(s) {
   const title = s.title || s.clean_title || s.folder;
@@ -786,6 +842,26 @@ function cardHtml(m) {
       <div class="row2"><span class="fmt">${res}${tokensHtml(m)}</span><span style="color:${shrink ? 'var(--shr)' : 'var(--faint)'}">${fmtG(m.size_bytes)}</span></div>
       <div class="spec">${m.status === 'error' ? '<span style="color:var(--err)">ERROR · </span>' : ''}${INFLIGHT.includes(m.status) ? `<span style="color:var(--acc)">${m.status.toUpperCase()} · </span>` : ''}${specBits.join(' · ')}</div>
     </div></div>`;
+}
+
+function rowHtml(m) {
+  const title = m.title || m.clean_title || m.folder;
+  const res = resOf(m);
+  const tier = tierOf(m);
+  const job = JOBS.find(j => j.movie_id === m.id && j.status === 'running');
+  const mbps = m.bitrate ? Math.round(m.bitrate / 1e6) : null;
+  const aria = [title, res, m.size_bytes ? fmtG(m.size_bytes) : null,
+                tier ? TIER[tier].aria : null].filter(Boolean).join(', ');
+  return `<div class="lrow ${tier === 'bloated' ? 'shrink' : ''}" role="button" tabindex="0"
+    aria-label="${esc(aria)}" onclick="location.hash='#/movie/${m.id}'">
+    <div class="lt">${esc(title)}${m.year ? ` <span class="lyr">${m.year}</span>` : ''}${m.dup ? ' <span class="ldup">DUP</span>' : ''}</div>
+    <div class="lfmt">${res}${tokensHtml(m)}</div>
+    <div class="lcodec">${esc((m.video_codec || '').toUpperCase())}</div>
+    <div class="lbr">${mbps ? mbps + ' Mbps' : ''}</div>
+    <div class="lsize ${tier === 'bloated' ? 'shr' : ''}">${fmtG(m.size_bytes)}</div>
+    <div class="lst">${job ? `<span class="lrun">${Math.round(job.progress || 0)}%</span>`
+      : tier ? `<span class="ltier ${TIER[tier].cls}">${TIER[tier].label}</span>` : ''}</div>
+  </div>`;
 }
 
 // ---------- scan ----------

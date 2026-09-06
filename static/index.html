@@ -101,7 +101,7 @@
 
   /* ---------- rows view ---------- */
   .rows { padding:6px 22px 22px; }
-  .lrow { display:grid; grid-template-columns:minmax(0,1fr) 190px 74px 84px 78px 74px;
+  .lrow { display:grid; grid-template-columns:minmax(0,1fr) 190px 68px 82px 74px 76px 52px;
           align-items:center; gap:14px; padding:7px 10px; border-bottom:1px solid var(--hair);
           cursor:pointer; font:11px var(--mono); color:var(--mut); }
   .lrow:hover { background:var(--p2); }
@@ -115,8 +115,12 @@
   .ldup { color:var(--dup); font:700 9px var(--mono); }
   .lfmt { display:flex; align-items:center; }
   .lbr, .lsize { text-align:right; }
+  /* the bitrate wears its own verdict: the tier is a statement about this number */
+  .lbr.bloated { color:var(--shr); font-weight:700; }
+  .lbr.ideal { color:var(--fine); }
+  .lbr.lean { color:var(--faint); }
   .lsize.shr { color:var(--shr); }
-  .lst { text-align:right; }
+  .lst, .lq { text-align:right; }
   .ltier { font:700 8.5px var(--mono); letter-spacing:.08em; padding:2px 5px; border-radius:3px; }
   .ltier.shrink { color:var(--shr); background:rgba(232,194,104,.1); }
   .ltier.fine { color:var(--fine); background:rgba(127,201,168,.1); }
@@ -166,6 +170,9 @@
   .mcard .t { font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .mcard .row2 { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:4px; font:11px var(--mono); color:var(--mut); }
   .mcard .spec { font:10px var(--mono); color:var(--faint); margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .spec .br.bloated { color:var(--shr); font-weight:700; }
+  .spec .br.ideal { color:var(--fine); }
+  .spec .br.lean { color:var(--faint); }
 
   /* ---------- detail ---------- */
   .dwrap { max-width:960px; margin:0 auto; }
@@ -328,8 +335,9 @@
      readable, so step the count down instead of holding 6 everywhere */
   @media (min-width:701px) and (max-width:1100px) {
     .grid { grid-template-columns:repeat(4,1fr); }
-    .lrow { grid-template-columns:minmax(0,1fr) 150px 70px 74px; gap:10px; }
-    .lrow > .lbr, .lhead > :nth-child(4) { display:none; }
+    .lrow { grid-template-columns:minmax(0,1fr) 150px 74px 76px; gap:10px; }
+    .lrow > .lcodec, .lrow > .lbr, .lhead > :nth-child(3), .lhead > :nth-child(4),
+    .lrow > .lst, .lhead > :nth-child(7) { display:none; }
     .dash .stats { grid-template-columns:repeat(2,1fr); }
     .dash .cell:nth-child(2) { border-right:none; }
     .dash .cell:nth-child(1), .dash .cell:nth-child(2) { border-bottom:1px solid var(--hair); }
@@ -354,9 +362,10 @@
     .tabs { margin:0 14px; }
     .grid { grid-template-columns:repeat(3,1fr); gap:10px; padding:14px; }
     .rows { padding:4px 14px 18px; }
-    .lrow { grid-template-columns:minmax(0,1fr) 70px 62px; gap:10px; }
-    .lrow > .lfmt, .lrow > .lcodec, .lrow > .lbr { display:none; }
-    .lhead > :nth-child(2), .lhead > :nth-child(3), .lhead > :nth-child(4) { display:none; }
+    .lrow { grid-template-columns:minmax(0,1fr) 74px 62px; gap:10px; }
+    .lrow > .lfmt, .lrow > .lcodec, .lrow > .lbr, .lrow > .lst { display:none; }
+    .lhead > :nth-child(2), .lhead > :nth-child(3), .lhead > :nth-child(4),
+    .lhead > :nth-child(7) { display:none; }
     .mcard .spec { display:none; }
     .dtop, .ident { padding-left:14px; padding-right:14px; }
     .steps { padding:12px 14px 18px; }
@@ -798,7 +807,7 @@ function paintGrid() {
   if (!ms.length) { el.innerHTML = '<div class="empty">NOTHING HERE</div>'; return; }
   el.innerHTML = VIEW === 'rows'
     ? `<div class="rows"><div class="lrow lhead" aria-hidden="true">
-         <div>TITLE</div><div>FORMAT</div><div>CODEC</div><div>BITRATE</div><div>SIZE</div><div></div></div>
+         <div>TITLE</div><div>FORMAT</div><div>CODEC</div><div>BITRATE</div><div>VERDICT</div><div>SIZE</div><div>JOB</div></div>
        ${ms.map(rowHtml).join('')}</div>`
     : `<div class="grid">${ms.map(cardHtml).join('')}</div>`;
 }
@@ -825,9 +834,12 @@ function cardHtml(m) {
   const shrink = tier === 'bloated';
   const job = JOBS.find(j => j.movie_id === m.id && j.status === 'running');
   // resolution lives in row2 next to the format marks; this line carries the
-  // encoding facts that nothing else states
-  const specBits = [(m.video_codec || '').toUpperCase(),
-                    m.bitrate ? Math.round(m.bitrate / 1e6) + ' Mbps' : null].filter(Boolean);
+  // encoding facts that nothing else states. The bitrate is coloured by its own
+  // verdict so the number and the judgment of it are never read apart.
+  const brHtml = m.bitrate
+    ? `<span class="br ${tier || ''}"${tier ? ` title="${esc(TIER[tier].hint(m))}"` : ''}>${Math.round(m.bitrate / 1e6)} Mbps</span>`
+    : null;
+  const specBits = [(m.video_codec || '').toUpperCase(), brHtml].filter(Boolean);
   const aria = [title, res, m.size_bytes ? fmtG(m.size_bytes) : null,
                 tier ? TIER[tier].aria : null, m.dup ? 'has duplicates' : null,
                 m.status && m.status !== 'unprocessed' ? 'status ' + m.status : null].filter(Boolean).join(', ');
@@ -857,10 +869,10 @@ function rowHtml(m) {
     <div class="lt">${esc(title)}${m.year ? ` <span class="lyr">${m.year}</span>` : ''}${m.dup ? ' <span class="ldup">DUP</span>' : ''}</div>
     <div class="lfmt">${res}${tokensHtml(m)}</div>
     <div class="lcodec">${esc((m.video_codec || '').toUpperCase())}</div>
-    <div class="lbr">${mbps ? mbps + ' Mbps' : ''}</div>
+    <div class="lbr ${tier || ''}" title="${tier ? esc(TIER[tier].hint(m)) : ''}">${mbps ? mbps + ' Mbps' : ''}</div>
+    <div class="lq">${tier ? `<span class="ltier ${TIER[tier].cls}">${TIER[tier].label}</span>` : ''}</div>
     <div class="lsize ${tier === 'bloated' ? 'shr' : ''}">${fmtG(m.size_bytes)}</div>
-    <div class="lst">${job ? `<span class="lrun">${Math.round(job.progress || 0)}%</span>`
-      : tier ? `<span class="ltier ${TIER[tier].cls}">${TIER[tier].label}</span>` : ''}</div>
+    <div class="lst">${job ? `<span class="lrun">${Math.round(job.progress || 0)}%</span>` : ''}</div>
   </div>`;
 }
 

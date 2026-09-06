@@ -113,25 +113,27 @@
   /* Inline with the resolution: the format belongs to the metadata line, not
      stamped over the artwork. On a flat footer they need no scrim, which is
      also why they stay legible a size smaller than they did on a poster. */
-  .pills { display:inline-flex; align-items:center; gap:6px; vertical-align:-2px; margin-left:7px; }
-  .mk { height:13px; width:auto; color:var(--mut); }
+  /* card tokens: outlined, mono, the same weight as the rest of the line */
+  .toks { display:inline-flex; align-items:center; gap:5px; margin-left:7px; }
+  .tok { font:700 8.5px var(--mono); letter-spacing:.05em; color:var(--mut);
+         border:1px solid var(--ctl); border-radius:3px; padding:1px 4px; white-space:nowrap; }
+  /* detail marks */
+  .pills { display:inline-flex; align-items:center; gap:10px; vertical-align:-3px; }
+  .mk { height:17px; width:auto; color:var(--body); }
   .mk path { fill:currentColor; }
   /* Sized in viewBox units (150x40), so both lines scale with .mk height. */
   .mkw { fill:currentColor; font:600 15px var(--ui); }
   .mkw2 { fill:currentColor; font:700 12px var(--ui); letter-spacing:2.4px; }
   /* HDR10 has no lockup to reproduce; set in the page's own mono so it reads
      as a sibling of the Dolby marks instead of a mismatched logo. */
-  .mk-txt { font:700 9px var(--mono); letter-spacing:.09em; color:var(--mut); }
-  .pills.detail { margin-left:2px; gap:8px; }
-  .pills.detail .mk { height:16px; }
-  .pills.detail .mk-txt { font-size:11px; }
-  .row2 .fmt { display:inline-flex; align-items:center; min-width:0; }
+  .mk-txt { font:700 11px var(--mono); letter-spacing:.09em; color:var(--body); }
+  .row2 .fmt { display:inline-flex; align-items:center; min-width:0; letter-spacing:.04em; }
   .dup-badge { position:absolute; top:8px; right:8px; font:700 9px var(--mono); color:var(--dup); background:rgba(15,8,14,.85); border:1px solid var(--dupBd); border-radius:4px; padding:2px 6px; }
   .mcard .prog { position:absolute; left:0; right:0; height:3px; background:color-mix(in srgb, var(--track) 90%, transparent); }
   .mcard .prog > div { height:100%; background:var(--acc); }
   .mcard .foot { padding:8px 10px 9px; background:linear-gradient(180deg,var(--p3),var(--foot)); }
   .mcard .t { font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .mcard .row2 { display:flex; justify-content:space-between; margin-top:3px; font:11px var(--mono); color:var(--faint); }
+  .mcard .row2 { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:4px; font:11px var(--mono); color:var(--mut); }
   .mcard .spec { font:10px var(--mono); color:var(--faint); margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
   /* ---------- detail ---------- */
@@ -316,7 +318,6 @@
     .tabs { margin:0 14px; }
     .grid { grid-template-columns:repeat(3,1fr); gap:10px; padding:14px; }
     .mcard .spec { display:none; }
-    .mcard .row2 span:first-child { display:none; }
     .dtop, .ident { padding-left:14px; padding-right:14px; }
     .steps { padding:12px 14px 18px; }
     .trow { flex-wrap:wrap; }
@@ -624,17 +625,33 @@ const MARKS = {
   atmos: `<svg class="mk" viewBox="0 0 150 40" role="img" aria-label="Dolby Atmos">
     <path d="M2 4h6a10 16 0 0 1 0 32H2z"/><path d="M38 4h-6a10 16 0 0 0 0 32h6z"/>
     <text x="48" y="19" class="mkw">Dolby</text><text x="48" y="35" class="mkw2">ATMOS</text></svg>`,
-  hdr10: `<span class="mk-txt">HDR10</span>`,
-  hlg: `<span class="mk-txt">HLG</span>`,
 };
+// The Dolby lockup needs about 50px of width to stay readable; a library card
+// gives the whole metadata line ~190px. Rendered at card scale the wordmark
+// turns into a smudge, so cards get short tokens and the real marks live in
+// the detail view, which has the room.
+const TOKENS = { dv: 'DV', hdr10: 'HDR10', hlg: 'HLG', atmos: 'ATMOS' };
 
+function formatKeys(m) {
+  const k = [];
+  if ((m.hdr || '').includes('DV')) k.push('dv');
+  if ((m.hdr || '').includes('HDR10')) k.push('hdr10');
+  else if (m.hdr === 'HLG') k.push('hlg');
+  if (m.atmos) k.push('atmos');
+  return k;
+}
+
+// card: legible at 190px
+function tokensHtml(m) {
+  const k = formatKeys(m);
+  return k.length ? `<span class="toks">${k.map(x =>
+    `<span class="tok">${TOKENS[x]}</span>`).join('')}</span>` : '';
+}
+// detail: the real marks, where they fit
 function pillsHtml(m) {
-  const p = [];
-  if ((m.hdr || '').includes('DV')) p.push(MARKS.dv);
-  if ((m.hdr || '').includes('HDR10')) p.push(MARKS.hdr10);
-  else if (m.hdr === 'HLG') p.push(MARKS.hlg);
-  if (m.atmos) p.push(MARKS.atmos);
-  return p.length ? `<div class="pills">${p.join('')}</div>` : '';
+  const k = formatKeys(m);
+  return k.length ? `<span class="pills">${k.map(x =>
+    MARKS[x] || `<span class="mk-txt">${TOKENS[x]}</span>`).join('')}</span>` : '';
 }
 const inBucket = (m, tab) => {
   if (tab === 'all') return true;
@@ -751,8 +768,10 @@ function cardHtml(m) {
   // be carrying more bitrate than its resolution needs, and that stays true
   const shrink = tier === 'bloated';
   const job = JOBS.find(j => j.movie_id === m.id && j.status === 'running');
-  const specBits = [res, (m.video_codec || '').toUpperCase(),
-                    m.bitrate ? Math.round(m.bitrate / 1e6) + 'Mbps' : null].filter(Boolean);
+  // resolution lives in row2 next to the format marks; this line carries the
+  // encoding facts that nothing else states
+  const specBits = [(m.video_codec || '').toUpperCase(),
+                    m.bitrate ? Math.round(m.bitrate / 1e6) + ' Mbps' : null].filter(Boolean);
   const aria = [title, res, m.size_bytes ? fmtG(m.size_bytes) : null,
                 tier ? TIER[tier].aria : null, m.dup ? 'has duplicates' : null,
                 m.status && m.status !== 'unprocessed' ? 'status ' + m.status : null].filter(Boolean).join(', ');
@@ -764,7 +783,7 @@ function cardHtml(m) {
     ${job ? `<div class="prog" role="progressbar" aria-valuenow="${Math.round(job.progress || 0)}" aria-valuemin="0" aria-valuemax="100" aria-label="Job progress" style="bottom:${document.body.clientWidth <= 700 ? 40 : 58}px"><div class="g-acc" style="width:${job.progress || 0}%"></div></div>` : ''}
     <div class="foot">
       <div class="t">${esc(title)}</div>
-      <div class="row2"><span class="fmt">${res}${pillsHtml(m)}</span><span style="color:${shrink ? 'var(--shr)' : 'var(--faint)'}">${fmtG(m.size_bytes)}</span></div>
+      <div class="row2"><span class="fmt">${res}${tokensHtml(m)}</span><span style="color:${shrink ? 'var(--shr)' : 'var(--faint)'}">${fmtG(m.size_bytes)}</span></div>
       <div class="spec">${m.status === 'error' ? '<span style="color:var(--err)">ERROR · </span>' : ''}${INFLIGHT.includes(m.status) ? `<span style="color:var(--acc)">${m.status.toUpperCase()} · </span>` : ''}${specBits.join(' · ')}</div>
     </div></div>`;
 }
@@ -883,7 +902,7 @@ async function renderDetail(id) {
         <div class="fn">${esc(m.file || m.folder)}</div>
         <div class="spec-chips">
           ${m.width ? `<span class="schip">${m.width}×${m.height}</span>` : ''}
-          ${pillsHtml(m).replace('class="pills"', 'class="pills detail"')}
+          ${pillsHtml(m)}
           ${m.video_codec ? `<span class="schip">${esc(m.video_codec.toUpperCase())}</span>` : ''}
           ${mbps ? `<span class="schip ${mbps > bar ? 'shr' : ''}">${mbps.toFixed(0)} Mbps</span>` : ''}
           ${m.size_bytes ? `<span class="schip ${shrink ? 'shr' : ''}">${fmtG(m.size_bytes)}</span>` : ''}

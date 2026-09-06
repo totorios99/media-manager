@@ -14,6 +14,7 @@ CREATE TABLE tracks (
     movie_id INTEGER, episode_id INTEGER, mkv_id INTEGER,
     type TEXT NOT NULL, codec TEXT, lang TEXT, name TEXT,
     channels INTEGER, default_flag INTEGER DEFAULT 0, forced_flag INTEGER DEFAULT 0,
+    sdh_flag INTEGER DEFAULT 0, commentary_flag INTEGER DEFAULT 0,
     ext_path TEXT, keep INTEGER DEFAULT 1, out_order INTEGER DEFAULT 0,
     out_lang TEXT DEFAULT '', out_default INTEGER DEFAULT 0, out_forced INTEGER DEFAULT 0,
     out_name TEXT DEFAULT ''

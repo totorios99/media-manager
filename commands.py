@@ -29,6 +29,47 @@ def _kept(tracks, ttype):
     return [t for t in tracks if t["type"] == ttype and t["keep"]]
 
 
+# Jellyfin shows the track name verbatim, so a blank one leaves the picker
+# reading "Unknown" and a release-group name leaks "[wWw.PelisMKVHD.Com]".
+# Only these few languages actually occur in this library; anything else falls
+# back to the code so the label is at worst uninformative, never wrong.
+_LANG_LABEL = {
+    "eng": "English", "spa": "Español", "spa-mx": "Español (Latino)",
+    "spa-es": "Español (España)", "jpn": "日本語", "fre": "Français",
+    "fra": "Français", "ger": "Deutsch", "deu": "Deutsch", "ita": "Italiano",
+    "por": "Português", "kor": "한국어", "chi": "中文", "zho": "中文",
+}
+
+
+def _canonical_name(t):
+    """Track name to write. Keeps an explicit out_name; otherwise builds one
+    from language + forced/SDH so nothing ships blank or full of release junk."""
+    if t.get("out_name"):
+        return t["out_name"]
+    lang = t.get("out_lang") or "und"
+    label = _LANG_LABEL.get(lang, lang.upper())
+    if t.get("out_forced"):
+        return f"{label} (forzados)" if lang.startswith("spa") else f"{label} (Forced)"
+    if t.get("sdh_flag"):
+        return f"{label} (SDH)"
+    return label
+
+
+def _flag_args(tid, t):
+    """The five mkv flags build_mkvmerge_remux used to leave untouched, so
+    whatever the source set survived the remux uncontrolled. SDH/commentary
+    mirror the stored columns; the other three are always cleared -- nothing
+    in this library is a real audio-description or text-description track."""
+    args = []
+    if t["type"] != "video":
+        args += ["--hearing-impaired-flag", f"{tid}:{'yes' if t.get('sdh_flag') else 'no'}"]
+        args += ["--commentary-flag", f"{tid}:{'yes' if t.get('commentary_flag') else 'no'}"]
+        args += ["--original-flag", f"{tid}:no"]
+        args += ["--text-descriptions-flag", f"{tid}:no"]
+        args += ["--visual-impaired-flag", f"{tid}:no"]
+    return args
+
+
 def build_mkvmerge_remux(tracks, title, in_path, out_path):
     video = sorted(_kept(tracks, "video"), key=lambda t: t["mkv_id"])
     audio = sorted(_kept(tracks, "audio"), key=lambda t: t["out_order"])
@@ -61,7 +102,8 @@ def build_mkvmerge_remux(tracks, title, in_path, out_path):
         argv += ["--default-track-flag", f"{tid}:{'yes' if t['out_default'] else 'no'}"]
         if t["type"] != "video":
             argv += ["--forced-display-flag", f"{tid}:{'yes' if t['out_forced'] else 'no'}"]
-        argv += ["--track-name", f"{tid}:{t['out_name'] or ''}"]
+        argv += _flag_args(tid, t)
+        argv += ["--track-name", f"{tid}:{_canonical_name(t) if t['type'] != 'video' else (t['out_name'] or '')}"]
     argv.append(in_path)
 
     # external subtitle files: each is its own input file with a single track (id 0)
@@ -70,7 +112,8 @@ def build_mkvmerge_remux(tracks, title, in_path, out_path):
         argv += ["--language", f"0:{t['out_lang']}"]
         argv += ["--default-track-flag", f"0:{'yes' if t['out_default'] else 'no'}"]
         argv += ["--forced-display-flag", f"0:{'yes' if t['out_forced'] else 'no'}"]
-        argv += ["--track-name", f"0:{t['out_name'] or ''}"]
+        argv += _flag_args(0, t)
+        argv += ["--track-name", f"0:{_canonical_name(t)}"]
         argv.append(t["ext_path"])
         ext_file_index[id(t)] = i
 
@@ -153,20 +196,31 @@ def build_handbrake_encode(tracks, in_path, out_path,
     return argv, sub_output_order
 
 
-def build_mkvpropedit_chain(out_path, title, audio_output_order, sub_output_order, video_lang=None):
+def build_mkvpropedit_chain(out_path, title, audio_output_order, sub_output_order,
+                            video_lang=None, video_track=None):
     """audio_output_order / sub_output_order: kept tracks in final OUTPUT order
-    (1-based position == track:a{N}/track:s{N} target)."""
+    (1-based position == track:a{N}/track:s{N} target).
+
+    Every flag it touches is written unconditionally. Anything left unwritten
+    keeps whatever the source had -- that is how a Pelis rip's forced flag rode
+    along on a Spanish audio track and how the video track kept flag-default=0."""
     argv = ["mkvpropedit", out_path, "--edit", "info", "--set", f"title={title}"]
     if video_lang:
         # HandBrake writes the video track as 'und'; verify compares against the
         # configured lang, so it must be stamped here
-        argv += ["--edit", "track:v1", "--set", f"language={video_lang}"]
+        # the release group's name rides on the video track too ("Mr Body - YIFY");
+        # nothing useful ever lives there, so it is always cleared
+        argv += ["--edit", "track:v1", "--set", f"language={video_lang}", "--set", "name=",
+                 "--set", f"flag-default={1 if (video_track or {}).get('out_default', 1) else 0}"]
     for i, t in enumerate(audio_output_order, start=1):
         argv += [
             "--edit", f"track:a{i}",
             "--set", f"language={t['out_lang']}",
             "--set", f"flag-default={1 if t['out_default'] else 0}",
-            "--set", f"name={t['out_name'] or ''}",
+            "--set", f"flag-forced={1 if t['out_forced'] else 0}",
+            "--set", f"name={_canonical_name(t)}",
+            "--set", f"flag-commentary={1 if t.get('commentary_flag') else 0}",
+            "--set", "flag-original=0",
         ]
     for i, t in enumerate(sub_output_order, start=1):
         argv += [
@@ -174,7 +228,12 @@ def build_mkvpropedit_chain(out_path, title, audio_output_order, sub_output_orde
             "--set", f"language={t['out_lang']}",
             "--set", f"flag-default={1 if t['out_default'] else 0}",
             "--set", f"flag-forced={1 if t['out_forced'] else 0}",
-            "--set", f"name={t['out_name'] or ''}",
+            "--set", f"name={_canonical_name(t)}",
+            "--set", f"flag-hearing-impaired={1 if t.get('sdh_flag') else 0}",
+            "--set", f"flag-commentary={1 if t.get('commentary_flag') else 0}",
+            "--set", "flag-original=0",
+            "--set", "flag-text-descriptions=0",
+            "--set", "flag-visual-impaired=0",
         ]
     return argv
 

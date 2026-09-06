@@ -297,8 +297,12 @@ def suggest_tracks(conn, owner_id, table="movies", multi_audio=False):
     for lang in wanted:
         # avoided codecs sort last within a language, so cands[0] is the compatible
         # best — the same pick the old next() made, one less pass
+        # commentary sorts last like an avoided codec: it only wins when it is
+        # the sole track for that language, otherwise a 2.0 AC-3 commentary
+        # could out-rank the real 5.1 dub on codec score alone
         cands = sorted([t for t in audio if t["lang"] == lang],
-                       key=lambda t: (_audio_avoided(t["codec"]), _audio_rank(t["codec"])))
+                       key=lambda t: (t.get("commentary_flag") or 0,
+                                      _audio_avoided(t["codec"]), _audio_rank(t["codec"])))
         if not cands:
             continue
         # ponytail: TV keeps every dub in a wanted language; movies keep one
@@ -567,6 +571,7 @@ def upsert_show(conn, media_root, folder_name, api_key):
             container_title=info["container_title"], video_codec=info["video_codec"],
             width=info["width"], height=info["height"], bitrate=info["bitrate"],
             duration=info["duration"], size_bytes=info["size_bytes"], hdr=info["hdr"],
+            atmos=info["atmos"],
             status=status, updated_at=now,
         )
         if ep_row:
@@ -630,6 +635,20 @@ def _detect_hdr(streams):
     return "SDR"
 
 
+def _detect_atmos(streams):
+    """1 when any audio stream carries an Atmos substream, else 0.
+
+    ffprobe spells it in the stream `profile`: "Dolby TrueHD + Dolby Atmos" or
+    "Dolby Digital Plus + Dolby Atmos". The codec name alone never says it --
+    both TrueHD and E-AC-3 exist with and without Atmos."""
+    for s in streams:
+        if s.get("codec_type") != "audio":
+            continue
+        if "atmos" in (s.get("profile") or "").lower():
+            return 1
+    return 0
+
+
 # mkv's legacy language field is ISO 639-2 only -- "spa" carries no region, so
 # Latin American and European Spanish audio collide as one language and only
 # one survives the one-per-language rule. Rippers that care tag it in the
@@ -639,6 +658,12 @@ def _detect_hdr(streams):
 # to out_lang (mkvmerge/HandBrake need a real ISO code -- see _spanish_base).
 SPANISH_MX_RE = re.compile(r"\blatino\b|\blat(?:am)?\b|\bmex(?:ico)?\b|\b(?:es-)?419\b", re.IGNORECASE)
 SPANISH_ES_RE = re.compile(r"\bcastellano\b|\bespa[ñn]a\b|\bspain\b|\b(?:es-)?es\b", re.IGNORECASE)
+
+# Most rips never set mkv's hearing-impaired/commentary flags and say it in the
+# track name instead ("English (SDH)", "Commentary by the director"), so the name
+# is the more reliable of the two signals -- both are consulted.
+_NAME_SDH_RE = re.compile(r"\bsdh\b|\bcc\b|hearing.?impaired|\bhi\b", re.IGNORECASE)
+_NAME_COMMENTARY_RE = re.compile(r"\bcommentar(?:y|ies)\b|\bcomentario", re.IGNORECASE)
 
 
 def _spanish_variant(lang, name):
@@ -677,6 +702,11 @@ def inspect_file(path):
             "channels": tp.get("audio_channels"),
             "default_flag": 1 if tp.get("default_track") else 0,
             "forced_flag": 1 if tp.get("forced_track") else 0,
+            # the remux writes every one of these back explicitly, so they have to
+            # be read explicitly too -- otherwise a source's SDH flag survives on a
+            # track we relabelled as plain dialogue
+            "sdh_flag": 1 if tp.get("flag_hearing_impaired") or _NAME_SDH_RE.search(name) else 0,
+            "commentary_flag": 1 if tp.get("flag_commentary") or _NAME_COMMENTARY_RE.search(name) else 0,
             "ext_path": None,
         })
 
@@ -721,6 +751,7 @@ def inspect_file(path):
         "height": vstream.get("height"),
         "bitrate": bitrate,
         "hdr": _detect_hdr(streams),
+        "atmos": _detect_atmos(streams),
         "size_bytes": os.path.getsize(path) if os.path.exists(path) else None,
         "tracks": tracks,
     }
@@ -776,6 +807,7 @@ def upsert_movie(conn, media_root, folder_name, api_key):
         container_title=info["container_title"], video_codec=info["video_codec"],
         width=info["width"], height=info["height"], bitrate=info["bitrate"],
         duration=info["duration"], size_bytes=info["size_bytes"], hdr=info["hdr"],
+        atmos=info["atmos"],
         status=status, updated_at=now,
     )
 
@@ -819,7 +851,8 @@ def _upsert_tracks(conn, owner_id, source_tracks, ext_subs, original_language, o
     order_counters = {"audio": 0, "subtitle": 0}
     orig_lang_3 = LANG_ISO1_TO_3.get(original_language or "", None)
 
-    def upsert_one(key, type_, codec, lang, name, channels, default_flag, forced_flag, ext_path, mkv_id):
+    def upsert_one(key, type_, codec, lang, name, channels, default_flag, forced_flag, ext_path, mkv_id,
+                   sdh_flag=0, commentary_flag=0):
         seen_keys.add(key)
         prior = existing.get(key)
         if prior:
@@ -827,8 +860,9 @@ def _upsert_tracks(conn, owner_id, source_tracks, ext_subs, original_language, o
             # may sit at a new index in the remuxed file
             conn.execute(
                 "UPDATE tracks SET mkv_id=?, type=?, codec=?, lang=?, name=?, channels=?, "
-                "default_flag=?, forced_flag=? WHERE id=?",
-                (mkv_id, type_, codec, lang, name, channels, default_flag, forced_flag, prior["id"]),
+                "default_flag=?, forced_flag=?, sdh_flag=?, commentary_flag=? WHERE id=?",
+                (mkv_id, type_, codec, lang, name, channels, default_flag, forced_flag,
+                 sdh_flag, commentary_flag, prior["id"]),
             )
             return
         # lang may be a spa-mx/spa-es grouping key (see _spanish_variant) --
@@ -840,16 +874,17 @@ def _upsert_tracks(conn, owner_id, source_tracks, ext_subs, original_language, o
             order_counters[type_] += 1
         conn.execute(
             f"INSERT INTO tracks ({owner_col}, mkv_id, type, codec, lang, name, channels, default_flag, forced_flag, "
-            "ext_path, keep, out_order, out_lang, out_default, out_forced, out_name) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)",
+            "sdh_flag, commentary_flag, ext_path, keep, out_order, out_lang, out_default, out_forced, out_name) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)",
             (owner_id, mkv_id, type_, codec, lang, name, channels, default_flag, forced_flag,
-             ext_path, out_order, out_lang, default_flag, forced_flag, ""),
+             sdh_flag, commentary_flag, ext_path, out_order, out_lang, default_flag, forced_flag, ""),
         )
 
     for t in source_tracks:
         key = sig_key(t, source_counts)
         upsert_one(key, t["type"], t["codec"], t["lang"], t["name"], t["channels"],
-                   t["default_flag"], t["forced_flag"], None, t["mkv_id"])
+                   t["default_flag"], t["forced_flag"], None, t["mkv_id"],
+                   t.get("sdh_flag", 0), t.get("commentary_flag", 0))
 
     for s in ext_subs:
         key = ("ext", s["ext_path"])

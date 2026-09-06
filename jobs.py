@@ -172,6 +172,14 @@ def poll_job(conn, job_id):
                      (status, code, now, job_id))
         conn.commit()
     elif job["tmux_session"] and not session_alive(job["tmux_session"]):
+        # tmux reports the session gone as soon as the pane process exits, which
+        # can beat the wrapper shell's own `echo EXIT:$rc` to disk. Two finished
+        # remuxes were marked failed that way, output verified fine. Re-read once
+        # before believing it -- only a log with still no EXIT line is a crash.
+        time.sleep(2)
+        exit_matches = EXIT_RE.findall(tail(job["log_path"]) if job["log_path"] else "")
+        if exit_matches:
+            return poll_job(conn, job_id)
         conn.execute("UPDATE jobs SET status='failed', finished_at=? WHERE id=?", (now, job_id))
         conn.commit()
     else:

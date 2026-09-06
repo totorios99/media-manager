@@ -33,12 +33,8 @@ def _kept(tracks, ttype):
 # reading "Unknown" and a release-group name leaks "[wWw.PelisMKVHD.Com]".
 # Only these few languages actually occur in this library; anything else falls
 # back to the code so the label is at worst uninformative, never wrong.
-_LANG_LABEL = {
-    "eng": "English", "spa": "Español", "spa-mx": "Español (Latino)",
-    "spa-es": "Español (España)", "jpn": "日本語", "fre": "Français",
-    "fra": "Français", "ger": "Deutsch", "deu": "Deutsch", "ita": "Italiano",
-    "por": "Português", "kor": "한국어", "chi": "中文", "zho": "中文",
-}
+_LANG_LABEL = {"eng": "English", "spa": "Español",
+               "spa-mx": "Español (Latino)", "spa-es": "Español (España)"}
 
 
 def _canonical_name(t):

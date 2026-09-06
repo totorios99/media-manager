@@ -43,12 +43,10 @@ def main():
     assert q(None, **scope_uhd) is None, "no bitrate -> no verdict"
     assert q(20e6)["res"] == "sd", "no dimensions -> SD cap, unchanged"
 
-    # the legacy two-word field still answers for its old callers
-    assert app._advice({"bitrate": 20e6, "width": 3840, "height": 1608}) == "keep"
-    assert app._advice({"bitrate": 40e6, "width": 3840, "height": 1608}) == "encode"
-    assert app._advice({"bitrate": 9e6, "width": 3840, "height": 1608}) == "keep", \
-        "a lean file is not something to encode"
-    assert app._advice({"bitrate": None}) is None
+    # only 'bloated' means encode; 'lean' is a thin file, not a fat one
+    assert q(20e6, **scope_uhd)["tier"] == "ideal"
+    assert q(40e6, **scope_uhd)["tier"] == "bloated"
+    assert q(9e6, **scope_uhd)["tier"] == "lean", "thin is not something to encode"
 
     # codec-aware floor: a 12 Mbps 4K is thin for h264 but fine for HEVC
     h264_uhd = dict(width=3840, height=2160, video_codec="h264")

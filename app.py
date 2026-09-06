@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 import commands
 import jobs
 import scan
+from scan import _now
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "/media/hdd1/Movies")
@@ -298,7 +299,7 @@ def _owner_info(conn, kind, owner_id):
 
 def _set_owner_status(conn, kind, owner_id, status, output_file=None):
     table = _owner_table(kind)
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    now = _now()
     if output_file is not None:
         conn.execute(f"UPDATE {table} SET status=?, output_file=?, updated_at=? WHERE id=?",
                      (status, output_file, now, owner_id))
@@ -322,7 +323,7 @@ def _reap_stale_jobs():
         for r in conn.execute("SELECT id FROM jobs WHERE status='running'").fetchall():
             job = _poll_and_finalize(conn, r["id"])
             if job and job["status"] == "running" and not jobs.scope_active(job["id"]):
-                now = time.strftime("%Y-%m-%dT%H:%M:%S")
+                now = _now()
                 kind, oid = _job_owner_kind_id(job)
                 conn.execute("UPDATE jobs SET status='failed', finished_at=? WHERE id=?", (now, job["id"]))
                 _set_owner_status(conn, kind, oid, "error")
@@ -548,8 +549,8 @@ def junk_apply():
 # The floor is the other end -- under it the bitrate is thin for the resolution,
 # so the file wants a better source, not a shrink.
 # ponytail: fixed thresholds; make settings if they ever need tuning
-ADVICE_MBPS_UHD, ADVICE_MBPS_FHD, ADVICE_MBPS_SD = 25, 15, 8
-FLOOR_MBPS_UHD, FLOOR_MBPS_FHD, FLOOR_MBPS_SD = 15, 8, 4
+# resolution class -> (cap, floor) in Mbps
+_BANDS = {"uhd": (25, 15), "fhd": (15, 8), "sd": (8, 4)}
 # Those floors are h264 numbers. HEVC/AV1/VP9 hold the same picture at roughly
 # 60% of the bitrate, so a codec-blind floor called 116 of 178 4K HEVC files
 # "thin" when they were fine -- 75% of the library came back `lean` and the
@@ -579,8 +580,7 @@ def _quality(d):
     if not br:
         return None
     res = _res_class(w, h)
-    cap = {"uhd": ADVICE_MBPS_UHD, "fhd": ADVICE_MBPS_FHD, "sd": ADVICE_MBPS_SD}[res]
-    floor = {"uhd": FLOOR_MBPS_UHD, "fhd": FLOOR_MBPS_FHD, "sd": FLOOR_MBPS_SD}[res]
+    cap, floor = _BANDS[res]
     codec = (d.get("video_codec") or "").lower()
     if any(c in codec for c in _MODERN_CODECS):
         floor = round(floor * MODERN_CODEC_FLOOR, 1)
@@ -589,17 +589,9 @@ def _quality(d):
     return {"tier": tier, "mbps": round(mbps, 1), "cap": cap, "floor": floor, "res": res}
 
 
-def _advice(d):
-    """'encode' | 'keep' | None. Derived from _quality — the older two-word
-    field the payload and its callers still speak in."""
-    q = _quality(d)
-    return None if q is None else ("encode" if q["tier"] == "bloated" else "keep")
-
-
 def _movie_summary(row, dup_ids):
     d = dict(row)
     d["dup"] = d["id"] in dup_ids
-    d["advice"] = _advice(d)
     d["quality"] = _quality(d)
     return d
 
@@ -654,7 +646,6 @@ def get_movie(movie_id: int):
                 (movie["tmdb_id"], movie_id),
             ).fetchall()]
         m = dict(movie)
-        m["advice"] = _advice(m)
         m["quality"] = _quality(m)
         return {"movie": m, "tracks": [dict(t) for t in tracks], "duplicates": siblings}
     finally:
@@ -676,7 +667,7 @@ def set_tmdb(movie_id: int, body: dict):
         raise HTTPException(502, "TMDB lookup failed")
     conn = get_db()
     try:
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
         conn.execute(
             "UPDATE movies SET tmdb_id=?, title=?, year=?, original_language=?, poster_path=?, updated_at=? WHERE id=?",
             (info["tmdb_id"], info["title"], info["year"], info["original_language"], info["poster_path"], now, movie_id),
@@ -721,7 +712,7 @@ def save_config(movie_id: int, body: dict):
                 (int(t["keep"]), int(t["out_order"]), t["out_lang"], int(t["out_default"]),
                  int(t["out_forced"]), t.get("out_name", ""), t["id"], movie_id),
             )
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
         conn.execute("UPDATE movies SET status='ready', updated_at=? WHERE id=? AND status NOT IN ('working','clean')",
                      (now, movie_id))
         conn.commit()
@@ -761,7 +752,7 @@ def rename_movie(movie_id: int):
         target = _safe_name(f"{m['title']} ({m['year']})")
         old_folder = os.path.join(MEDIA_ROOT, m["folder"])
         new_folder = os.path.join(MEDIA_ROOT, target)
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
 
         # -- folder rename, committed on its own so a later file-rename failure
         #    can never leave the DB pointing at a folder that no longer exists
@@ -902,7 +893,7 @@ def accept_as_is(movie_id: int):
         if busy:
             raise HTTPException(409, "a job is running or queued for this movie")
         conn.execute("UPDATE movies SET status='clean', updated_at=? WHERE id=?",
-                     (time.strftime("%Y-%m-%dT%H:%M:%S"), movie_id))
+                     (_now(), movie_id))
         conn.commit()
         return {"ok": True}
     finally:
@@ -986,7 +977,7 @@ def set_show_tmdb(show_id: int, body: dict):
     conn = get_db()
     try:
         _show_or_404(conn, show_id)
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
         conn.execute(
             "UPDATE shows SET tmdb_id=?, title=?, year=?, original_language=?, poster_path=?, updated_at=? WHERE id=?",
             (info["tmdb_id"], info["title"], info["year"], info["original_language"], info["poster_path"], now, show_id),
@@ -1005,7 +996,7 @@ def set_excluded(show_id: int, body: dict):
     try:
         _show_or_404(conn, show_id)
         excluded = set(int(i) for i in body.get("excluded", []))
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
         for r in conn.execute("SELECT id FROM episodes WHERE show_id=?", (show_id,)).fetchall():
             conn.execute("UPDATE episodes SET excluded=?, updated_at=? WHERE id=?",
                          (1 if r["id"] in excluded else 0, now, r["id"]))
@@ -1113,7 +1104,7 @@ def set_show_config_from_episode(show_id: int, body: dict):
             }
             for r in rows
         }
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
         conn.execute("UPDATE shows SET track_config=?, updated_at=? WHERE id=?",
                      (json.dumps(config), now, show_id))
         conn.commit()
@@ -1135,7 +1126,7 @@ def apply_show_config(show_id: int):
         if not config:
             raise HTTPException(400, "no show config set -- POST .../config/from-episode first")
         clean, conflicts = _show_config_conflicts(conn, show_id, config)
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
         for item in clean:
             _apply_track_settings(conn, item["episode_id"], item["track_updates"])
             conn.execute(
@@ -1256,7 +1247,7 @@ def rename_show(show_id: int):
         target = _safe_name(f"{s['title']} ({s['year']})")
         old_folder = os.path.join(SHOWS_ROOT, s["folder"])
         new_folder = os.path.join(SHOWS_ROOT, target)
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
 
         if target != s["folder"]:
             if not os.path.isdir(old_folder):
@@ -1384,7 +1375,7 @@ def save_config_episode(episode_id: int, body: dict):
     try:
         _owner_or_404(conn, "episode", episode_id)
         _apply_track_settings(conn, episode_id, body.get("tracks", []))
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
         conn.execute(
             "UPDATE episodes SET status='ready', updated_at=? WHERE id=? AND status NOT IN ('working','clean')",
             (now, episode_id),
@@ -1632,7 +1623,7 @@ def _cancel_job(conn, job):
     job = dict(job)
     if job["status"] not in ("running", "queued"):
         return False
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    now = _now()
     if job["status"] == "running":
         jobs.kill_job(job)
         conn.execute("UPDATE jobs SET status='cancelled', exit_code=-2, finished_at=? WHERE id=?",
@@ -1911,7 +1902,7 @@ def _delete_original(conn, kind, owner_id):
     if out != final_path:
         os.rename(out, final_path)
     table = _owner_table(kind)
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    now = _now()
     conn.execute(f"UPDATE {table} SET file=?, output_file=NULL, updated_at=? WHERE id=?",
                  (final_name, now, owner_id))
     if freed > 0:

@@ -365,121 +365,11 @@ const resOf = m => {
   if (w >= 1200 || h >= 700) return '720p';
   return h ? h + 'p' : '';
 };
-// The server already worked out the bar from width-first resolution class; a
-// height-only copy of the rule here rated every 3840x1608 scope 4K against the
-// 1080p bar. Fall back only when quality is absent (no bitrate on the row).
-const barFor = m => (m.quality || {}).cap || ((m.width || 0) >= 3000 || (m.height || 0) >= 2000 ? 25
-                    : (m.width || 0) >= 1800 || (m.height || 0) >= 1000 ? 15 : 8);
-const KIND_LABEL = { remux: 'Quick Remux', encode: 'Heavy Encode', sample: 'Sample' };
-const INFLIGHT = ['cleaning', 'encoding', 'working'];
+// The server classes resolution width-first and sends the bar with it; a
+// height-only copy of that rule here rated every 3840x1608 scope 4K against
+// the 1080p bar. Null when the row has no bitrate -- then there is no bar.
+const barFor = m => (m.quality || {}).cap || null;
 
-function toast(msg, isError) {
-  const el = document.createElement('div');
-  el.className = 'toast'; el.textContent = msg;
-  // errors carry role=alert so they're announced even mid-utterance; the
-  // container's polite live region handles the routine confirmations
-  if (isError) el.setAttribute('role', 'alert');
-  el.onclick = () => el.remove();
-  document.getElementById('toasts').appendChild(el);
-  setTimeout(() => el.remove(), 8000);
-}
-const oops = e => toast(e.message || String(e), true);
-
-// ---------- modal ----------
-// modal({title, html, confirmLabel, mode:'plain'|'typed'|'hold', expect, danger, holdClass}) -> Promise<bool>
-function modal(o) {
-  return new Promise(resolve => {
-    const root = document.getElementById('modal-root');
-    const typed = o.mode === 'typed';
-    const returnFocus = document.activeElement;   // restored on close
-    const titleId = 'mtitle';
-    root.innerHTML = `<div class="mback">
-      <div class="mpanel ${o.danger ? 'danger' : ''}" role="dialog" aria-modal="true" aria-labelledby="${titleId}">
-        <div class="mhead" id="${titleId}">${esc(o.title)}</div>
-        <div class="mbody">${o.html || ''}${typed ? `<label class="visually-hidden" for="mtyped">Type ${esc(o.expect)} to confirm</label><input id="mtyped" placeholder="type: ${esc(o.expect)}" autocomplete="off">` : ''}</div>
-        <div class="mfoot">
-          <button class="btn" id="mcancel">Cancel</button>
-          <button class="btn ${o.danger ? 'danger' : 'fine'} ${o.mode === 'hold' ? 'holdbtn' + (o.danger ? '' : ' fine') : ''}" id="mok" ${typed ? 'disabled' : ''} style="padding:7px 16px"
-            ${o.mode === 'hold' ? 'aria-describedby="mholdhint"' : ''}>
-            ${o.mode === 'hold' ? '<span class="fill"></span>' : ''}<span style="position:relative">${esc(o.confirmLabel || 'Confirm')}</span>
-          </button>
-          ${o.mode === 'hold' ? '<span id="mholdhint" class="visually-hidden">Press and hold, or hold Enter or Space, for one second to confirm.</span>' : ''}
-        </div>
-      </div></div>`;
-
-    const panel = root.querySelector('.mpanel');
-    const done = v => {
-      document.removeEventListener('keydown', onKey, true);
-      root.innerHTML = '';
-      if (returnFocus && returnFocus.focus) returnFocus.focus();
-      resolve(v);
-    };
-
-    // Escape closes; Tab is trapped inside the panel
-    const onKey = e => {
-      if (e.key === 'Escape') { e.preventDefault(); done(false); return; }
-      if (e.key !== 'Tab') return;
-      const f = [...panel.querySelectorAll('button,input,select,textarea,a[href]')]
-        .filter(el => !el.disabled && el.offsetParent !== null);
-      if (!f.length) return;
-      const first = f[0], last = f[f.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    };
-    document.addEventListener('keydown', onKey, true);
-
-    root.querySelector('.mback').onclick = e => { if (e.target === e.currentTarget) done(false); };
-    document.getElementById('mcancel').onclick = () => done(false);
-    const ok = document.getElementById('mok');
-    if (typed) {
-      const inp = document.getElementById('mtyped');
-      inp.oninput = () => { ok.disabled = inp.value.trim() !== o.expect; };
-      inp.focus();
-      ok.onclick = () => done(true);
-    } else if (o.mode === 'hold') {
-      // hold 0.8s to confirm — fill animates via rAF. Keyboard gets the same
-      // deliberate friction by holding Enter/Space, rather than being locked
-      // out of every destructive action entirely.
-      let t0 = null, raf = null, holding = false;
-      const fill = ok.querySelector('.fill');
-      const step = ts => {
-        if (!t0) t0 = ts;
-        const p = Math.min(1, (ts - t0) / 800);
-        fill.style.width = (p * 100) + '%';
-        if (p >= 1) { done(true); return; }
-        raf = requestAnimationFrame(step);
-      };
-      const start = e => {
-        if (e && e.preventDefault) e.preventDefault();
-        if (holding) return;            // ignore key auto-repeat
-        holding = true; t0 = null; raf = requestAnimationFrame(step);
-      };
-      const stop = () => { holding = false; cancelAnimationFrame(raf); fill.style.width = '0%'; };
-      ok.onmousedown = start; ok.ontouchstart = start;
-      ok.onmouseup = ok.onmouseleave = ok.ontouchend = stop;
-      ok.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') start(e); };
-      ok.onkeyup = e => { if (e.key === 'Enter' || e.key === ' ') stop(); };
-      ok.onblur = stop;
-      ok.focus();
-    } else {
-      ok.onclick = () => done(true);
-      ok.focus();
-    }
-  });
-}
-
-// Enter/Space activate any element we've marked role="button" (cards, links,
-// chart columns). One delegated listener instead of handlers on every node.
-document.addEventListener('keydown', e => {
-  if (e.key !== 'Enter' && e.key !== ' ') return;
-  const el = e.target.closest('[role="button"]');
-  if (!el || el.tagName === 'BUTTON' || el.tagName === 'INPUT') return;
-  e.preventDefault();
-  el.click();
-});
-
-// ---------- state ----------
-let MOVIES = [], SHOWS = [], JOBS = [], POWER = null, STATS = { reclaimed_bytes: 0 };
 let TAB = 'needs', SORT = 'size', DUPONLY = false, Q = '', RES = 'all';
 let SCAN = { running: false };
 let TRACKSTATE = null;   // {audio:[], subs:[]} while a detail page is open
@@ -595,13 +485,13 @@ const inRes = m => RES === 'all' || resOf(m) === RES || (RES === 'SD' && !['4K',
 
 // LEAN stays neutral on purpose: amber means "a decision you haven't made",
 // jade means "resolved", and a thin bitrate is neither -- it's information.
-const TIER_LABEL = { bloated: 'SHRINK', ideal: 'FINE', lean: 'LEAN' };
-const TIER_CLASS = { bloated: 'shrink g-shr-badge', ideal: 'fine g-fine-badge', lean: 'lean' };
-const TIER_ARIA = { bloated: 'shrink advised', ideal: 'bitrate fine', lean: 'bitrate low for this resolution' };
-const TIER_HINT = {
-  bloated: m => `${m.quality.mbps} Mbps is over the ${m.quality.cap} Mbps bar for ${resOf(m)} — a heavy encode buys real space`,
-  ideal: m => `${m.quality.mbps} Mbps sits in the ${m.quality.floor}–${m.quality.cap} Mbps band for ${resOf(m)} — good size for the quality`,
-  lean: m => `${m.quality.mbps} Mbps is under the ${m.quality.floor} Mbps floor for ${resOf(m)} — thin for this resolution, a better source would help`,
+const TIER = {
+  bloated: { label: 'SHRINK', cls: 'shrink g-shr-badge', aria: 'shrink advised',
+    hint: m => `${m.quality.mbps} Mbps is over the ${m.quality.cap} Mbps bar for ${resOf(m)} — a heavy encode buys real space` },
+  ideal: { label: 'FINE', cls: 'fine g-fine-badge', aria: 'bitrate fine',
+    hint: m => `${m.quality.mbps} Mbps sits in the ${m.quality.floor}–${m.quality.cap} Mbps band for ${resOf(m)} — good size for the quality` },
+  lean: { label: 'LEAN', cls: 'lean', aria: 'bitrate low for this resolution',
+    hint: m => `${m.quality.mbps} Mbps is under the ${m.quality.floor} Mbps floor for ${resOf(m)} — thin for this resolution, a better source would help` },
 };
 
 // Format capsules, streaming-service style: neutral outline, never a status color.
@@ -731,12 +621,12 @@ function cardHtml(m) {
   const specBits = [res, (m.video_codec || '').toUpperCase(), m.hdr && m.hdr !== 'SDR' ? m.hdr : null,
                     m.bitrate ? Math.round(m.bitrate / 1e6) + 'Mbps' : null].filter(Boolean);
   const aria = [title, res, m.size_bytes ? fmtG(m.size_bytes) : null,
-                tier ? TIER_ARIA[tier] : null, m.dup ? 'has duplicates' : null,
+                tier ? TIER[tier].aria : null, m.dup ? 'has duplicates' : null,
                 m.status && m.status !== 'unprocessed' ? 'status ' + m.status : null].filter(Boolean).join(', ');
   return `<div class="mcard ${shrink ? 'shrink' : ''}" role="button" tabindex="0"
     aria-label="${esc(aria)}" onclick="location.hash='#/movie/${m.id}'">
     ${poster ? `<img class="poster" src="${poster}" alt="" loading="lazy">` : `<div class="noposter">${esc(title)}</div>`}
-    ${tier ? `<div class="adv-badge ${TIER_CLASS[tier]}">${TIER_LABEL[tier]}</div>` : ''}
+    ${tier ? `<div class="adv-badge ${TIER[tier].cls}">${TIER[tier].label}</div>` : ''}
     ${pillsHtml(m)}
     ${m.dup ? '<div class="dup-badge">DUP</div>' : ''}
     ${job ? `<div class="prog" role="progressbar" aria-valuenow="${Math.round(job.progress || 0)}" aria-valuemin="0" aria-valuemax="100" aria-label="Job progress" style="bottom:${document.body.clientWidth <= 700 ? 40 : 58}px"><div class="g-acc" style="width:${job.progress || 0}%"></div></div>` : ''}
@@ -842,7 +732,7 @@ async function renderDetail(id) {
     stub: ['STUB', 'var(--mut)'], error: ['ERROR', 'var(--err)'] };
   const [stL, stC] = STMAP[m.status] || STMAP.unprocessed;
   const poster = posterUrl(m.poster_path);
-  const shrink = m.advice === 'encode';
+  const shrink = tierOf(m) === 'bloated';
   const mbps = m.bitrate ? (m.bitrate / 1e6) : null;
   const bar = barFor(m);
 
@@ -1004,7 +894,8 @@ async function callStrip(id) { await api(`/api/${TRACK_BASE}/${id}/strip-names`,
 function tagForRF(rf) { return rf <= 18 ? 'NEAR-LOSSLESS' : rf <= 21 ? 'EXCELLENT' : rf <= 23 ? 'SWEET SPOT' : 'QUALITY RISK'; }
 function recommendedRF(m) {
   // lowest RF (best quality) whose projected full size lands under the advice bar
-  if (!SAMPLES.length || !m.duration) return null;
+  // no bar means no bitrate on the row, so there is nothing to aim under
+  if (!SAMPLES.length || !m.duration || !barFor(m)) return null;
   const barBits = barFor(m) * 1e6;
   const ok = SAMPLES.filter(s => s.est_full_bytes && (s.est_full_bytes * 8 / m.duration) <= barBits)
                     .sort((a, b) => a.rf - b.rf);
@@ -1080,7 +971,7 @@ function refreshStep3() {
 }
 
 async function previewCmd(id) {
-  const kind = window._m && window._m.advice === 'keep' ? 'remux' : 'encode';
+  const kind = window._m && tierOf(window._m) !== 'bloated' ? 'remux' : 'encode';
   const r = await api(`/api/movies/${id}/command?kind=${kind}&quality=${SELRF}`).catch(e => { oops(e); throw e; });
   const pre = document.getElementById('cmdPreview');
   pre.style.display = 'block';

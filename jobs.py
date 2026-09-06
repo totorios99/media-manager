@@ -5,7 +5,7 @@ import shlex
 import subprocess
 import time
 
-from scan import inspect_file
+from scan import _now, inspect_file
 
 TMUX_PREFIX = "mm-"
 HB_PROGRESS_RE = re.compile(r"Encoding:.*?(\d+\.\d+)\s*%")
@@ -71,7 +71,7 @@ def start_job(conn, kind, cmd_str, log_dir, movie_id=None, episode_id=None, cpu_
     """cmd_str: full shell command (already built/joined, may contain && chains).
     queued=True only records the row; a ticker launches it when the runner is free.
     Exactly one of movie_id/episode_id should be set."""
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    now = _now()
     cur = conn.execute(
         "INSERT INTO jobs (movie_id, episode_id, kind, status, cmd, started_at) VALUES (?,?,?,?,?,?)",
         (movie_id, episode_id, kind, "queued" if queued else "running", cmd_str, now),
@@ -90,7 +90,7 @@ def _launch(conn, job_id, cmd_str, log_dir, cpu_quota):
     wrapped = _systemd_wrap(cmd_str, f"mm-job-{job_id}", cpu_quota)
     full_cmd = f"{wrapped} >> {shlex.quote(log_path)} 2>&1; echo EXIT:$? >> {shlex.quote(log_path)}"
     conn.execute("UPDATE jobs SET status='running', tmux_session=?, log_path=?, started_at=? WHERE id=?",
-                 (session, log_path, time.strftime("%Y-%m-%dT%H:%M:%S"), job_id))
+                 (session, log_path, _now(), job_id))
     conn.commit()
     subprocess.run(["tmux", "new-session", "-d", "-s", session, "sh", "-c", full_cmd], check=True)
 
@@ -162,7 +162,7 @@ def poll_job(conn, job_id):
         return job
     text = tail(job["log_path"]) if job["log_path"] else ""
     exit_matches = EXIT_RE.findall(text)
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    now = _now()
     if exit_matches:
         code = int(exit_matches[-1])
         # mkvmerge exit codes: 0 ok, 1 warnings only (still wrote full output), 2 real error.

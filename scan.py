@@ -29,6 +29,11 @@ ARTWORK_SUFFIXES = {"folder", "poster", "backdrop", "background", "landscape", "
 ARTWORK_EXT = (".jpg", ".jpeg", ".png", ".webp")
 
 
+def _now():
+    """Local wall-clock stamp in the format every table stores."""
+    return time.strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def _artwork_base(stem, ext):
     """None if not artwork. '' for generic artwork (folder.jpg, backdrop.jpg).
     Otherwise the file-stem prefix it belongs to ('Movie.hevc-poster' -> 'Movie.hevc')."""
@@ -42,9 +47,6 @@ def _artwork_base(stem, ext):
             return stem[:-(len(suf) + 1)]
     return None
 
-
-def _is_artwork(stem, ext):
-    return _artwork_base(stem, ext) is not None
 
 # Known scene/tracker junk patterns -- deny-list, not allow-list: anything that
 # doesn't match a known-junk pattern is left alone rather than guessed at.
@@ -340,7 +342,7 @@ def suggest_tracks(conn, owner_id, table="movies", multi_audio=False):
         if srt:
             mark(srt, lang, default=False, forced=False)
 
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    now = _now()
     for t in tracks:
         if t["type"] == "video":
             lang = t["lang"] if t["lang"] != "und" else (orig3 or "eng")
@@ -519,7 +521,7 @@ def upsert_show(conn, media_root, folder_name, api_key):
     by find_episode_files, then prunes episode rows whose file vanished."""
     folder_path = os.path.join(media_root, folder_name)
     clean_title, guess_year = clean_title_year(folder_name)
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    now = _now()
 
     row = conn.execute("SELECT id FROM shows WHERE folder=?", (folder_name,)).fetchone()
     show_id = row["id"] if row else None
@@ -767,7 +769,7 @@ def upsert_movie(conn, media_root, folder_name, api_key):
 
     main_file = find_main_file(folder_path)
     clean_title, guess_year = clean_title_year(folder_name)
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    now = _now()
 
     cur = conn.execute("SELECT id FROM movies WHERE folder = ?", (folder_name,))
     row = cur.fetchone()
@@ -952,7 +954,7 @@ def scan_library(conn, media_root, api_key, progress_cb=None, include_shows=True
             elif not path_unchanged(seen.get(name), os.path.join(media_root, name)):
                 upsert_movie(conn, media_root, name, api_key)
         except Exception:
-            now = time.strftime("%Y-%m-%dT%H:%M:%S")
+            now = _now()
             if kinds[name] == "show":
                 # shows carry no status column (it's a computed aggregate over
                 # episodes) -- just make sure a row exists so it's visible; the
@@ -995,7 +997,7 @@ def scan_shows_root(conn, shows_root, api_key, progress_cb=None):
             conn.execute(
                 "INSERT INTO shows (folder, updated_at) VALUES (?, ?) "
                 "ON CONFLICT(folder) DO UPDATE SET updated_at=excluded.updated_at",
-                (name, time.strftime("%Y-%m-%dT%H:%M:%S")),
+                (name, _now()),
             )
             conn.commit()
         if progress_cb:

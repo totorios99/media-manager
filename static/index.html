@@ -369,7 +369,116 @@ const resOf = m => {
 // height-only copy of that rule here rated every 3840x1608 scope 4K against
 // the 1080p bar. Null when the row has no bitrate -- then there is no bar.
 const barFor = m => (m.quality || {}).cap || null;
+const KIND_LABEL = { remux: 'Quick Remux', encode: 'Heavy Encode', sample: 'Sample' };
+const INFLIGHT = ['cleaning', 'encoding', 'working'];
 
+function toast(msg, isError) {
+  const el = document.createElement('div');
+  el.className = 'toast'; el.textContent = msg;
+  // errors carry role=alert so they're announced even mid-utterance; the
+  // container's polite live region handles the routine confirmations
+  if (isError) el.setAttribute('role', 'alert');
+  el.onclick = () => el.remove();
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 8000);
+}
+const oops = e => toast(e.message || String(e), true);
+
+// ---------- modal ----------
+// modal({title, html, confirmLabel, mode:'plain'|'typed'|'hold', expect, danger, holdClass}) -> Promise<bool>
+function modal(o) {
+  return new Promise(resolve => {
+    const root = document.getElementById('modal-root');
+    const typed = o.mode === 'typed';
+    const returnFocus = document.activeElement;   // restored on close
+    const titleId = 'mtitle';
+    root.innerHTML = `<div class="mback">
+      <div class="mpanel ${o.danger ? 'danger' : ''}" role="dialog" aria-modal="true" aria-labelledby="${titleId}">
+        <div class="mhead" id="${titleId}">${esc(o.title)}</div>
+        <div class="mbody">${o.html || ''}${typed ? `<label class="visually-hidden" for="mtyped">Type ${esc(o.expect)} to confirm</label><input id="mtyped" placeholder="type: ${esc(o.expect)}" autocomplete="off">` : ''}</div>
+        <div class="mfoot">
+          <button class="btn" id="mcancel">Cancel</button>
+          <button class="btn ${o.danger ? 'danger' : 'fine'} ${o.mode === 'hold' ? 'holdbtn' + (o.danger ? '' : ' fine') : ''}" id="mok" ${typed ? 'disabled' : ''} style="padding:7px 16px"
+            ${o.mode === 'hold' ? 'aria-describedby="mholdhint"' : ''}>
+            ${o.mode === 'hold' ? '<span class="fill"></span>' : ''}<span style="position:relative">${esc(o.confirmLabel || 'Confirm')}</span>
+          </button>
+          ${o.mode === 'hold' ? '<span id="mholdhint" class="visually-hidden">Press and hold, or hold Enter or Space, for one second to confirm.</span>' : ''}
+        </div>
+      </div></div>`;
+
+    const panel = root.querySelector('.mpanel');
+    const done = v => {
+      document.removeEventListener('keydown', onKey, true);
+      root.innerHTML = '';
+      if (returnFocus && returnFocus.focus) returnFocus.focus();
+      resolve(v);
+    };
+
+    // Escape closes; Tab is trapped inside the panel
+    const onKey = e => {
+      if (e.key === 'Escape') { e.preventDefault(); done(false); return; }
+      if (e.key !== 'Tab') return;
+      const f = [...panel.querySelectorAll('button,input,select,textarea,a[href]')]
+        .filter(el => !el.disabled && el.offsetParent !== null);
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey, true);
+
+    root.querySelector('.mback').onclick = e => { if (e.target === e.currentTarget) done(false); };
+    document.getElementById('mcancel').onclick = () => done(false);
+    const ok = document.getElementById('mok');
+    if (typed) {
+      const inp = document.getElementById('mtyped');
+      inp.oninput = () => { ok.disabled = inp.value.trim() !== o.expect; };
+      inp.focus();
+      ok.onclick = () => done(true);
+    } else if (o.mode === 'hold') {
+      // hold 0.8s to confirm — fill animates via rAF. Keyboard gets the same
+      // deliberate friction by holding Enter/Space, rather than being locked
+      // out of every destructive action entirely.
+      let t0 = null, raf = null, holding = false;
+      const fill = ok.querySelector('.fill');
+      const step = ts => {
+        if (!t0) t0 = ts;
+        const p = Math.min(1, (ts - t0) / 800);
+        fill.style.width = (p * 100) + '%';
+        if (p >= 1) { done(true); return; }
+        raf = requestAnimationFrame(step);
+      };
+      const start = e => {
+        if (e && e.preventDefault) e.preventDefault();
+        if (holding) return;            // ignore key auto-repeat
+        holding = true; t0 = null; raf = requestAnimationFrame(step);
+      };
+      const stop = () => { holding = false; cancelAnimationFrame(raf); fill.style.width = '0%'; };
+      ok.onmousedown = start; ok.ontouchstart = start;
+      ok.onmouseup = ok.onmouseleave = ok.ontouchend = stop;
+      ok.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') start(e); };
+      ok.onkeyup = e => { if (e.key === 'Enter' || e.key === ' ') stop(); };
+      ok.onblur = stop;
+      ok.focus();
+    } else {
+      ok.onclick = () => done(true);
+      ok.focus();
+    }
+  });
+}
+
+// Enter/Space activate any element we've marked role="button" (cards, links,
+// chart columns). One delegated listener instead of handlers on every node.
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = e.target.closest('[role="button"]');
+  if (!el || el.tagName === 'BUTTON' || el.tagName === 'INPUT') return;
+  e.preventDefault();
+  el.click();
+});
+
+// ---------- state ----------
+let MOVIES = [], SHOWS = [], JOBS = [], POWER = null, STATS = { reclaimed_bytes: 0 };
 let TAB = 'needs', SORT = 'size', DUPONLY = false, Q = '', RES = 'all';
 let SCAN = { running: false };
 let TRACKSTATE = null;   // {audio:[], subs:[]} while a detail page is open

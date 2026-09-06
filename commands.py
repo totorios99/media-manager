@@ -94,7 +94,7 @@ def build_mkvmerge_remux(tracks, title, in_path, out_path):
     main_file_tracks = video + audio + subs_internal
     for t in main_file_tracks:
         tid = t["mkv_id"]
-        argv += ["--language", f"{tid}:{t['out_lang']}"]
+        argv += ["--language", f"{tid}:{t['out_lang'] or 'und'}"]
         argv += ["--default-track-flag", f"{tid}:{'yes' if t['out_default'] else 'no'}"]
         if t["type"] != "video":
             argv += ["--forced-display-flag", f"{tid}:{'yes' if t['out_forced'] else 'no'}"]
@@ -105,7 +105,7 @@ def build_mkvmerge_remux(tracks, title, in_path, out_path):
     # external subtitle files: each is its own input file with a single track (id 0)
     ext_file_index = {}
     for i, t in enumerate(subs_external, start=1):
-        argv += ["--language", f"0:{t['out_lang']}"]
+        argv += ["--language", f"0:{t['out_lang'] or 'und'}"]
         argv += ["--default-track-flag", f"0:{'yes' if t['out_default'] else 'no'}"]
         argv += ["--forced-display-flag", f"0:{'yes' if t['out_forced'] else 'no'}"]
         argv += _flag_args(0, t)
@@ -206,12 +206,12 @@ def build_mkvpropedit_chain(out_path, title, audio_output_order, sub_output_orde
         # configured lang, so it must be stamped here
         # the release group's name rides on the video track too ("Mr Body - YIFY");
         # nothing useful ever lives there, so it is always cleared
-        argv += ["--edit", "track:v1", "--set", f"language={video_lang}", "--set", "name=",
+        argv += ["--edit", "track:v1", "--set", f"language={video_lang or 'und'}", "--set", "name=",
                  "--set", f"flag-default={1 if (video_track or {}).get('out_default', 1) else 0}"]
     for i, t in enumerate(audio_output_order, start=1):
         argv += [
             "--edit", f"track:a{i}",
-            "--set", f"language={t['out_lang']}",
+            "--set", f"language={t['out_lang'] or 'und'}",
             "--set", f"flag-default={1 if t['out_default'] else 0}",
             "--set", f"flag-forced={1 if t['out_forced'] else 0}",
             "--set", f"name={_canonical_name(t)}",
@@ -221,7 +221,7 @@ def build_mkvpropedit_chain(out_path, title, audio_output_order, sub_output_orde
     for i, t in enumerate(sub_output_order, start=1):
         argv += [
             "--edit", f"track:s{i}",
-            "--set", f"language={t['out_lang']}",
+            "--set", f"language={t['out_lang'] or 'und'}",
             "--set", f"flag-default={1 if t['out_default'] else 0}",
             "--set", f"flag-forced={1 if t['out_forced'] else 0}",
             "--set", f"name={_canonical_name(t)}",

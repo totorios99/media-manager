@@ -37,9 +37,14 @@ _LANG_LABEL = {"eng": "English", "spa": "Español",
                "spa-mx": "Español (Latino)", "spa-es": "Español (España)"}
 
 
-def _canonical_name(t):
+def _canonical_name(t, siblings=()):
     """Track name to write. Keeps an explicit out_name; otherwise builds one
-    from language + forced/SDH so nothing ships blank or full of release junk."""
+    from language + forced/SDH so nothing ships blank or full of release junk.
+
+    `siblings` are the other kept tracks of the same type. When a language has
+    more than one, the codec joins the name: suggest_tracks keeps both the
+    compatible pick and the TrueHD/Atmos one, and naming both "English" left no
+    way to tell the 5.1 AC-3 from the Atmos stream in the player."""
     if t.get("out_name"):
         return t["out_name"]
     lang = t.get("out_lang") or "und"
@@ -48,6 +53,16 @@ def _canonical_name(t):
         return f"{label} (forzados)" if lang.startswith("spa") else f"{label} (Forced)"
     if t.get("sdh_flag"):
         return f"{label} (SDH)"
+    # Audio only: for audio the codec IS the difference between the two kept
+    # tracks (AC-3 vs TrueHD Atmos). A subtitle's codec is a container detail --
+    # naming one "English (SUBRIP)" tells the viewer nothing they asked for.
+    if t.get("type") == "audio":
+        same = [x for x in siblings if (x.get("out_lang") or "und") == lang
+                and not x.get("out_forced") and not x.get("sdh_flag")]
+        if len(same) > 1:
+            codec = (t.get("codec") or "").replace("/", " ").split()
+            if codec:
+                return f"{label} ({codec[0]})"
     return label
 
 
@@ -99,7 +114,8 @@ def build_mkvmerge_remux(tracks, title, in_path, out_path):
         if t["type"] != "video":
             argv += ["--forced-display-flag", f"{tid}:{'yes' if t['out_forced'] else 'no'}"]
         argv += _flag_args(tid, t)
-        argv += ["--track-name", f"{tid}:{_canonical_name(t) if t['type'] != 'video' else (t['out_name'] or '')}"]
+        argv += ["--track-name",
+                 f"{tid}:{_canonical_name(t, audio if t['type'] == 'audio' else subs) if t['type'] != 'video' else (t['out_name'] or '')}"]
     argv.append(in_path)
 
     # external subtitle files: each is its own input file with a single track (id 0)
@@ -109,7 +125,7 @@ def build_mkvmerge_remux(tracks, title, in_path, out_path):
         argv += ["--default-track-flag", f"0:{'yes' if t['out_default'] else 'no'}"]
         argv += ["--forced-display-flag", f"0:{'yes' if t['out_forced'] else 'no'}"]
         argv += _flag_args(0, t)
-        argv += ["--track-name", f"0:{_canonical_name(t)}"]
+        argv += ["--track-name", f"0:{_canonical_name(t, subs)}"]
         argv.append(t["ext_path"])
         ext_file_index[id(t)] = i
 
@@ -205,16 +221,19 @@ def build_mkvpropedit_chain(out_path, title, audio_output_order, sub_output_orde
         # HandBrake writes the video track as 'und'; verify compares against the
         # configured lang, so it must be stamped here
         # the release group's name rides on the video track too ("Mr Body - YIFY");
-        # nothing useful ever lives there, so it is always cleared
+        # nothing useful ever lives there, so it is always cleared.
+        # The video track is always the default one: a file has exactly one, and
+        # reading out_default here wrote a source's flag-default=0 straight back
+        # -- the very thing this line exists to correct.
         argv += ["--edit", "track:v1", "--set", f"language={video_lang or 'und'}", "--set", "name=",
-                 "--set", f"flag-default={1 if (video_track or {}).get('out_default', 1) else 0}"]
+                 "--set", "flag-default=1"]
     for i, t in enumerate(audio_output_order, start=1):
         argv += [
             "--edit", f"track:a{i}",
             "--set", f"language={t['out_lang'] or 'und'}",
             "--set", f"flag-default={1 if t['out_default'] else 0}",
             "--set", f"flag-forced={1 if t['out_forced'] else 0}",
-            "--set", f"name={_canonical_name(t)}",
+            "--set", f"name={_canonical_name(t, audio_output_order)}",
             "--set", f"flag-commentary={1 if t.get('commentary_flag') else 0}",
             "--set", "flag-original=0",
         ]
@@ -224,7 +243,7 @@ def build_mkvpropedit_chain(out_path, title, audio_output_order, sub_output_orde
             "--set", f"language={t['out_lang'] or 'und'}",
             "--set", f"flag-default={1 if t['out_default'] else 0}",
             "--set", f"flag-forced={1 if t['out_forced'] else 0}",
-            "--set", f"name={_canonical_name(t)}",
+            "--set", f"name={_canonical_name(t, sub_output_order)}",
             "--set", f"flag-hearing-impaired={1 if t.get('sdh_flag') else 0}",
             "--set", f"flag-commentary={1 if t.get('commentary_flag') else 0}",
             "--set", "flag-original=0",

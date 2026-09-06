@@ -664,7 +664,10 @@ SPANISH_ES_RE = re.compile(r"\bcastellano\b|\bespa[ñn]a\b|\bspain\b|\b(?:es-)?e
 # Most rips never set mkv's hearing-impaired/commentary flags and say it in the
 # track name instead ("English (SDH)", "Commentary by the director"), so the name
 # is the more reliable of the two signals -- both are consulted.
-_NAME_SDH_RE = re.compile(r"\bsdh\b|\bcc\b|hearing.?impaired|\bhi\b", re.IGNORECASE)
+# No two-letter alternatives: "Hi-Res" matched \bhi\b (the hyphen is a word
+# boundary) and would have shipped a DTS-HD track named "English (SDH)".
+_NAME_SDH_RE = re.compile(r"\bsdh\b|[\[(]cc[\])]|closed.?caption|hearing.?impaired",
+                          re.IGNORECASE)
 _NAME_COMMENTARY_RE = re.compile(r"\bcommentar(?:y|ies)\b|\bcomentario", re.IGNORECASE)
 
 

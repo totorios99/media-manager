@@ -161,19 +161,6 @@ def _migrate(conn):
         if "track_config" not in show_cols:
             conn.execute("ALTER TABLE shows ADD COLUMN track_config TEXT")
             conn.commit()
-    # additive columns; each stays NULL/0 until the next scan re-inspects the file
-    for table, col, decl in (
-        ("movies", "atmos", "INTEGER DEFAULT 0"),
-        ("episodes", "atmos", "INTEGER DEFAULT 0"),
-        ("tracks", "sdh_flag", "INTEGER DEFAULT 0"),
-        ("tracks", "commentary_flag", "INTEGER DEFAULT 0"),
-    ):
-        if not conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
-            continue
-        if col not in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
-            conn.commit()
     if conn.execute("PRAGMA user_version").fetchone()[0] >= 1:
         return
     jobs_exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='jobs'").fetchone()
@@ -218,6 +205,22 @@ def _migrate(conn):
             raise
         finally:
             conn.execute("PRAGMA foreign_keys=ON")
+    # Additive columns, after the rebuild above: run before it, the pre-TV
+    # migration recreated `tracks` from _TRACKS_OLD_COLS and renamed it over
+    # the top, dropping both new columns and breaking every later scan.
+    # Each stays NULL/0 until the next scan re-inspects the file.
+    for table, col, decl in (
+        ("movies", "atmos", "INTEGER DEFAULT 0"),
+        ("episodes", "atmos", "INTEGER DEFAULT 0"),
+        ("tracks", "sdh_flag", "INTEGER DEFAULT 0"),
+        ("tracks", "commentary_flag", "INTEGER DEFAULT 0"),
+    ):
+        if not conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+            continue
+        if col not in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+            conn.commit()
     conn.execute("PRAGMA user_version=1")
     conn.commit()
 
@@ -329,7 +332,9 @@ def _reap_stale_jobs():
                 _set_owner_status(conn, kind, oid, "error")
                 conn.commit()
                 job = dict(conn.execute("SELECT * FROM jobs WHERE id=?", (r["id"],)).fetchone())
-            if job and job["status"] == "failed" and job["kind"] != "sample":
+            # propedit's output_file is the source itself; there is no partial
+            # output to clear and removing it would destroy the only copy
+            if job and job["status"] == "failed" and job["kind"] not in ("sample", "propedit"):
                 kind, oid = _job_owner_kind_id(job)
                 owner = _owner_info(conn, kind, oid)
                 if owner and owner["output_file"]:
@@ -1563,6 +1568,19 @@ def _enqueue(conn, kind, owner_id, job_kind, quality):
             (owner_id,)).fetchone()
         if bad:
             raise HTTPException(400, "this title drops or adds tracks; use kind=remux")
+        # build_mkvpropedit_chain addresses track:a{N}/track:s{N}, which are
+        # positions in the FILE. mkvmerge reorders as it writes so the two agree
+        # for a remux; mkvpropedit moves nothing. A config that reorders would
+        # therefore stamp each track's metadata onto whichever track happens to
+        # sit at that position -- in place, over the only copy, and
+        # verify_output compares expected-by-out_order against got-by-mkv_id, so
+        # the swap verifies clean.
+        for ttype in ("audio", "subtitle"):
+            rows = conn.execute(
+                f"SELECT mkv_id, out_order FROM tracks WHERE {col}=? AND type=? AND keep=1 "
+                "ORDER BY mkv_id", (owner_id, ttype)).fetchall()
+            if [r["out_order"] for r in rows] != sorted(r["out_order"] for r in rows):
+                raise HTTPException(400, "this title reorders tracks; use kind=remux")
 
     # propedit rewrites headers in place: no second copy, so no space needed
     need_bytes = 0 if job_kind == "propedit" else (2 * 10**9 if job_kind == "sample" else owner["size_bytes"])
@@ -1633,7 +1651,9 @@ def _cancel_job(conn, job):
     if job["kind"] != "sample":
         kind, oid = _job_owner_kind_id(job)
         owner = _owner_info(conn, kind, oid)
-        if owner and job["status"] == "running" and owner["output_file"]:
+        # same reason as the reaper: for propedit output_file is the source
+        if (owner and job["status"] == "running" and owner["output_file"]
+                and job["kind"] != "propedit"):
             try:
                 os.remove(owner["output_file"])
             except OSError:

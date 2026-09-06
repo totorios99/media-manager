@@ -176,10 +176,13 @@ def poll_job(conn, job_id):
         # can beat the wrapper shell's own `echo EXIT:$rc` to disk. Two finished
         # remuxes were marked failed that way, output verified fine. Re-read once
         # before believing it -- only a log with still no EXIT line is a crash.
-        time.sleep(2)
-        exit_matches = EXIT_RE.findall(tail(job["log_path"]) if job["log_path"] else "")
-        if exit_matches:
-            return poll_job(conn, job_id)
+        # Poll in short steps rather than sleeping the full grace period: this
+        # runs on the job ticker and on every /api/jobs request, so a flat 2 s
+        # stalled both once per dead session.
+        for _ in range(20):
+            time.sleep(0.1)
+            if EXIT_RE.findall(tail(job["log_path"]) if job["log_path"] else ""):
+                return poll_job(conn, job_id)
         conn.execute("UPDATE jobs SET status='failed', finished_at=? WHERE id=?", (now, job_id))
         conn.commit()
     else:

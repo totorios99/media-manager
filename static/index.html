@@ -26,6 +26,8 @@
     --shrBd:rgba(232,194,104,.4); --shrBg:rgba(232,194,104,.13);
     --fineBd:rgba(127,201,168,.35); --fineBg:rgba(127,201,168,.1);
     --dupBd:rgba(180,142,173,.45); --errBd:rgba(255,93,93,.3);
+    /* format capsules (DV/HDR/Atmos): deliberately colorless -- see DESIGN.md */
+    --pillBd:rgba(138,148,166,.45);
     /* Overlay shadows only. Resting surfaces move up the panel ramp instead. */
     --shadowPop:rgba(0,0,0,.5); --shadowModal:rgba(0,0,0,.6);
     --mono:ui-monospace,'SF Mono',Menlo,monospace;
@@ -95,7 +97,40 @@
   .tabs .right label { cursor:pointer; }
 
   /* ---------- grid ---------- */
-  .grid { display:grid; grid-template-columns:repeat(6,1fr); gap:14px; padding:18px 22px 22px; }
+  .grid { display:grid; grid-template-columns:repeat(8,1fr); gap:12px; padding:18px 22px 22px; }
+
+  /* ---------- rows view ---------- */
+  .rows { padding:6px 22px 22px; }
+  .lrow { display:grid; grid-template-columns:minmax(0,1fr) 190px 68px 82px 74px 76px 52px;
+          align-items:center; gap:14px; padding:7px 10px; border-bottom:1px solid var(--hair);
+          cursor:pointer; font:11px var(--mono); color:var(--mut); }
+  .lrow:hover { background:var(--p2); }
+  .lrow:focus-visible { outline:2px solid var(--acc); outline-offset:-2px; }
+  /* the header is a row too, so a column can never drift out of alignment */
+  .lhead { position:sticky; top:0; z-index:2; background:var(--p1); color:var(--faint);
+           font-size:9px; letter-spacing:.12em; cursor:default; border-bottom:1px solid var(--bd); }
+  .lhead:hover { background:var(--p1); }
+  .lt { font:600 12px var(--ui); color:var(--tx); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lyr { color:var(--faint); font-weight:400; }
+  .ldup { color:var(--dup); font:700 9px var(--mono); }
+  .lfmt { display:flex; align-items:center; }
+  .lbr, .lsize { text-align:right; }
+  /* the bitrate wears its own verdict: the tier is a statement about this number */
+  .lbr.bloated { color:var(--shr); font-weight:700; }
+  .lbr.ideal { color:var(--fine); }
+  .lbr.lean { color:var(--faint); }
+  .lsize.shr { color:var(--shr); }
+  .lst, .lq { text-align:right; }
+  .ltier { font:700 8.5px var(--mono); letter-spacing:.08em; padding:2px 5px; border-radius:3px; }
+  .ltier.shrink { color:var(--shr); background:rgba(232,194,104,.1); }
+  .ltier.fine { color:var(--fine); background:rgba(127,201,168,.1); }
+  .ltier.lean { color:var(--mut); }
+  .lrow .g-shr-badge, .lrow .g-fine-badge { box-shadow:none; }
+  .lrun { color:var(--acc); }
+  .vtog { display:inline-flex; border:1px solid var(--ctl); border-radius:4px; overflow:hidden; }
+  .vbtn { background:none; border:none; color:var(--mut); font-size:12px; line-height:1;
+          padding:4px 7px; cursor:pointer; }
+  .vbtn.on { background:var(--ctl); color:var(--tx); }
   .mcard { position:relative; border-radius:10px; overflow:hidden; border:1px solid var(--bd); background:var(--p3); cursor:pointer; transition:border-color .12s ease-out; }
   .mcard.shrink { border-color:var(--shrBd); }
   .mcard:hover { border-color:var(--acc); }
@@ -105,13 +140,39 @@
   .adv-badge { position:absolute; top:8px; left:8px; font:700 10px var(--mono); letter-spacing:.08em; background:rgba(10,11,15,.9); border-radius:4px; padding:3px 7px; }
   .adv-badge.shrink { color:var(--shr); }
   .adv-badge.fine { color:var(--fine); }
+  .adv-badge.lean { color:var(--mut); }
+  /* Format capsules. Neutral by rule: the palette's colors each carry a status
+     meaning, and "this file has Atmos" is not a status. */
+  /* Inline with the resolution: the format belongs to the metadata line, not
+     stamped over the artwork. On a flat footer they need no scrim, which is
+     also why they stay legible a size smaller than they did on a poster. */
+  /* card tokens: outlined, mono, the same weight as the rest of the line */
+  .toks { display:inline-flex; align-items:center; gap:5px; margin-left:7px; }
+  .tok { display:inline-flex; align-items:center; gap:3px; font:700 8.5px var(--mono);
+         letter-spacing:.05em; color:var(--mut); border:1px solid var(--ctl);
+         border-radius:3px; padding:1px 4px; white-space:nowrap; }
+  .dd { height:8px; width:8px; fill:currentColor; flex:none; }
+  /* detail marks */
+  .pills { display:inline-flex; align-items:center; gap:10px; vertical-align:-3px; }
+  .mk { height:17px; width:auto; color:var(--body); }
+  .mk path { fill:currentColor; }
+  /* Sized in viewBox units (150x40), so both lines scale with .mk height. */
+  .mkw { fill:currentColor; font:600 15px var(--ui); }
+  .mkw2 { fill:currentColor; font:700 12px var(--ui); letter-spacing:2.4px; }
+  /* HDR10 has no lockup to reproduce; set in the page's own mono so it reads
+     as a sibling of the Dolby marks instead of a mismatched logo. */
+  .mk-txt { font:700 11px var(--mono); letter-spacing:.09em; color:var(--body); }
+  .row2 .fmt { display:inline-flex; align-items:center; min-width:0; letter-spacing:.04em; }
   .dup-badge { position:absolute; top:8px; right:8px; font:700 9px var(--mono); color:var(--dup); background:rgba(15,8,14,.85); border:1px solid var(--dupBd); border-radius:4px; padding:2px 6px; }
   .mcard .prog { position:absolute; left:0; right:0; height:3px; background:color-mix(in srgb, var(--track) 90%, transparent); }
   .mcard .prog > div { height:100%; background:var(--acc); }
   .mcard .foot { padding:8px 10px 9px; background:linear-gradient(180deg,var(--p3),var(--foot)); }
   .mcard .t { font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .mcard .row2 { display:flex; justify-content:space-between; margin-top:3px; font:11px var(--mono); color:var(--faint); }
+  .mcard .row2 { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:4px; font:11px var(--mono); color:var(--mut); }
   .mcard .spec { font:10px var(--mono); color:var(--faint); margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .spec .br.bloated { color:var(--shr); font-weight:700; }
+  .spec .br.ideal { color:var(--fine); }
+  .spec .br.lean { color:var(--faint); }
 
   /* ---------- detail ---------- */
   .dwrap { max-width:960px; margin:0 auto; }
@@ -192,7 +253,8 @@
   .advbanner { display:flex; align-items:center; gap:10px; border-radius:8px; padding:10px 14px; font-size:13px; flex-wrap:wrap; }
   .advbanner.shrink { background:var(--shrBg); border:1px solid var(--shrBd); }
   .advbanner.fine { background:var(--fineBg); border:1px solid var(--fineBd); }
-  .advbanner b.s { color:var(--shr); } .advbanner b.f { color:var(--fine); }
+  .advbanner.lean { background:var(--p2); border:1px solid var(--ctl); }
+  .advbanner b.s { color:var(--shr); } .advbanner b.f { color:var(--fine); } .advbanner b.l { color:var(--mut); }
   .advbanner span { color:var(--body); }
 
   /* RF chart */
@@ -273,12 +335,18 @@
      readable, so step the count down instead of holding 6 everywhere */
   @media (min-width:701px) and (max-width:1100px) {
     .grid { grid-template-columns:repeat(4,1fr); }
+    .lrow { grid-template-columns:minmax(0,1fr) 150px 74px 76px; gap:10px; }
+    .lrow > .lcodec, .lrow > .lbr, .lhead > :nth-child(3), .lhead > :nth-child(4),
+    .lrow > .lst, .lhead > :nth-child(7) { display:none; }
     .dash .stats { grid-template-columns:repeat(2,1fr); }
     .dash .cell:nth-child(2) { border-right:none; }
     .dash .cell:nth-child(1), .dash .cell:nth-child(2) { border-bottom:1px solid var(--hair); }
   }
   @media (min-width:1101px) and (max-width:1320px) {
     .grid { grid-template-columns:repeat(5,1fr); }
+  }
+  @media (min-width:1321px) and (max-width:1700px) {
+    .grid { grid-template-columns:repeat(6,1fr); }
   }
 
   /* ---------- mobile ---------- */
@@ -293,8 +361,12 @@
     .dash .cell:nth-child(3), .dash .cell:nth-child(4) { border-bottom:none; }
     .tabs { margin:0 14px; }
     .grid { grid-template-columns:repeat(3,1fr); gap:10px; padding:14px; }
+    .rows { padding:4px 14px 18px; }
+    .lrow { grid-template-columns:minmax(0,1fr) 74px 62px; gap:10px; }
+    .lrow > .lfmt, .lrow > .lcodec, .lrow > .lbr, .lrow > .lst { display:none; }
+    .lhead > :nth-child(2), .lhead > :nth-child(3), .lhead > :nth-child(4),
+    .lhead > :nth-child(7) { display:none; }
     .mcard .spec { display:none; }
-    .mcard .row2 span:first-child { display:none; }
     .dtop, .ident { padding-left:14px; padding-right:14px; }
     .steps { padding:12px 14px 18px; }
     .trow { flex-wrap:wrap; }
@@ -355,7 +427,10 @@ const resOf = m => {
   if (w >= 1200 || h >= 700) return '720p';
   return h ? h + 'p' : '';
 };
-const barFor = m => (m.height || 0) >= 2000 ? 25 : (m.height || 0) >= 1000 ? 15 : 8;
+// The server classes resolution width-first and sends the bar with it; a
+// height-only copy of that rule here rated every 3840x1608 scope 4K against
+// the 1080p bar. Null when the row has no bitrate -- then there is no bar.
+const barFor = m => (m.quality || {}).cap || null;
 const KIND_LABEL = { remux: 'Quick Remux', encode: 'Heavy Encode', sample: 'Sample' };
 const INFLIGHT = ['cleaning', 'encoding', 'working'];
 
@@ -466,7 +541,10 @@ document.addEventListener('keydown', e => {
 
 // ---------- state ----------
 let MOVIES = [], SHOWS = [], JOBS = [], POWER = null, STATS = { reclaimed_bytes: 0 };
-let TAB = 'needs', SORT = 'size', DUPONLY = false, Q = '';
+let TAB = 'needs', SORT = 'size', DUPONLY = false, Q = '', RES = 'all';
+// grid reads like a shelf; rows read like a worklist -- same data, and the
+// choice survives a reload because it is a working preference, not a filter
+let VIEW = localStorage.getItem('view') || 'grid';
 let SCAN = { running: false };
 let TRACKSTATE = null;   // {audio:[], subs:[]} while a detail page is open
 let TRACK_BASE = 'movies';  // 'movies' | 'episodes' -- which API the track editor writes to
@@ -571,19 +649,79 @@ async function loadMovies() {
 }
 function paintHomeBody() { if (CURID) return; paintDash(); paintTabs(); paintGrid(); }
 
-function bucketOf(m) {
-  if (INFLIGHT.includes(m.status)) return 'flight';
-  if (m.status === 'clean') return 'done';
-  if (m.advice === 'encode') return 'needs';
-  return 'other';
+// A title can sit in more than one bucket: `clean` describes the track work,
+// `needs` describes the bitrate. A remuxed 4K still carrying 40 Mbps is both
+// done and still costing space, so tabs test membership instead of switching
+// on one exclusive bucket.
+const tierOf = m => (m.quality || {}).tier || null;
+// resOf already spells the label the picker offers, so the filter is a match on it
+const inRes = m => RES === 'all' || resOf(m) === RES || (RES === 'SD' && !['4K', '1080p', '720p'].includes(resOf(m)));
+
+// LEAN stays neutral on purpose: amber means "a decision you haven't made",
+// jade means "resolved", and a thin bitrate is neither -- it's information.
+const TIER = {
+  bloated: { label: 'SHRINK', cls: 'shrink g-shr-badge', aria: 'shrink advised',
+    hint: m => `${m.quality.mbps} Mbps is over the ${m.quality.cap} Mbps bar for ${resOf(m)} — a heavy encode buys real space` },
+  ideal: { label: 'FINE', cls: 'fine g-fine-badge', aria: 'bitrate fine',
+    hint: m => `${m.quality.mbps} Mbps sits in the ${m.quality.floor}–${m.quality.cap} Mbps band for ${resOf(m)} — good size for the quality` },
+  lean: { label: 'LEAN', cls: 'lean', aria: 'bitrate low for this resolution',
+    hint: m => `${m.quality.mbps} Mbps is under the ${m.quality.floor} Mbps floor for ${resOf(m)} — thin for this resolution, a better source would help` },
+};
+
+// Format marks, the way a streaming service shows them: the real Dolby
+// lockup rather than a word in a box.
+const MARKS = {
+  dv: `<svg class="mk" viewBox="0 0 150 40" role="img" aria-label="Dolby Vision">
+    <path d="M2 4h6a10 16 0 0 1 0 32H2z"/><path d="M38 4h-6a10 16 0 0 0 0 32h6z"/>
+    <text x="48" y="19" class="mkw">Dolby</text><text x="48" y="35" class="mkw2">VISION</text></svg>`,
+  atmos: `<svg class="mk" viewBox="0 0 150 40" role="img" aria-label="Dolby Atmos">
+    <path d="M2 4h6a10 16 0 0 1 0 32H2z"/><path d="M38 4h-6a10 16 0 0 0 0 32h6z"/>
+    <text x="48" y="19" class="mkw">Dolby</text><text x="48" y="35" class="mkw2">ATMOS</text></svg>`,
+};
+// The Dolby lockup needs about 50px of width to stay readable; a library card
+// gives the whole metadata line ~190px. Rendered at card scale the wordmark
+// turns into a smudge, so cards get short tokens and the real marks live in
+// the detail view, which has the room.
+const DD = `<svg class="dd" viewBox="0 0 40 40" aria-hidden="true">
+  <path d="M2 4h6a10 16 0 0 1 0 32H2z"/><path d="M38 4h-6a10 16 0 0 0 0 32h6z"/></svg>`;
+// Only the Dolby formats take the glyph; HDR10 is not theirs.
+const TOKENS = { dv: DD + 'DV', hdr10: 'HDR10', hlg: 'HLG', atmos: DD + 'ATMOS' };
+
+function formatKeys(m) {
+  const k = [];
+  if ((m.hdr || '').includes('DV')) k.push('dv');
+  if ((m.hdr || '').includes('HDR10')) k.push('hdr10');
+  else if (m.hdr === 'HLG') k.push('hlg');
+  if (m.atmos) k.push('atmos');
+  return k;
 }
+
+// card: legible at 190px
+function tokensHtml(m) {
+  const k = formatKeys(m);
+  return k.length ? `<span class="toks">${k.map(x =>
+    `<span class="tok">${TOKENS[x]}</span>`).join('')}</span>` : '';
+}
+// detail: the real marks, where they fit
+function pillsHtml(m) {
+  const k = formatKeys(m);
+  return k.length ? `<span class="pills">${k.map(x =>
+    MARKS[x] || `<span class="mk-txt">${TOKENS[x]}</span>`).join('')}</span>` : '';
+}
+const inBucket = (m, tab) => {
+  if (tab === 'all') return true;
+  if (tab === 'flight') return INFLIGHT.includes(m.status);
+  if (tab === 'done') return m.status === 'clean';
+  if (tab === 'needs') return tierOf(m) === 'bloated' && !INFLIGHT.includes(m.status);
+  return false;
+};
 function paintDash() {
   const el = document.getElementById('dash');
   if (!el) return;
   const total = MOVIES.length;
   const totalB = MOVIES.reduce((a, m) => a + (m.size_bytes || 0), 0);
   const done = MOVIES.filter(m => m.status === 'clean').length;
-  const queue = MOVIES.filter(m => bucketOf(m) === 'needs');
+  const queue = MOVIES.filter(m => inBucket(m, 'needs'));
   // ponytail: 0.72 savings factor = observed x265 shrink on this library's remuxes
   const onTable = queue.reduce((a, m) => a + (m.size_bytes || 0), 0) * 0.72;
   const pct = total ? Math.round(100 * done / total) : 0;
@@ -632,16 +770,26 @@ function paintDash() {
 function paintTabs() {
   const el = document.getElementById('tabs');
   if (!el) return;
-  const counts = { needs: 0, flight: 0, done: 0 };
-  MOVIES.forEach(m => { const b = bucketOf(m); if (counts[b] !== undefined) counts[b]++; });
+  // counts respect the resolution filter, so the tab number always matches the
+  // number of cards the click will actually show
+  const pool = MOVIES.filter(inRes);
   const t = (id, label, n) => `<button class="tab ${TAB === id ? 'on' : ''}" aria-pressed="${TAB === id}" onclick="TAB='${id}';paintTabs();paintGrid()">${label} ${n}</button>`;
+  const n = tab => pool.filter(m => inBucket(m, tab)).length;
   el.innerHTML = `<div class="tabs">
-    ${t('needs', 'NEEDS DECISION', counts.needs)}${t('flight', 'IN FLIGHT', counts.flight)}${t('done', 'DONE', counts.done)}${t('all', 'ALL', MOVIES.length)}${t('shows', 'TV SHOWS', SHOWS.length)}
+    ${t('needs', 'NEEDS DECISION', n('needs'))}${t('flight', 'IN FLIGHT', n('flight'))}${t('done', 'DONE', n('done'))}${t('all', 'ALL', pool.length)}${t('shows', 'TV SHOWS', SHOWS.length)}
     <div class="right">
+      <span aria-hidden="true">RES:</span><select aria-label="Filter by resolution" onchange="RES=this.value;paintTabs();paintGrid()">
+        ${['all', '4K', '1080p', '720p', 'SD'].map(r =>
+          `<option value="${r}" ${RES === r ? 'selected' : ''}>${r === 'all' ? 'ALL' : r.toUpperCase()}</option>`).join('')}</select>
       <span aria-hidden="true">SORT:</span><select aria-label="Sort library by" onchange="SORT=this.value;paintGrid()">
         <option value="size" ${SORT === 'size' ? 'selected' : ''}>SIZE ▾</option>
         <option value="title" ${SORT === 'title' ? 'selected' : ''}>TITLE</option></select>
       <label>DUP <input type="checkbox" aria-label="Show only duplicates" ${DUPONLY ? 'checked' : ''} onchange="DUPONLY=this.checked;paintGrid()"></label>
+      <span class="vtog" role="group" aria-label="View">
+        ${['grid', 'rows'].map(v => `<button class="vbtn ${VIEW === v ? 'on' : ''}" aria-pressed="${VIEW === v}"
+          title="${v === 'grid' ? 'Poster grid' : 'Compact rows'}"
+          onclick="VIEW='${v}';localStorage.setItem('view','${v}');paintTabs();paintGrid()">${v === 'grid' ? '▦' : '☰'}</button>`).join('')}
+      </span>
     </div></div>`;
 }
 function paintGrid() {
@@ -652,11 +800,16 @@ function paintGrid() {
     el.innerHTML = ss.length ? `<div class="grid">${ss.map(showCardHtml).join('')}</div>` : '<div class="empty">NO SHOWS FOUND</div>';
     return;
   }
-  let ms = MOVIES.filter(m => TAB === 'all' || bucketOf(m) === TAB);
+  let ms = MOVIES.filter(m => inRes(m) && inBucket(m, TAB));
   if (DUPONLY) ms = ms.filter(m => m.dup);
   ms.sort(SORT === 'size' ? (a, b) => (b.size_bytes || 0) - (a.size_bytes || 0)
                           : (a, b) => (a.title || a.clean_title || a.folder).localeCompare(b.title || b.clean_title || b.folder));
-  el.innerHTML = ms.length ? `<div class="grid">${ms.map(cardHtml).join('')}</div>` : '<div class="empty">NOTHING HERE</div>';
+  if (!ms.length) { el.innerHTML = '<div class="empty">NOTHING HERE</div>'; return; }
+  el.innerHTML = VIEW === 'rows'
+    ? `<div class="rows"><div class="lrow lhead" aria-hidden="true">
+         <div>TITLE</div><div>FORMAT</div><div>CODEC</div><div>BITRATE</div><div>VERDICT</div><div>SIZE</div><div>JOB</div></div>
+       ${ms.map(rowHtml).join('')}</div>`
+    : `<div class="grid">${ms.map(cardHtml).join('')}</div>`;
 }
 function showCardHtml(s) {
   const title = s.title || s.clean_title || s.folder;
@@ -675,24 +828,52 @@ function cardHtml(m) {
   const title = m.title || m.clean_title || m.folder;
   const poster = posterUrl(m.poster_path);
   const res = resOf(m);
-  const shrink = m.advice === 'encode' && m.status !== 'clean';
+  const tier = tierOf(m);
+  // the badge no longer hides once a title is clean -- a remuxed file can still
+  // be carrying more bitrate than its resolution needs, and that stays true
+  const shrink = tier === 'bloated';
   const job = JOBS.find(j => j.movie_id === m.id && j.status === 'running');
-  const specBits = [res, (m.video_codec || '').toUpperCase(), m.hdr && m.hdr !== 'SDR' ? m.hdr : null,
-                    m.bitrate ? Math.round(m.bitrate / 1e6) + 'Mbps' : null].filter(Boolean);
+  // resolution lives in row2 next to the format marks; this line carries the
+  // encoding facts that nothing else states. The bitrate is coloured by its own
+  // verdict so the number and the judgment of it are never read apart.
+  const brHtml = m.bitrate
+    ? `<span class="br ${tier || ''}"${tier ? ` title="${esc(TIER[tier].hint(m))}"` : ''}>${Math.round(m.bitrate / 1e6)} Mbps</span>`
+    : null;
+  const specBits = [(m.video_codec || '').toUpperCase(), brHtml].filter(Boolean);
   const aria = [title, res, m.size_bytes ? fmtG(m.size_bytes) : null,
-                shrink ? 'shrink advised' : null, m.dup ? 'has duplicates' : null,
+                tier ? TIER[tier].aria : null, m.dup ? 'has duplicates' : null,
                 m.status && m.status !== 'unprocessed' ? 'status ' + m.status : null].filter(Boolean).join(', ');
   return `<div class="mcard ${shrink ? 'shrink' : ''}" role="button" tabindex="0"
     aria-label="${esc(aria)}" onclick="location.hash='#/movie/${m.id}'">
     ${poster ? `<img class="poster" src="${poster}" alt="" loading="lazy">` : `<div class="noposter">${esc(title)}</div>`}
-    ${m.status !== 'clean' && m.advice ? `<div class="adv-badge ${shrink ? 'shrink g-shr-badge' : 'fine g-fine-badge'}">${shrink ? 'SHRINK' : 'FINE'}</div>` : ''}
+    ${tier ? `<div class="adv-badge ${TIER[tier].cls}">${TIER[tier].label}</div>` : ''}
     ${m.dup ? '<div class="dup-badge">DUP</div>' : ''}
     ${job ? `<div class="prog" role="progressbar" aria-valuenow="${Math.round(job.progress || 0)}" aria-valuemin="0" aria-valuemax="100" aria-label="Job progress" style="bottom:${document.body.clientWidth <= 700 ? 40 : 58}px"><div class="g-acc" style="width:${job.progress || 0}%"></div></div>` : ''}
     <div class="foot">
       <div class="t">${esc(title)}</div>
-      <div class="row2"><span>${res}${m.hdr && m.hdr !== 'SDR' ? ' ' + m.hdr : ''}</span><span style="color:${shrink ? 'var(--shr)' : 'var(--faint)'}">${fmtG(m.size_bytes)}</span></div>
+      <div class="row2"><span class="fmt">${res}${tokensHtml(m)}</span><span style="color:${shrink ? 'var(--shr)' : 'var(--faint)'}">${fmtG(m.size_bytes)}</span></div>
       <div class="spec">${m.status === 'error' ? '<span style="color:var(--err)">ERROR · </span>' : ''}${INFLIGHT.includes(m.status) ? `<span style="color:var(--acc)">${m.status.toUpperCase()} · </span>` : ''}${specBits.join(' · ')}</div>
     </div></div>`;
+}
+
+function rowHtml(m) {
+  const title = m.title || m.clean_title || m.folder;
+  const res = resOf(m);
+  const tier = tierOf(m);
+  const job = JOBS.find(j => j.movie_id === m.id && j.status === 'running');
+  const mbps = m.bitrate ? Math.round(m.bitrate / 1e6) : null;
+  const aria = [title, res, m.size_bytes ? fmtG(m.size_bytes) : null,
+                tier ? TIER[tier].aria : null].filter(Boolean).join(', ');
+  return `<div class="lrow ${tier === 'bloated' ? 'shrink' : ''}" role="button" tabindex="0"
+    aria-label="${esc(aria)}" onclick="location.hash='#/movie/${m.id}'">
+    <div class="lt">${esc(title)}${m.year ? ` <span class="lyr">${m.year}</span>` : ''}${m.dup ? ' <span class="ldup">DUP</span>' : ''}</div>
+    <div class="lfmt">${res}${tokensHtml(m)}</div>
+    <div class="lcodec">${esc((m.video_codec || '').toUpperCase())}</div>
+    <div class="lbr ${tier || ''}" title="${tier ? esc(TIER[tier].hint(m)) : ''}">${mbps ? mbps + ' Mbps' : ''}</div>
+    <div class="lq">${tier ? `<span class="ltier ${TIER[tier].cls}">${TIER[tier].label}</span>` : ''}</div>
+    <div class="lsize ${tier === 'bloated' ? 'shr' : ''}">${fmtG(m.size_bytes)}</div>
+    <div class="lst">${job ? `<span class="lrun">${Math.round(job.progress || 0)}%</span>` : ''}</div>
+  </div>`;
 }
 
 // ---------- scan ----------
@@ -790,7 +971,7 @@ async function renderDetail(id) {
     stub: ['STUB', 'var(--mut)'], error: ['ERROR', 'var(--err)'] };
   const [stL, stC] = STMAP[m.status] || STMAP.unprocessed;
   const poster = posterUrl(m.poster_path);
-  const shrink = m.advice === 'encode';
+  const shrink = tierOf(m) === 'bloated';
   const mbps = m.bitrate ? (m.bitrate / 1e6) : null;
   const bar = barFor(m);
 
@@ -809,8 +990,8 @@ async function renderDetail(id) {
         <div class="fn">${esc(m.file || m.folder)}</div>
         <div class="spec-chips">
           ${m.width ? `<span class="schip">${m.width}×${m.height}</span>` : ''}
+          ${pillsHtml(m)}
           ${m.video_codec ? `<span class="schip">${esc(m.video_codec.toUpperCase())}</span>` : ''}
-          ${m.hdr && m.hdr !== 'SDR' ? `<span class="schip acc">${esc(m.hdr)}</span>` : ''}
           ${mbps ? `<span class="schip ${mbps > bar ? 'shr' : ''}">${mbps.toFixed(0)} Mbps</span>` : ''}
           ${m.size_bytes ? `<span class="schip ${shrink ? 'shr' : ''}">${fmtG(m.size_bytes)}</span>` : ''}
           ${m.original_language ? `<span class="schip">orig: ${esc(m.original_language)}</span>` : ''}
@@ -952,7 +1133,8 @@ async function callStrip(id) { await api(`/api/${TRACK_BASE}/${id}/strip-names`,
 function tagForRF(rf) { return rf <= 18 ? 'NEAR-LOSSLESS' : rf <= 21 ? 'EXCELLENT' : rf <= 23 ? 'SWEET SPOT' : 'QUALITY RISK'; }
 function recommendedRF(m) {
   // lowest RF (best quality) whose projected full size lands under the advice bar
-  if (!SAMPLES.length || !m.duration) return null;
+  // no bar means no bitrate on the row, so there is nothing to aim under
+  if (!SAMPLES.length || !m.duration || !barFor(m)) return null;
   const barBits = barFor(m) * 1e6;
   const ok = SAMPLES.filter(s => s.est_full_bytes && (s.est_full_bytes * 8 / m.duration) <= barBits)
                     .sort((a, b) => a.rf - b.rf);
@@ -960,13 +1142,15 @@ function recommendedRF(m) {
 }
 function step3Html(m, running) {
   if (running) return jobProgressHtml() || '<div class="jprog"><div class="row">job starting…</div></div>';
-  const shrink = m.advice === 'encode';
-  const mbps = m.bitrate ? Math.round(m.bitrate / 1e6) : null;
-  const bar = barFor(m);
+  const tier = tierOf(m);
+  const q = m.quality;
   const res = resOf(m);
-  const banner = m.advice ? (shrink
-    ? `<div class="advbanner shrink"><b class="s">SHRINK ADVISED</b><span>${mbps} Mbps is above the ${bar} Mbps bar for ${res} — a heavy encode should reclaim ~${Math.round((m.size_bytes || 0) * 0.72 / 1e9)} GB with no visible loss.</span></div>`
-    : `<div class="advbanner fine"><b class="f">QUALITY FINE</b><span>${mbps ?? '?'} Mbps is at or under the ${bar} Mbps bar for ${res} — accept as-is, or quick-remux if the tracks need cleanup.</span></div>`) : '';
+  const BANNER = {
+    bloated: () => `<div class="advbanner shrink"><b class="s">SHRINK ADVISED</b><span>${q.mbps} Mbps is above the ${q.cap} Mbps bar for ${res} — a heavy encode should reclaim ~${Math.round((m.size_bytes || 0) * 0.72 / 1e9)} GB with no visible loss.</span></div>`,
+    ideal: () => `<div class="advbanner fine"><b class="f">QUALITY FINE</b><span>${q.mbps} Mbps sits in the ${q.floor}–${q.cap} Mbps band for ${res} — good size for the quality. Accept as-is, or quick-remux if the tracks need cleanup.</span></div>`,
+    lean: () => `<div class="advbanner lean"><b class="l">BITRATE LEAN</b><span>${q.mbps} Mbps is under the ${q.floor} Mbps floor for ${res} — thin for this resolution. Encoding it again would only lose more; a better source is the real upgrade.</span></div>`,
+  };
+  const banner = tier ? BANNER[tier]() : '';
   const selSample = SAMPLES.find(s => s.rf === SELRF);
   const est = selSample && selSample.est_full_bytes ? ` · est ~${fmtG(selSample.est_full_bytes)}` : '';
   return `${banner}
@@ -1026,7 +1210,7 @@ function refreshStep3() {
 }
 
 async function previewCmd(id) {
-  const kind = window._m && window._m.advice === 'keep' ? 'remux' : 'encode';
+  const kind = window._m && tierOf(window._m) !== 'bloated' ? 'remux' : 'encode';
   const r = await api(`/api/movies/${id}/command?kind=${kind}&quality=${SELRF}`).catch(e => { oops(e); throw e; });
   const pre = document.getElementById('cmdPreview');
   pre.style.display = 'block';

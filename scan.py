@@ -29,6 +29,11 @@ ARTWORK_SUFFIXES = {"folder", "poster", "backdrop", "background", "landscape", "
 ARTWORK_EXT = (".jpg", ".jpeg", ".png", ".webp")
 
 
+def _now():
+    """Local wall-clock stamp in the format every table stores."""
+    return time.strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def _artwork_base(stem, ext):
     """None if not artwork. '' for generic artwork (folder.jpg, backdrop.jpg).
     Otherwise the file-stem prefix it belongs to ('Movie.hevc-poster' -> 'Movie.hevc')."""
@@ -42,9 +47,6 @@ def _artwork_base(stem, ext):
             return stem[:-(len(suf) + 1)]
     return None
 
-
-def _is_artwork(stem, ext):
-    return _artwork_base(stem, ext) is not None
 
 # Known scene/tracker junk patterns -- deny-list, not allow-list: anything that
 # doesn't match a known-junk pattern is left alone rather than guessed at.
@@ -297,8 +299,12 @@ def suggest_tracks(conn, owner_id, table="movies", multi_audio=False):
     for lang in wanted:
         # avoided codecs sort last within a language, so cands[0] is the compatible
         # best — the same pick the old next() made, one less pass
+        # commentary sorts last like an avoided codec: it only wins when it is
+        # the sole track for that language, otherwise a 2.0 AC-3 commentary
+        # could out-rank the real 5.1 dub on codec score alone
         cands = sorted([t for t in audio if t["lang"] == lang],
-                       key=lambda t: (_audio_avoided(t["codec"]), _audio_rank(t["codec"])))
+                       key=lambda t: (t.get("commentary_flag") or 0,
+                                      _audio_avoided(t["codec"]), _audio_rank(t["codec"])))
         if not cands:
             continue
         # ponytail: TV keeps every dub in a wanted language; movies keep one
@@ -336,7 +342,7 @@ def suggest_tracks(conn, owner_id, table="movies", multi_audio=False):
         if srt:
             mark(srt, lang, default=False, forced=False)
 
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    now = _now()
     for t in tracks:
         if t["type"] == "video":
             lang = t["lang"] if t["lang"] != "und" else (orig3 or "eng")
@@ -515,7 +521,7 @@ def upsert_show(conn, media_root, folder_name, api_key):
     by find_episode_files, then prunes episode rows whose file vanished."""
     folder_path = os.path.join(media_root, folder_name)
     clean_title, guess_year = clean_title_year(folder_name)
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    now = _now()
 
     row = conn.execute("SELECT id FROM shows WHERE folder=?", (folder_name,)).fetchone()
     show_id = row["id"] if row else None
@@ -567,6 +573,7 @@ def upsert_show(conn, media_root, folder_name, api_key):
             container_title=info["container_title"], video_codec=info["video_codec"],
             width=info["width"], height=info["height"], bitrate=info["bitrate"],
             duration=info["duration"], size_bytes=info["size_bytes"], hdr=info["hdr"],
+            atmos=info["atmos"],
             status=status, updated_at=now,
         )
         if ep_row:
@@ -630,6 +637,20 @@ def _detect_hdr(streams):
     return "SDR"
 
 
+def _detect_atmos(streams):
+    """1 when any audio stream carries an Atmos substream, else 0.
+
+    ffprobe spells it in the stream `profile`: "Dolby TrueHD + Dolby Atmos" or
+    "Dolby Digital Plus + Dolby Atmos". The codec name alone never says it --
+    both TrueHD and E-AC-3 exist with and without Atmos."""
+    for s in streams:
+        if s.get("codec_type") != "audio":
+            continue
+        if "atmos" in (s.get("profile") or "").lower():
+            return 1
+    return 0
+
+
 # mkv's legacy language field is ISO 639-2 only -- "spa" carries no region, so
 # Latin American and European Spanish audio collide as one language and only
 # one survives the one-per-language rule. Rippers that care tag it in the
@@ -639,6 +660,15 @@ def _detect_hdr(streams):
 # to out_lang (mkvmerge/HandBrake need a real ISO code -- see _spanish_base).
 SPANISH_MX_RE = re.compile(r"\blatino\b|\blat(?:am)?\b|\bmex(?:ico)?\b|\b(?:es-)?419\b", re.IGNORECASE)
 SPANISH_ES_RE = re.compile(r"\bcastellano\b|\bespa[ñn]a\b|\bspain\b|\b(?:es-)?es\b", re.IGNORECASE)
+
+# Most rips never set mkv's hearing-impaired/commentary flags and say it in the
+# track name instead ("English (SDH)", "Commentary by the director"), so the name
+# is the more reliable of the two signals -- both are consulted.
+# No two-letter alternatives: "Hi-Res" matched \bhi\b (the hyphen is a word
+# boundary) and would have shipped a DTS-HD track named "English (SDH)".
+_NAME_SDH_RE = re.compile(r"\bsdh\b|[\[(]cc[\])]|closed.?caption|hearing.?impaired",
+                          re.IGNORECASE)
+_NAME_COMMENTARY_RE = re.compile(r"\bcommentar(?:y|ies)\b|\bcomentario", re.IGNORECASE)
 
 
 def _spanish_variant(lang, name):
@@ -677,6 +707,11 @@ def inspect_file(path):
             "channels": tp.get("audio_channels"),
             "default_flag": 1 if tp.get("default_track") else 0,
             "forced_flag": 1 if tp.get("forced_track") else 0,
+            # the remux writes every one of these back explicitly, so they have to
+            # be read explicitly too -- otherwise a source's SDH flag survives on a
+            # track we relabelled as plain dialogue
+            "sdh_flag": 1 if tp.get("flag_hearing_impaired") or _NAME_SDH_RE.search(name) else 0,
+            "commentary_flag": 1 if tp.get("flag_commentary") or _NAME_COMMENTARY_RE.search(name) else 0,
             "ext_path": None,
         })
 
@@ -721,6 +756,7 @@ def inspect_file(path):
         "height": vstream.get("height"),
         "bitrate": bitrate,
         "hdr": _detect_hdr(streams),
+        "atmos": _detect_atmos(streams),
         "size_bytes": os.path.getsize(path) if os.path.exists(path) else None,
         "tracks": tracks,
     }
@@ -736,7 +772,7 @@ def upsert_movie(conn, media_root, folder_name, api_key):
 
     main_file = find_main_file(folder_path)
     clean_title, guess_year = clean_title_year(folder_name)
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    now = _now()
 
     cur = conn.execute("SELECT id FROM movies WHERE folder = ?", (folder_name,))
     row = cur.fetchone()
@@ -759,7 +795,19 @@ def upsert_movie(conn, media_root, folder_name, api_key):
         return movie_id
 
     file_path = os.path.join(folder_path, main_file)
-    tmdb = tmdb_search(clean_title, guess_year, api_key)
+    # A row that already carries a tmdb_id keeps it. Re-searching on every scan
+    # silently undid manual corrections: "Enemy (2013)" is TMDB 181886 with a
+    # 2014-03-14 release date, so a year-strict search on the folder's 2013
+    # picks "Class Enemy" instead, and the next propedit stamped that wrong
+    # title into the file. upsert_show already worked this way.
+    existing = conn.execute("SELECT tmdb_id, title, year, original_language, poster_path "
+                            "FROM movies WHERE id=?", (movie_id,)).fetchone() if movie_id else None
+    if existing and existing["tmdb_id"]:
+        tmdb = {"tmdb_id": existing["tmdb_id"], "title": existing["title"],
+                "year": existing["year"], "original_language": existing["original_language"],
+                "poster_path": existing["poster_path"]}
+    else:
+        tmdb = tmdb_search(clean_title, guess_year, api_key)
     info = inspect_file(file_path)
     ext_subs = find_external_subs(folder_path)
 
@@ -776,6 +824,7 @@ def upsert_movie(conn, media_root, folder_name, api_key):
         container_title=info["container_title"], video_codec=info["video_codec"],
         width=info["width"], height=info["height"], bitrate=info["bitrate"],
         duration=info["duration"], size_bytes=info["size_bytes"], hdr=info["hdr"],
+        atmos=info["atmos"],
         status=status, updated_at=now,
     )
 
@@ -819,7 +868,8 @@ def _upsert_tracks(conn, owner_id, source_tracks, ext_subs, original_language, o
     order_counters = {"audio": 0, "subtitle": 0}
     orig_lang_3 = LANG_ISO1_TO_3.get(original_language or "", None)
 
-    def upsert_one(key, type_, codec, lang, name, channels, default_flag, forced_flag, ext_path, mkv_id):
+    def upsert_one(key, type_, codec, lang, name, channels, default_flag, forced_flag, ext_path, mkv_id,
+                   sdh_flag=0, commentary_flag=0):
         seen_keys.add(key)
         prior = existing.get(key)
         if prior:
@@ -827,8 +877,9 @@ def _upsert_tracks(conn, owner_id, source_tracks, ext_subs, original_language, o
             # may sit at a new index in the remuxed file
             conn.execute(
                 "UPDATE tracks SET mkv_id=?, type=?, codec=?, lang=?, name=?, channels=?, "
-                "default_flag=?, forced_flag=? WHERE id=?",
-                (mkv_id, type_, codec, lang, name, channels, default_flag, forced_flag, prior["id"]),
+                "default_flag=?, forced_flag=?, sdh_flag=?, commentary_flag=? WHERE id=?",
+                (mkv_id, type_, codec, lang, name, channels, default_flag, forced_flag,
+                 sdh_flag, commentary_flag, prior["id"]),
             )
             return
         # lang may be a spa-mx/spa-es grouping key (see _spanish_variant) --
@@ -840,16 +891,17 @@ def _upsert_tracks(conn, owner_id, source_tracks, ext_subs, original_language, o
             order_counters[type_] += 1
         conn.execute(
             f"INSERT INTO tracks ({owner_col}, mkv_id, type, codec, lang, name, channels, default_flag, forced_flag, "
-            "ext_path, keep, out_order, out_lang, out_default, out_forced, out_name) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)",
+            "sdh_flag, commentary_flag, ext_path, keep, out_order, out_lang, out_default, out_forced, out_name) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)",
             (owner_id, mkv_id, type_, codec, lang, name, channels, default_flag, forced_flag,
-             ext_path, out_order, out_lang, default_flag, forced_flag, ""),
+             sdh_flag, commentary_flag, ext_path, out_order, out_lang, default_flag, forced_flag, ""),
         )
 
     for t in source_tracks:
         key = sig_key(t, source_counts)
         upsert_one(key, t["type"], t["codec"], t["lang"], t["name"], t["channels"],
-                   t["default_flag"], t["forced_flag"], None, t["mkv_id"])
+                   t["default_flag"], t["forced_flag"], None, t["mkv_id"],
+                   t.get("sdh_flag", 0), t.get("commentary_flag", 0))
 
     for s in ext_subs:
         key = ("ext", s["ext_path"])
@@ -917,7 +969,7 @@ def scan_library(conn, media_root, api_key, progress_cb=None, include_shows=True
             elif not path_unchanged(seen.get(name), os.path.join(media_root, name)):
                 upsert_movie(conn, media_root, name, api_key)
         except Exception:
-            now = time.strftime("%Y-%m-%dT%H:%M:%S")
+            now = _now()
             if kinds[name] == "show":
                 # shows carry no status column (it's a computed aggregate over
                 # episodes) -- just make sure a row exists so it's visible; the
@@ -960,7 +1012,7 @@ def scan_shows_root(conn, shows_root, api_key, progress_cb=None):
             conn.execute(
                 "INSERT INTO shows (folder, updated_at) VALUES (?, ?) "
                 "ON CONFLICT(folder) DO UPDATE SET updated_at=excluded.updated_at",
-                (name, time.strftime("%Y-%m-%dT%H:%M:%S")),
+                (name, _now()),
             )
             conn.commit()
         if progress_cb:

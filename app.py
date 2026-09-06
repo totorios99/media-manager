@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 import commands
 import jobs
 import scan
+from scan import _now
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "/media/hdd1/Movies")
@@ -74,7 +75,7 @@ CREATE TABLE IF NOT EXISTS movies (
     original_language TEXT, poster_path TEXT,
     container_title TEXT, video_codec TEXT, width INTEGER, height INTEGER,
     bitrate INTEGER, duration REAL, size_bytes INTEGER,
-    hdr TEXT,
+    hdr TEXT, atmos INTEGER DEFAULT 0,
     status TEXT DEFAULT 'unprocessed',
     output_file TEXT, updated_at TEXT
 );
@@ -94,7 +95,7 @@ CREATE TABLE IF NOT EXISTS episodes (
     folder TEXT NOT NULL,
     file TEXT,
     container_title TEXT, video_codec TEXT, width INTEGER, height INTEGER,
-    bitrate INTEGER, duration REAL, size_bytes INTEGER, hdr TEXT,
+    bitrate INTEGER, duration REAL, size_bytes INTEGER, hdr TEXT, atmos INTEGER DEFAULT 0,
     status TEXT DEFAULT 'unprocessed',
     excluded INTEGER DEFAULT 0,
     output_file TEXT, updated_at TEXT,
@@ -107,6 +108,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     mkv_id INTEGER,
     type TEXT NOT NULL, codec TEXT, lang TEXT, name TEXT,
     channels INTEGER, default_flag INTEGER DEFAULT 0, forced_flag INTEGER DEFAULT 0,
+    sdh_flag INTEGER DEFAULT 0, commentary_flag INTEGER DEFAULT 0,
     ext_path TEXT,
     keep INTEGER DEFAULT 1, out_order INTEGER DEFAULT 0,
     out_lang TEXT DEFAULT '', out_default INTEGER DEFAULT 0, out_forced INTEGER DEFAULT 0,
@@ -136,7 +138,12 @@ _TRACKS_OLD_COLS = ("id", "movie_id", "mkv_id", "type", "codec", "lang", "name",
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH, timeout=30)
+    # 30s was not enough: verifying a 30 GB 4K remux reads the whole file back
+    # over a 1.5 Gb/s USB link while transmission writes to the same SMR disk,
+    # and every enqueue in that window died with "database is locked" -- 36 in
+    # one run. Waiting is always better than failing here; nothing holds a write
+    # lock for a long stretch, the contention is pure disk starvation.
+    conn = sqlite3.connect(DB_PATH, timeout=300)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
@@ -198,6 +205,22 @@ def _migrate(conn):
             raise
         finally:
             conn.execute("PRAGMA foreign_keys=ON")
+    # Additive columns, after the rebuild above: run before it, the pre-TV
+    # migration recreated `tracks` from _TRACKS_OLD_COLS and renamed it over
+    # the top, dropping both new columns and breaking every later scan.
+    # Each stays NULL/0 until the next scan re-inspects the file.
+    for table, col, decl in (
+        ("movies", "atmos", "INTEGER DEFAULT 0"),
+        ("episodes", "atmos", "INTEGER DEFAULT 0"),
+        ("tracks", "sdh_flag", "INTEGER DEFAULT 0"),
+        ("tracks", "commentary_flag", "INTEGER DEFAULT 0"),
+    ):
+        if not conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+            continue
+        if col not in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+            conn.commit()
     conn.execute("PRAGMA user_version=1")
     conn.commit()
 
@@ -279,7 +302,7 @@ def _owner_info(conn, kind, owner_id):
 
 def _set_owner_status(conn, kind, owner_id, status, output_file=None):
     table = _owner_table(kind)
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    now = _now()
     if output_file is not None:
         conn.execute(f"UPDATE {table} SET status=?, output_file=?, updated_at=? WHERE id=?",
                      (status, output_file, now, owner_id))
@@ -303,13 +326,15 @@ def _reap_stale_jobs():
         for r in conn.execute("SELECT id FROM jobs WHERE status='running'").fetchall():
             job = _poll_and_finalize(conn, r["id"])
             if job and job["status"] == "running" and not jobs.scope_active(job["id"]):
-                now = time.strftime("%Y-%m-%dT%H:%M:%S")
+                now = _now()
                 kind, oid = _job_owner_kind_id(job)
                 conn.execute("UPDATE jobs SET status='failed', finished_at=? WHERE id=?", (now, job["id"]))
                 _set_owner_status(conn, kind, oid, "error")
                 conn.commit()
                 job = dict(conn.execute("SELECT * FROM jobs WHERE id=?", (r["id"],)).fetchone())
-            if job and job["status"] == "failed" and job["kind"] != "sample":
+            # propedit's output_file is the source itself; there is no partial
+            # output to clear and removing it would destroy the only copy
+            if job and job["status"] == "failed" and job["kind"] not in ("sample", "propedit"):
                 kind, oid = _job_owner_kind_id(job)
                 owner = _owner_info(conn, kind, oid)
                 if owner and owner["output_file"]:
@@ -524,32 +549,55 @@ def junk_apply():
 
 # ---------- movies ----------
 
-# bitrate above this (Mbps, by resolution class) → worth a heavy encode;
-# at/below it the storage win doesn't justify a lossy re-encode
+# bitrate ceiling per resolution class (Mbps): above it a heavy encode buys real
+# space; at or under it the storage win doesn't justify a lossy re-encode.
+# The floor is the other end -- under it the bitrate is thin for the resolution,
+# so the file wants a better source, not a shrink.
 # ponytail: fixed thresholds; make settings if they ever need tuning
-ADVICE_MBPS_UHD, ADVICE_MBPS_FHD, ADVICE_MBPS_SD = 25, 15, 8
+# resolution class -> (cap, floor) in Mbps
+_BANDS = {"uhd": (25, 15), "fhd": (15, 8), "sd": (8, 4)}
+# Those floors are h264 numbers. HEVC/AV1/VP9 hold the same picture at roughly
+# 60% of the bitrate, so a codec-blind floor called 116 of 178 4K HEVC files
+# "thin" when they were fine -- 75% of the library came back `lean` and the
+# signal was useless. The cap stays codec-blind on purpose: a 40 Mbps file is
+# worth re-encoding whatever wrote it.
+MODERN_CODEC_FLOOR = 0.6
+_MODERN_CODECS = ("hevc", "h265", "av1", "vp9")
 
 
-def _advice(d):
-    """'encode' | 'keep' | None (no data). Advisory only — never blocks a job."""
+def _res_class(w, h):
+    """'uhd' | 'fhd' | 'sd'. Width first: a 2.39:1 scope UHD is 3840x1608, and a
+    height-only test rates it FHD -- then 23 Mbps looks bloated and every scope
+    4K begs for an encode."""
+    if w >= 3000 or h >= 2000:
+        return "uhd"
+    if w >= 1800 or h >= 1000:
+        return "fhd"
+    return "sd"
+
+
+def _quality(d):
+    """Where the bitrate sits for its resolution, or None with no data.
+
+    {'tier': 'bloated'|'ideal'|'lean', 'mbps', 'cap', 'floor', 'res'}
+    Advisory only — never blocks a job."""
     br, w, h = d.get("bitrate"), d.get("width") or 0, d.get("height") or 0
     if not br:
         return None
-    # width first: a 2.39:1 scope UHD is 3840x1608, and a height-only test rates
-    # it FHD -- then 23 Mbps looks bloated and every scope 4K begs for an encode
-    if w >= 3000 or h >= 2000:
-        cap = ADVICE_MBPS_UHD
-    elif w >= 1800 or h >= 1000:
-        cap = ADVICE_MBPS_FHD
-    else:
-        cap = ADVICE_MBPS_SD
-    return "encode" if br > cap * 1e6 else "keep"
+    res = _res_class(w, h)
+    cap, floor = _BANDS[res]
+    codec = (d.get("video_codec") or "").lower()
+    if any(c in codec for c in _MODERN_CODECS):
+        floor = round(floor * MODERN_CODEC_FLOOR, 1)
+    mbps = br / 1e6
+    tier = "bloated" if mbps > cap else ("lean" if mbps < floor else "ideal")
+    return {"tier": tier, "mbps": round(mbps, 1), "cap": cap, "floor": floor, "res": res}
 
 
 def _movie_summary(row, dup_ids):
     d = dict(row)
     d["dup"] = d["id"] in dup_ids
-    d["advice"] = _advice(d)
+    d["quality"] = _quality(d)
     return d
 
 
@@ -603,7 +651,7 @@ def get_movie(movie_id: int):
                 (movie["tmdb_id"], movie_id),
             ).fetchall()]
         m = dict(movie)
-        m["advice"] = _advice(m)
+        m["quality"] = _quality(m)
         return {"movie": m, "tracks": [dict(t) for t in tracks], "duplicates": siblings}
     finally:
         conn.close()
@@ -624,7 +672,7 @@ def set_tmdb(movie_id: int, body: dict):
         raise HTTPException(502, "TMDB lookup failed")
     conn = get_db()
     try:
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
         conn.execute(
             "UPDATE movies SET tmdb_id=?, title=?, year=?, original_language=?, poster_path=?, updated_at=? WHERE id=?",
             (info["tmdb_id"], info["title"], info["year"], info["original_language"], info["poster_path"], now, movie_id),
@@ -669,7 +717,7 @@ def save_config(movie_id: int, body: dict):
                 (int(t["keep"]), int(t["out_order"]), t["out_lang"], int(t["out_default"]),
                  int(t["out_forced"]), t.get("out_name", ""), t["id"], movie_id),
             )
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
         conn.execute("UPDATE movies SET status='ready', updated_at=? WHERE id=? AND status NOT IN ('working','clean')",
                      (now, movie_id))
         conn.commit()
@@ -709,7 +757,7 @@ def rename_movie(movie_id: int):
         target = _safe_name(f"{m['title']} ({m['year']})")
         old_folder = os.path.join(MEDIA_ROOT, m["folder"])
         new_folder = os.path.join(MEDIA_ROOT, target)
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
 
         # -- folder rename, committed on its own so a later file-rename failure
         #    can never leave the DB pointing at a folder that no longer exists
@@ -850,7 +898,7 @@ def accept_as_is(movie_id: int):
         if busy:
             raise HTTPException(409, "a job is running or queued for this movie")
         conn.execute("UPDATE movies SET status='clean', updated_at=? WHERE id=?",
-                     (time.strftime("%Y-%m-%dT%H:%M:%S"), movie_id))
+                     (_now(), movie_id))
         conn.commit()
         return {"ok": True}
     finally:
@@ -934,7 +982,7 @@ def set_show_tmdb(show_id: int, body: dict):
     conn = get_db()
     try:
         _show_or_404(conn, show_id)
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
         conn.execute(
             "UPDATE shows SET tmdb_id=?, title=?, year=?, original_language=?, poster_path=?, updated_at=? WHERE id=?",
             (info["tmdb_id"], info["title"], info["year"], info["original_language"], info["poster_path"], now, show_id),
@@ -953,7 +1001,7 @@ def set_excluded(show_id: int, body: dict):
     try:
         _show_or_404(conn, show_id)
         excluded = set(int(i) for i in body.get("excluded", []))
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
         for r in conn.execute("SELECT id FROM episodes WHERE show_id=?", (show_id,)).fetchall():
             conn.execute("UPDATE episodes SET excluded=?, updated_at=? WHERE id=?",
                          (1 if r["id"] in excluded else 0, now, r["id"]))
@@ -1061,7 +1109,7 @@ def set_show_config_from_episode(show_id: int, body: dict):
             }
             for r in rows
         }
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
         conn.execute("UPDATE shows SET track_config=?, updated_at=? WHERE id=?",
                      (json.dumps(config), now, show_id))
         conn.commit()
@@ -1083,7 +1131,7 @@ def apply_show_config(show_id: int):
         if not config:
             raise HTTPException(400, "no show config set -- POST .../config/from-episode first")
         clean, conflicts = _show_config_conflicts(conn, show_id, config)
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
         for item in clean:
             _apply_track_settings(conn, item["episode_id"], item["track_updates"])
             conn.execute(
@@ -1204,7 +1252,7 @@ def rename_show(show_id: int):
         target = _safe_name(f"{s['title']} ({s['year']})")
         old_folder = os.path.join(SHOWS_ROOT, s["folder"])
         new_folder = os.path.join(SHOWS_ROOT, target)
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
 
         if target != s["folder"]:
             if not os.path.isdir(old_folder):
@@ -1332,7 +1380,7 @@ def save_config_episode(episode_id: int, body: dict):
     try:
         _owner_or_404(conn, "episode", episode_id)
         _apply_track_settings(conn, episode_id, body.get("tracks", []))
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        now = _now()
         conn.execute(
             "UPDATE episodes SET status='ready', updated_at=? WHERE id=? AND status NOT IN ('working','clean')",
             (now, episode_id),
@@ -1438,8 +1486,12 @@ def _owner_or_404(conn, kind, owner_id):
 
 
 def _build_job_cmd(conn, kind, owner, job_kind, quality):
-    """Returns (cmd_str, out_path) for remux/encode/sample. `owner` is the
-    uniform dict from _owner_info; `kind` is 'movie'|'episode'."""
+    """Returns (cmd_str, out_path) for remux/propedit/encode/sample. `owner` is
+    the uniform dict from _owner_info; `kind` is 'movie'|'episode'.
+
+    propedit edits the source in place, so its out_path IS the source path --
+    no 2 TB of copying and no free-space requirement for the 104 titles that
+    only have wrong labels, not extra tracks."""
     title = owner["title_display"]
     folder_path = os.path.join(_root_for(kind), owner["folder"])
     in_path = os.path.join(folder_path, owner["file"])
@@ -1447,6 +1499,16 @@ def _build_job_cmd(conn, kind, owner, job_kind, quality):
     if job_kind == "remux":
         out_path = os.path.join(folder_path, f"{owner['out_base']}.remux.mkv")
         return shlex.join(commands.build_mkvmerge_remux(tracks, title, in_path, out_path)), out_path
+    if job_kind == "propedit":
+        audio_order = sorted([t for t in tracks if t["type"] == "audio" and t["keep"]],
+                             key=lambda t: t["out_order"])
+        sub_order = sorted([t for t in tracks if t["type"] == "subtitle" and t["keep"]],
+                           key=lambda t: t["out_order"])
+        vtrack = next((t for t in tracks if t["type"] == "video"), None)
+        argv = commands.build_mkvpropedit_chain(in_path, title, audio_order, sub_order,
+                                                video_lang=vtrack["out_lang"] if vtrack else None,
+                                                video_track=vtrack)
+        return shlex.join(argv), in_path
     if job_kind == "sample":
         out_path = os.path.join(folder_path, f"{owner['out_base']}.sample.rf{quality}.mkv")
         start = int((owner["duration"] or 1200) / 2)  # mid-movie: representative scene
@@ -1459,13 +1521,14 @@ def _build_job_cmd(conn, kind, owner, job_kind, quality):
     audio_order = sorted([t for t in tracks if t["type"] == "audio" and t["keep"]], key=lambda t: t["out_order"])
     vtrack = next((t for t in tracks if t["type"] == "video"), None)
     mkvpe = commands.build_mkvpropedit_chain(out_path, title, audio_order, sub_order,
-                                             video_lang=vtrack["out_lang"] if vtrack else None)
+                                             video_lang=vtrack["out_lang"] if vtrack else None,
+                                             video_track=vtrack)
     return shlex.join(hb_argv) + " && " + shlex.join(mkvpe), out_path
 
 
 def _preview_command(conn, kind, owner_id, job_kind, quality):
-    if job_kind not in ("remux", "encode", "sample"):
-        raise HTTPException(400, "kind must be remux|encode|sample")
+    if job_kind not in ("remux", "propedit", "encode", "sample"):
+        raise HTTPException(400, "kind must be remux|propedit|encode|sample")
     owner = _owner_or_404(conn, kind, owner_id)
     cmd_str, _ = _build_job_cmd(conn, kind, owner, job_kind, quality)
     return {"cmd": cmd_str}
@@ -1481,8 +1544,8 @@ def preview_command(movie_id: int, kind: str, quality: int = 22):
 
 
 def _enqueue(conn, kind, owner_id, job_kind, quality):
-    if job_kind not in ("remux", "encode", "sample"):
-        raise HTTPException(400, "kind must be remux|encode|sample")
+    if job_kind not in ("remux", "propedit", "encode", "sample"):
+        raise HTTPException(400, "kind must be remux|propedit|encode|sample")
     owner = _owner_or_404(conn, kind, owner_id)
     if not owner["file"]:
         raise HTTPException(400, "no source file")
@@ -1493,7 +1556,34 @@ def _enqueue(conn, kind, owner_id, job_kind, quality):
     if mine:
         raise HTTPException(409, "a job is already running or queued for this item")
 
-    need_bytes = 2 * 10**9 if job_kind == "sample" else owner["size_bytes"]
+    if job_kind == "propedit":
+        # mkvpropedit only speaks Matroska; an mp4/avi has to go through
+        # mkvmerge to become an mkv at all, so it is never a propedit candidate
+        if not owner["file"].lower().endswith(".mkv"):
+            raise HTTPException(400, "not a Matroska file; use kind=remux")
+        # in-place editing cannot drop or add a track, so anything the config
+        # wants removed (or pulled in from an external .srt) needs a real remux
+        bad = conn.execute(
+            f"SELECT 1 FROM tracks WHERE {col}=? AND (keep=0 OR ext_path IS NOT NULL) LIMIT 1",
+            (owner_id,)).fetchone()
+        if bad:
+            raise HTTPException(400, "this title drops or adds tracks; use kind=remux")
+        # build_mkvpropedit_chain addresses track:a{N}/track:s{N}, which are
+        # positions in the FILE. mkvmerge reorders as it writes so the two agree
+        # for a remux; mkvpropedit moves nothing. A config that reorders would
+        # therefore stamp each track's metadata onto whichever track happens to
+        # sit at that position -- in place, over the only copy, and
+        # verify_output compares expected-by-out_order against got-by-mkv_id, so
+        # the swap verifies clean.
+        for ttype in ("audio", "subtitle"):
+            rows = conn.execute(
+                f"SELECT mkv_id, out_order FROM tracks WHERE {col}=? AND type=? AND keep=1 "
+                "ORDER BY mkv_id", (owner_id, ttype)).fetchall()
+            if [r["out_order"] for r in rows] != sorted(r["out_order"] for r in rows):
+                raise HTTPException(400, "this title reorders tracks; use kind=remux")
+
+    # propedit rewrites headers in place: no second copy, so no space needed
+    need_bytes = 0 if job_kind == "propedit" else (2 * 10**9 if job_kind == "sample" else owner["size_bytes"])
     if not jobs.has_space_for(_root_for(kind), need_bytes):
         raise HTTPException(507, "not enough free disk space for this operation")
 
@@ -1504,7 +1594,7 @@ def _enqueue(conn, kind, owner_id, job_kind, quality):
     job_id = jobs.start_job(conn, job_kind, cmd_str, LOG_DIR,
                             cpu_quota=_current_quota(conn), queued=bool(busy), **id_kwargs)
     if job_kind != "sample":  # samples never touch owner state
-        status = "cleaning" if job_kind == "remux" else "encoding"
+        status = "cleaning" if job_kind in ("remux", "propedit") else "encoding"
         _set_owner_status(conn, kind, owner_id, status, output_file=out_path)
         conn.commit()
     return {"job_id": job_id, "queued": bool(busy)}
@@ -1551,7 +1641,7 @@ def _cancel_job(conn, job):
     job = dict(job)
     if job["status"] not in ("running", "queued"):
         return False
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    now = _now()
     if job["status"] == "running":
         jobs.kill_job(job)
         conn.execute("UPDATE jobs SET status='cancelled', exit_code=-2, finished_at=? WHERE id=?",
@@ -1561,7 +1651,9 @@ def _cancel_job(conn, job):
     if job["kind"] != "sample":
         kind, oid = _job_owner_kind_id(job)
         owner = _owner_info(conn, kind, oid)
-        if owner and job["status"] == "running" and owner["output_file"]:
+        # same reason as the reaper: for propedit output_file is the source
+        if (owner and job["status"] == "running" and owner["output_file"]
+                and job["kind"] != "propedit"):
             try:
                 os.remove(owner["output_file"])
             except OSError:
@@ -1830,7 +1922,7 @@ def _delete_original(conn, kind, owner_id):
     if out != final_path:
         os.rename(out, final_path)
     table = _owner_table(kind)
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    now = _now()
     conn.execute(f"UPDATE {table} SET file=?, output_file=NULL, updated_at=? WHERE id=?",
                  (final_name, now, owner_id))
     if freed > 0:

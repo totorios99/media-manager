@@ -792,7 +792,19 @@ def upsert_movie(conn, media_root, folder_name, api_key):
         return movie_id
 
     file_path = os.path.join(folder_path, main_file)
-    tmdb = tmdb_search(clean_title, guess_year, api_key)
+    # A row that already carries a tmdb_id keeps it. Re-searching on every scan
+    # silently undid manual corrections: "Enemy (2013)" is TMDB 181886 with a
+    # 2014-03-14 release date, so a year-strict search on the folder's 2013
+    # picks "Class Enemy" instead, and the next propedit stamped that wrong
+    # title into the file. upsert_show already worked this way.
+    existing = conn.execute("SELECT tmdb_id, title, year, original_language, poster_path "
+                            "FROM movies WHERE id=?", (movie_id,)).fetchone() if movie_id else None
+    if existing and existing["tmdb_id"]:
+        tmdb = {"tmdb_id": existing["tmdb_id"], "title": existing["title"],
+                "year": existing["year"], "original_language": existing["original_language"],
+                "poster_path": existing["poster_path"]}
+    else:
+        tmdb = tmdb_search(clean_title, guess_year, api_key)
     info = inspect_file(file_path)
     ext_subs = find_external_subs(folder_path)
 

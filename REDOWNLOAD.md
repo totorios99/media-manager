@@ -4,7 +4,7 @@ Títulos cuyo archivo fuente está dañado. No hay arreglo local: mkvmerge copia
 fielmente lo que hay, así que re-remuxear vuelve a producir el mismo archivo
 corto. La única salida es conseguir otra fuente.
 
-Actualizado: 2026-09-06
+Actualizado: 2026-09-06 (archivos rotos borrados)
 
 ## La tanda de diciembre 2025
 
@@ -24,17 +24,38 @@ Los cuatro remux truncados (185 GB) se borraron el 2026-09-03. **Las fuentes
 originales siguen en disco** por si quieres compararlas con la nueva descarga
 antes de reemplazarlas.
 
-**Estado 2026-09-06: 2 de 5 resueltos.** Quedan Captain America, Superman y
-Sinners, 134 GB entre los tres. Los tres están ahora monitorizados en Radarr
-(los únicos 3 de 324 que lo están), así que se buscarán solos en cuanto
-Prowlarr tenga indexadores. Una verificación estructural independiente el
-2026-09-06 volvió a medirlos y confirmó las cifras de esta tabla al minuto.
+**Estado 2026-09-06: 2 de 5 resueltos, y los archivos rotos ya no están.**
+
+Ballerina y Thunderbolts se sustituyeron por descargas 4K verificadas. Los
+otros tres se borraron el 2026-09-06 tras confirmar por segunda vez que
+decodifican cero fotogramas pasado el corte —135.9 GB entre los cuatro rotos,
+contando The Good Girls—. Se conservaron las carpetas y su artwork: así Radarr
+y Jellyfin mantienen la entrada, y Radarr pasa a `hasFile=false`, que convierte
+un archivo aparentemente satisfactorio en una ausencia real.
+
+Los cuatro son las únicas películas monitorizadas en Radarr de 324, así que se
+buscarán solas en cuanto Prowlarr tenga indexadores. Si algún día aparece una
+quinta monitorizada, alguien amplió la excepción sin decidirlo.
+
+| Título | tmdb | Estado |
+|---|---|---|
+| Captain America: Brave New World | 822119 | borrado, monitorizado, seerr #24 |
+| Sinners | 1233413 | borrado, monitorizado, seerr #26 |
+| Superman | 1061474 | borrado, monitorizado, seerr #27 |
+| The Good Girls | 541339 | borrado, monitorizado, seerr #25 |
 
 ## Anterior
 
 | Título | Tamaño | Problema |
 |---|---|---|
-| Las Niñas Bien (2018) | — | `moov atom not found`; descarga truncada de mayo 2025, ni mkvmerge ni ffprobe pueden abrirla |
+| The Good Girls (2019) | 1.77 GB | `moov atom not found`; descarga truncada de mayo 2025, ni mkvmerge ni ffprobe pueden abrirla |
+
+Este es el mismo archivo que antes figuraba aquí como «Las Niñas Bien (2018)».
+TMDB 541339: título internacional *The Good Girls*, original *Las niñas bien*,
+estreno 2019-03-22. Estuvo listado dos veces bajo dos nombres —en este documento
+con el título original y en la biblioteca con el internacional— y la duplicación
+sobrevivió a una verificación que lo marcó «sin paquetes de video» sin que nadie
+uniera los dos. Un título es su id de TMDB, no su nombre.
 
 ## Cómo se detectan estos
 

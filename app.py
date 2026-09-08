@@ -1865,6 +1865,10 @@ def get_stats():
 # The container address, not the tailnet hostname: a "your film is ready"
 # message must not depend on the tailnet being up to arrive.
 NTFY_URL = os.environ.get("NTFY_URL", "http://172.17.0.1:8095/media")
+# job ids created by the Radarr hook, which finalize without a human.
+# In memory on purpose: after a restart these fall back to manual, and losing
+# automation is the safe direction to fail in when deletion is involved.
+_AUTO_FINALIZE = set()
 _HOOK_SECRET = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             ".radarr-hook-secret")
 
@@ -1963,6 +1967,8 @@ async def radarr_hook(request: Request):
         # default, Spanish second, TrueHD/Atmos kept but never default
         scan.suggest_tracks(conn, mid, "movies")
         job = _enqueue(conn, "movie", mid, "remux", 22)
+        if job.get("job_id"):
+            _AUTO_FINALIZE.add(job["job_id"])
         print(f"[hook] {event} {title} -> movie {mid}, job {job.get('job_id')}", flush=True)
         return {"ok": True, "movie_id": mid, **job}
     finally:
@@ -1983,6 +1989,18 @@ def _verify_and_finalize(conn, kind, owner_id, job):
     conn.commit()
     # The single point that knows a job both finished AND passed verification.
     # A notification here means normalized and checked -- never merely downloaded.
+    if ok and job["id"] in _AUTO_FINALIZE:
+        _AUTO_FINALIZE.discard(job["id"])
+        try:
+            # replaces the raw import with the normalised file, renames it to
+            # "Title (Year).mkv" and sweeps the folder of scene junk
+            _delete_original(conn, kind, owner_id)
+            owner = _owner_info(conn, kind, owner_id)
+        except Exception as e:
+            print(f"[hook] no se pudo finalizar {owner_id}: {e}", flush=True)
+            _notify(f"Requiere atención: {owner['title'] or owner['folder']}",
+                    f"el remux verificó pero no se pudo finalizar: {e}",
+                    tags="warning", priority=4)
     if kind == "movie":
         name = owner["title"] or owner["folder"]
         if ok:

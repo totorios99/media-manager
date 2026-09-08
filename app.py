@@ -13,6 +13,10 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+import base64
+import urllib.error
+import urllib.request
+
 import commands
 import jobs
 import scan
@@ -1856,6 +1860,115 @@ def get_stats():
         conn.close()
 
 
+
+# --- ntfy -------------------------------------------------------------------
+# The container address, not the tailnet hostname: a "your film is ready"
+# message must not depend on the tailnet being up to arrive.
+NTFY_URL = os.environ.get("NTFY_URL", "http://172.17.0.1:8095/media")
+_HOOK_SECRET = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            ".radarr-hook-secret")
+
+
+def _notify(title, body, tags="", priority=3):
+    """Fire-and-forget ntfy publish. Never raises: a notification failing must
+    not fail the job it is reporting on."""
+    try:
+        req = urllib.request.Request(
+            NTFY_URL, data=body.encode("utf-8"),
+            headers={"Title": title, "Tags": tags, "Priority": str(priority)})
+        urllib.request.urlopen(req, timeout=10).read()
+    except Exception as e:
+        print(f"[ntfy] no se pudo notificar: {e}", flush=True)
+
+
+def _track_summary(conn, kind, owner_id):
+    """The one line worth reading in a notification: what you will hear."""
+    col = _owner_col(kind)
+    rows = conn.execute(
+        f"SELECT out_lang, out_name, codec FROM tracks WHERE {col}=? AND type='audio' "
+        "AND keep=1 ORDER BY out_order", (owner_id,)).fetchall()
+    out = []
+    for r in rows:
+        lang = (r["out_lang"] or "und")
+        atmos = "atmos" in (r["codec"] or "").lower()
+        out.append(f"{lang}{'+atmos' if atmos else ''}")
+    return "/".join(out) or "sin audio"
+
+
+def _hook_credentials():
+    try:
+        with open(_HOOK_SECRET) as fh:
+            lines = [l.strip() for l in fh if l.strip()]
+        return (lines[0], lines[1]) if len(lines) >= 2 else None
+    except OSError:
+        return None
+
+
+def _check_hook_auth(request):
+    """HTTP Basic. uvicorn listens on 0.0.0.0, so this endpoint is reachable
+    from the whole LAN and it starts remuxes across 5 TB."""
+    want = _hook_credentials()
+    if not want:
+        raise HTTPException(503, "hook secret not configured")
+    hdr = request.headers.get("authorization", "")
+    if not hdr.lower().startswith("basic "):
+        raise HTTPException(401, "authentication required",
+                            headers={"WWW-Authenticate": "Basic"})
+    try:
+        user, _, pw = base64.b64decode(hdr.split(None, 1)[1]).decode().partition(":")
+    except Exception:
+        raise HTTPException(401, "malformed credentials")
+    import hmac
+    if not (hmac.compare_digest(user, want[0]) and hmac.compare_digest(pw, want[1])):
+        raise HTTPException(403, "bad credentials")
+
+
+@app.get("/api/hooks/radarr")
+def radarr_hook_probe():
+    """Radarr validates a webhook URL before saving it and refuses a 404."""
+    return {"ok": True, "hook": "radarr"}
+
+
+@app.post("/api/hooks/radarr")
+async def radarr_hook(request: Request):
+    _check_hook_auth(request)
+    body = await request.json()
+    event = body.get("eventType", "")
+    if event == "Test":
+        return {"ok": True, "test": True}
+    if event not in ("Download", "MovieFileImported", "Upgrade"):
+        return {"ok": True, "ignored": event}
+
+    movie = body.get("movie") or {}
+    folder = os.path.basename((movie.get("folderPath") or "").rstrip("/"))
+    title = movie.get("title") or folder
+    tmdb = movie.get("tmdbId")
+    conn = get_db()
+    try:
+        row = None
+        if tmdb:
+            row = conn.execute("SELECT id FROM movies WHERE tmdb_id=?", (tmdb,)).fetchone()
+        if not row and folder:
+            row = conn.execute("SELECT id FROM movies WHERE folder=?", (folder,)).fetchone()
+        # A brand-new import has no row until the folder is scanned.
+        if not row and folder:
+            scan.upsert_movie(conn, MEDIA_ROOT, folder, TMDB_API_KEY)
+            row = conn.execute("SELECT id FROM movies WHERE folder=?", (folder,)).fetchone()
+        if not row:
+            _notify("Importación sin normalizar", f"{title}: no encontré la carpeta en la biblioteca",
+                    tags="warning", priority=4)
+            raise HTTPException(404, f"no library row for {title!r}")
+        mid = row["id"]
+        # the convention lives in suggest_tracks: original language first and
+        # default, Spanish second, TrueHD/Atmos kept but never default
+        scan.suggest_tracks(conn, mid, "movies")
+        job = _enqueue(conn, "movie", mid, "remux", 22)
+        print(f"[hook] {event} {title} -> movie {mid}, job {job.get('job_id')}", flush=True)
+        return {"ok": True, "movie_id": mid, **job}
+    finally:
+        conn.close()
+
+
 def _verify_and_finalize(conn, kind, owner_id, job):
     owner = _owner_info(conn, kind, owner_id)
     kept = _kept_tracks(conn, kind, owner_id)
@@ -1868,6 +1981,18 @@ def _verify_and_finalize(conn, kind, owner_id, job):
         conn.execute("UPDATE jobs SET status='failed', exit_code=-1 WHERE id=?", (job["id"],))
         _set_owner_status(conn, kind, owner_id, "error")
     conn.commit()
+    # The single point that knows a job both finished AND passed verification.
+    # A notification here means normalized and checked -- never merely downloaded.
+    if kind == "movie":
+        name = owner["title"] or owner["folder"]
+        if ok:
+            res = f"{owner['width']}x{owner['height']}" if owner["width"] else "?"
+            _notify(f"Lista: {name}",
+                    f"{res} · {_track_summary(conn, kind, owner_id)}",
+                    tags="white_check_mark")
+        else:
+            _notify(f"Falló: {name}", msg or "la verificación no pasó",
+                    tags="rotating_light", priority=4)
     return ok, msg
 
 

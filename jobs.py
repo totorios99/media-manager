@@ -5,7 +5,7 @@ import shlex
 import subprocess
 import time
 
-from scan import _now, inspect_file
+from scan import _now, inspect_file, _spanish_base
 
 TMUX_PREFIX = "mm-"
 HB_PROGRESS_RE = re.compile(r"Encoding:.*?(\d+\.\d+)\s*%")
@@ -196,6 +196,38 @@ def poll_job(conn, job_id):
         conn.execute("UPDATE jobs SET progress=? WHERE id=?", (progress, job_id))
         conn.commit()
     return conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+
+
+def preflight(source_path, kept_tracks):
+    """Checked BEFORE muxing: the config addresses tracks by their source mkv_id,
+    so a file replaced since the last scan silently remaps every id and mkvmerge
+    muxes whatever now sits at that number. Only verify_output caught it -- after
+    hours of muxing. One inspect_file costs seconds and fails the job at enqueue."""
+    if not os.path.exists(source_path):
+        return False, f"el fichero de origen no existe: {source_path}"
+    have = {t["mkv_id"]: t for t in inspect_file(source_path)["tracks"]}
+    stale = "el fichero cambio desde el ultimo escaneo; re-escanea el titulo"
+    for t in kept_tracks:
+        if t.get("ext_path"):
+            continue  # external .srt: added by path, not addressed by source id
+        cur = have.get(t["mkv_id"])
+        if cur is None:
+            return False, (f"la pista {t['mkv_id']} ({t['type']}/{t['lang']}) ya no existe "
+                           f"en el origen: {stale}")
+        if cur["type"] != t["type"]:
+            return False, (f"la pista {t['mkv_id']} es {cur['type']} en el origen y la config "
+                           f"espera {t['type']}: {stale}")
+        if (cur["codec"] or "") != (t["codec"] or ""):
+            return False, (f"la pista {t['mkv_id']} es '{cur['codec']}' en el origen y la config "
+                           f"espera '{t['codec']}': {stale}")
+        # Type and codec alone are not identity: an inserted dub shifts every id
+        # and the track landing on the old number is still audio/AC-3. Inside Out 2
+        # picked up a "Descriptive Audio" track that way. Compare on the base ISO
+        # code so a lost Latino/Castellano wording is not a false rejection.
+        if _spanish_base(cur["lang"] or "") != _spanish_base(t["lang"] or ""):
+            return False, (f"la pista {t['mkv_id']} es '{cur['lang']}' en el origen y la config "
+                           f"espera '{t['lang']}': {stale}")
+    return True, "ok"
 
 
 def verify_output(out_path, kept_tracks, source_duration=None, source_path=None):

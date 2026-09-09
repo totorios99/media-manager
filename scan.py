@@ -270,6 +270,11 @@ def suggest_tracks(conn, owner_id, table="movies", multi_audio=False):
     # letting the one-per-language rule collapse them into a single pick
     if "spa" in wanted:
         spa_variants = sorted({t["lang"] for t in audio + subs if t["lang"].startswith("spa")})
+        # Castellano is not a wanted language: the library keeps English, Latino
+        # and the film's own original language, nothing else. It survives only
+        # when Spanish IS the original language, where it is the original track.
+        if orig3 != "spa":
+            spa_variants = [v for v in spa_variants if v != "spa-es"]
         i = wanted.index("spa")
         wanted[i:i + 1] = spa_variants or ["spa"]
     if len(audio) == 1 and audio[0]["lang"] == "und":
@@ -1159,7 +1164,15 @@ if __name__ == "__main__":
     suggest_tracks(c3, 1)
     got3 = {r["id"]: dict(r) for r in c3.execute("SELECT * FROM tracks")}
     assert got3[3]["keep"] == 1 and got3[3]["out_lang"] == "spa", "Latino kept, out_lang normalized to real ISO code"
-    assert got3[4]["keep"] == 1 and got3[4]["out_lang"] == "spa", "Castellano kept too -- not collapsed into one spa slot"
-    assert got3[3]["out_order"] != got3[4]["out_order"], "distinct slots, not overwriting each other"
+    assert got3[4]["keep"] == 0, "Castellano dropped: not a wanted language when the original is English"
+    assert got3[2]["keep"] == 1, "English still kept alongside Latino"
+
+    # ...unless Spanish IS the original language, where the Castellano track is
+    # the original audio and the whole reason to keep the film in Spanish
+    c3.execute("UPDATE movies SET original_language='es' WHERE id=1")
+    suggest_tracks(c3, 1)
+    got4 = {r["id"]: dict(r) for r in c3.execute("SELECT * FROM tracks")}
+    assert got4[4]["keep"] == 1, "Castellano survives when Spanish is the original language"
+    assert got4[3]["out_order"] != got4[4]["out_order"], "distinct slots, not overwriting each other"
 
     print("scan.py self-check OK")

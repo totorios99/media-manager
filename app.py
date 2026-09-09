@@ -1591,6 +1591,17 @@ def _enqueue(conn, kind, owner_id, job_kind, quality):
     if not jobs.has_space_for(_root_for(kind), need_bytes):
         raise HTTPException(507, "not enough free disk space for this operation")
 
+    # The config addresses source tracks by mkv_id. When Radarr replaces a file
+    # (upgrade) the ids remap and the stale config muxes the wrong tracks --
+    # jobs 743/744 burned 67 min of CPU before verify_output caught it. Check the
+    # real file now, at enqueue, while it costs seconds.
+    if job_kind in ("remux", "propedit"):
+        kept = [dict(r) for r in conn.execute(
+            f"SELECT * FROM tracks WHERE {col}=? AND keep=1", (owner_id,))]
+        ok, msg = jobs.preflight(owner["file"], kept)
+        if not ok:
+            raise HTTPException(409, msg)
+
     # global single runner: one job hammers the CPU at a time, rest queue up
     busy = conn.execute("SELECT id FROM jobs WHERE status='running' LIMIT 1").fetchone()
     cmd_str, out_path = _build_job_cmd(conn, kind, owner, job_kind, quality)

@@ -4,5 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi",
+    # graft.py cross-correlates two audio tracks to measure their offset
+    # before splicing one into the other; duration comparison cannot see a
+    # constant shift.
+    "numpy",
     "uvicorn",
 ]

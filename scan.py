@@ -663,8 +663,18 @@ def _detect_atmos(streams):
 # real signal available. This is a guess, not a real language code: it only
 # refines the internal `lang` used for matching/display, never what's written
 # to out_lang (mkvmerge/HandBrake need a real ISO code -- see _spanish_base).
-SPANISH_MX_RE = re.compile(r"\blatino\b|\blat(?:am)?\b|\bmex(?:ico)?\b|\b(?:es-)?419\b", re.IGNORECASE)
-SPANISH_ES_RE = re.compile(r"\bcastellano\b|\bespa[ñn]a\b|\bspain\b|\b(?:es-)?es\b", re.IGNORECASE)
+# Releases label these in English as often as in Spanish -- "Spanish (Latin
+# American)" and "Spanish (Castilian)" are what Blu-ray discs actually carry.
+# Missing the English wording left both variants as a bare "spa", which silently
+# defeats the rule that drops Castellano: the pick fell back to file order.
+SPANISH_MX_RE = re.compile(
+    r"\blatino\b|\blat(?:am)?\b|\bmex(?:ico|ican)?\b|\b(?:es-)?419\b"
+    r"|\blatin[\s-]*americ\w*\b|\bhispanoameric\w*\b|\bam[eé]rica\s+latina\b",
+    re.IGNORECASE)
+SPANISH_ES_RE = re.compile(
+    r"\bcastellano\b|\bcastilian\b|\bespa[ñn]a\b|\bspain\b|\bspanish\s+european\b"
+    r"|\beuropean\s+spanish\b|\biberian\b|\b(?:es-)?es\b",
+    re.IGNORECASE)
 
 # Most rips never set mkv's hearing-impaired/commentary flags and say it in the
 # track name instead ("English (SDH)", "Commentary by the director"), so the name
@@ -1142,6 +1152,15 @@ if __name__ == "__main__":
     assert _spanish_variant("spa", "Español Latino 5.1") == "spa-mx"
     assert _spanish_variant("spa", "Castellano") == "spa-es"
     assert _spanish_variant("spa", "Spanish (Spain)") == "spa-es"
+    # English wording: what Blu-ray releases actually carry
+    assert _spanish_variant("spa", "Spanish (Castilian)") == "spa-es"
+    assert _spanish_variant("spa", "Castilian") == "spa-es"
+    assert _spanish_variant("spa", "Spanish (Iberian)") == "spa-es"
+    assert _spanish_variant("spa", "European Spanish") == "spa-es"
+    assert _spanish_variant("spa", "Spanish (Latin American)") == "spa-mx"
+    assert _spanish_variant("spa", "Latin American PGS") == "spa-mx"
+    assert _spanish_variant("spa", "Hispanoamericano") == "spa-mx"
+    assert _spanish_variant("por", "Portuguese (Iberian)") == "por", "Iberian only reclassifies Spanish"
     assert _spanish_variant("spa", "") == "spa", "no name -- can't tell, stays bare"
     assert _spanish_variant("eng", "Latino") == "eng", "non-spanish langs pass through untouched"
     assert _spanish_base("spa-mx") == "spa" and _spanish_base("spa") == "spa"

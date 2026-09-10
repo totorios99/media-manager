@@ -1,6 +1,8 @@
 import asyncio
 import json
 import os
+import urllib.parse
+import subprocess
 import shutil
 import re
 import shlex
@@ -2152,6 +2154,62 @@ def _verify_and_finalize(conn, kind, owner_id, job):
     return ok, msg
 
 
+JELLYFIN_URL = os.environ.get("JELLYFIN_URL", "")
+_JELLYFIN_TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    ".jellyfin-token")
+
+
+def _jellyfin_token():
+    """Its own credential, in its own 0600 file, never another service's.
+
+    Empty when the file is absent, which disables the Jellyfin check rather than
+    breaking anything."""
+    tok = os.environ.get("JELLYFIN_TOKEN", "")
+    if tok:
+        return tok
+    try:
+        with open(_JELLYFIN_TOKEN_FILE) as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+# Jellyfin's path for a library that media-manager knows by MEDIA_ROOT
+JELLYFIN_MOVIES = os.environ.get("JELLYFIN_MOVIES", "/hdd1/Movies")
+
+
+def _jellyfin_refresh(folder, file_name, timeout=90):
+    """Make Jellyfin re-read the file we just put in place, and say whether it
+    now holds it. Returns (ok, detail).
+
+    Swapping the file leaves Jellyfin serving cached media streams from the copy
+    that is gone: the audio list it offers is the old one. Announcing a film as
+    ready while that is true means sitting down and picking a track that is not
+    there. Skipped silently when no token is configured -- it must never block a
+    notification, only strengthen it."""
+    token = _jellyfin_token()
+    if not (JELLYFIN_URL and token):
+        return True, "sin credenciales de Jellyfin: no verificado"
+    path = f"{JELLYFIN_MOVIES}/{folder}/{file_name}"
+    hdr = ["-H", f'Authorization: MediaBrowser Token="{token}"']
+    try:
+        out = subprocess.run(
+            ["curl", "-s", "--max-time", str(timeout), *hdr,
+             f"{JELLYFIN_URL}/Items?recursive=true&includeItemTypes=Movie&fields=Path"
+             f"&searchTerm={urllib.parse.quote(os.path.splitext(file_name)[0][:40])}"],
+            capture_output=True, text=True).stdout
+        items = (json.loads(out or "{}") or {}).get("Items", [])
+        match = next((i for i in items if i.get("Path") == path), None)
+        if not match:
+            return False, "Jellyfin no tiene el fichero indexado"
+        subprocess.run(["curl", "-s", "-o", "/dev/null", "--max-time", str(timeout),
+                        "-X", "POST", *hdr,
+                        f"{JELLYFIN_URL}/Items/{match['Id']}/Refresh"
+                        "?metadataRefreshMode=Default&imageRefreshMode=FullRefresh"
+                        "&replaceAllImages=false"], check=False)
+        return True, "refrescado"
+    except Exception as e:
+        return True, f"no se pudo consultar Jellyfin: {e}"
+
+
 def _announce_ready(conn, kind, owner_id):
     """Say a film is available -- once it actually is, with its file in place.
 
@@ -2165,6 +2223,11 @@ def _announce_ready(conn, kind, owner_id):
     res = f"{owner['width']}x{owner['height']}" if owner["width"] else "?"
     _restore_artwork(kind, owner["folder"])
     pending, notes = _readiness(conn, kind, owner_id, owner)
+    seen, why = _jellyfin_refresh(owner["folder"], owner["file"])
+    if not seen:
+        pending.append("indexar en Jellyfin")
+    elif why and why != "refrescado":
+        notes.append(why)
     detail = f"{res} · {_track_summary(conn, kind, owner_id)}"
     if pending:
         _notify(f"Incompleta: {name}", f"falta {', '.join(pending)} · {detail}",

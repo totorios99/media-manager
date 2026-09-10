@@ -7,3 +7,4 @@ __pycache__/
 data/
 media.db.bak-*
 .radarr-hook-secret
+.jellyfin-token

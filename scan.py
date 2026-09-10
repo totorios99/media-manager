@@ -93,8 +93,19 @@ def find_movie_junk(folder, keep_files):
         if JUNK_FILE_RE.search(f):
             junk.append(f)
     return junk
+# ISO 639-1 -> 639-2/B. A language missing here makes orig3 None, and the
+# original audio then loses its protection: suggest_tracks falls back to "eng"
+# and either mislabels the track or drops it. The Hunt (Danish) came out of a
+# remux tagged English for exactly this reason, so the list covers every
+# original language the library actually holds plus the common neighbours.
 LANG_2TO3 = {"en": "eng", "es": "spa", "fr": "fre", "de": "ger", "it": "ita",
-             "pt": "por", "ja": "jpn", "zh": "chi", "ko": "kor", "ru": "rus", "ar": "ara"}
+             "pt": "por", "ja": "jpn", "zh": "chi", "ko": "kor", "ru": "rus", "ar": "ara",
+             "da": "dan", "sv": "swe", "no": "nor", "nb": "nor", "nn": "nor",
+             "fi": "fin", "is": "ice", "nl": "dut", "pl": "pol", "cs": "cze",
+             "sk": "slo", "hu": "hun", "ro": "rum", "el": "gre", "tr": "tur",
+             "he": "heb", "hi": "hin", "th": "tha", "vi": "vie", "id": "ind",
+             "uk": "ukr", "bg": "bul", "hr": "hrv", "sr": "srp", "sl": "slv",
+             "et": "est", "lv": "lav", "lt": "lit", "ca": "cat", "fa": "per"}
 LANG_ISO1_TO_3 = LANG_2TO3  # reuse for original_language (TMDB gives ISO 639-1)
 
 
@@ -1164,6 +1175,12 @@ if __name__ == "__main__":
     assert _spanish_variant("spa", "") == "spa", "no name -- can't tell, stays bare"
     assert _spanish_variant("eng", "Latino") == "eng", "non-spanish langs pass through untouched"
     assert _spanish_base("spa-mx") == "spa" and _spanish_base("spa") == "spa"
+
+    # every original language the library holds must map, or the original audio
+    # silently falls back to "eng" (this is what mislabelled The Hunt as English)
+    for iso1 in ("da", "sv", "no", "ja", "ko", "fr", "it", "de", "pt", "zh"):
+        assert LANG_ISO1_TO_3.get(iso1), f"{iso1} has no ISO 639-2 mapping"
+    assert LANG_ISO1_TO_3["da"] == "dan" and LANG_ISO1_TO_3["sv"] == "swe"
 
     c3 = _sq.connect(":memory:")
     c3.row_factory = _sq.Row

@@ -697,9 +697,21 @@ _NAME_SDH_RE = re.compile(r"\bsdh\b|[\[(]cc[\])]|closed.?caption|hearing.?impair
 _NAME_COMMENTARY_RE = re.compile(r"\bcommentar(?:y|ies)\b|\bcomentario", re.IGNORECASE)
 
 
+_NAME_IS_SPANISH_RE = re.compile(r"\bspanish\b|\bespa[ñn]ol\b|\bcastellano\b|\blatino\b",
+                                 re.IGNORECASE)
+
+
 def _spanish_variant(lang, name):
     """'spa'|'spa-mx'|'spa-es' -- refines a bare 'spa' using the track name's
-    Latino/Castellano wording. Non-Spanish or already-specific langs pass through."""
+    Latino/Castellano wording. Non-Spanish or already-specific langs pass through.
+
+    'lat' is ISO 639 for Latin, the dead language, and releases use it for Latin
+    American Spanish. Spider-Verse carried its Latino subtitles that way, and the
+    track was headed for the discard pile because no rule about Spanish could see
+    it. Only reclassify when the name itself says Spanish -- an actual Latin track
+    keeps its code."""
+    if lang == "lat" and name and _NAME_IS_SPANISH_RE.search(name):
+        lang = "spa"
     if lang != "spa" or not name:
         return lang
     if SPANISH_MX_RE.search(name):
@@ -1172,6 +1184,11 @@ if __name__ == "__main__":
     assert _spanish_variant("spa", "Latin American PGS") == "spa-mx"
     assert _spanish_variant("spa", "Hispanoamericano") == "spa-mx"
     assert _spanish_variant("por", "Portuguese (Iberian)") == "por", "Iberian only reclassifies Spanish"
+    # 'lat' is Latin in ISO 639; releases misuse it for Latin American Spanish
+    assert _spanish_variant("lat", "Spanish (Latin American)") == "spa-mx"
+    assert _spanish_variant("lat", "Español Latino") == "spa-mx"
+    assert _spanish_variant("lat", "Latin") == "lat", "a real Latin track keeps its code"
+    assert _spanish_variant("lat", "") == "lat", "no name, no reclassification"
     assert _spanish_variant("spa", "") == "spa", "no name -- can't tell, stays bare"
     assert _spanish_variant("eng", "Latino") == "eng", "non-spanish langs pass through untouched"
     assert _spanish_base("spa-mx") == "spa" and _spanish_base("spa") == "spa"

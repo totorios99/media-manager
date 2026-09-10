@@ -42,5 +42,58 @@ def main():
     print("test_artwork OK")
 
 
+def test_readiness_gate():
+    """"Lista" must never go out while something obtainable is still missing.
+
+    Tokyo Drift shipped that message with its Spanish sitting in the recycle bin.
+    Superman has no Spanish in any copy we hold -- that is a note, not a blocker,
+    or the film would never be announced at all."""
+    import sqlite3, app, graft
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+      CREATE TABLE tracks (id INTEGER PRIMARY KEY, movie_id INT, type TEXT,
+                           out_lang TEXT, keep INT);
+      CREATE TABLE movies (id INTEGER PRIMARY KEY, folder TEXT, file TEXT);
+      INSERT INTO tracks (movie_id, type, out_lang, keep) VALUES
+        (1,'audio','eng',1), (1,'audio','spa',1),
+        (2,'audio','eng',1);
+      INSERT INTO movies (id, folder, file) VALUES (1,'Full (2020)',NULL),
+                                                   (2,'Full (2020)',NULL);
+    """)
+    root = app.MEDIA_ROOT
+
+    def owner(folder):
+        return {"folder": folder}
+
+    # con carátula y con español: lista
+    full = "Full (2020)"
+    os.makedirs(os.path.join(root, full), exist_ok=True)
+    open(os.path.join(root, full, "folder.jpg"), "w").write("i")
+    pending, notes = app._readiness(conn, "movie", 1, owner(full))
+    assert pending == [] and notes == [], (pending, notes)
+
+    # sin carátula, pero la papelera la tiene: pendiente, no lista
+    bare = "Bare (2021)"
+    os.makedirs(os.path.join(root, bare), exist_ok=True)
+    os.makedirs(os.path.join(graft.RECYCLE, bare), exist_ok=True)
+    open(os.path.join(graft.RECYCLE, bare, "folder.jpg"), "w").write("i")
+    pending, notes = app._readiness(conn, "movie", 1, owner(bare))
+    assert pending == ["carátula"], pending
+
+    # sin carátula y sin copia de la que sacarla: se anuncia, con nota
+    gone = "Gone (2022)"
+    os.makedirs(os.path.join(root, gone), exist_ok=True)
+    pending, notes = app._readiness(conn, "movie", 1, owner(gone))
+    assert pending == [] and "carátula" in notes, (pending, notes)
+
+    # sin español en ninguna parte: nota, nunca un bloqueo
+    pending, notes = app._readiness(conn, "movie", 2, owner(full))
+    assert pending == [] and notes == ["sin audio en español"], (pending, notes)
+
+    print("test_readiness_gate OK")
+
+
 if __name__ == "__main__":
     main()
+    test_readiness_gate()

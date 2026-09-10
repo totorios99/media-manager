@@ -2080,6 +2080,36 @@ def _restore_artwork(kind, folder):
     return restored
 
 
+def _readiness(conn, kind, owner_id, owner):
+    """What still stands between this file and being genuinely watchable.
+
+    Returns (pending, notes). `pending` is what we can still obtain and have not
+    -- announcing "Lista" with any of it outstanding is a half-truth. `notes` is
+    what the film simply does not have and no source can give it; that is worth
+    stating but must not hold the announcement forever.
+
+    The distinction is the whole point: Tokyo Drift's Spanish was sitting in the
+    recycle bin (pending, recoverable), while Superman's does not exist in any
+    copy we hold (a note, not a blocker)."""
+    pending, notes = [], []
+    folder = owner["folder"]
+    if not _has_artwork(kind, folder):
+        src = os.path.join(graft.RECYCLE, folder)
+        have_src = os.path.isdir(src) and any(
+            f.lower().endswith((".jpg", ".jpeg", ".png")) for f in os.listdir(src))
+        (pending if have_src else notes).append("carátula")
+    lost = _lost_audio_vs_recycle(conn, owner_id) if kind == "movie" else []
+    if lost:
+        pending.append("audio " + "/".join(lost))
+    else:
+        langs = {(r["out_lang"] or "") for r in conn.execute(
+            f"SELECT out_lang FROM tracks WHERE {_owner_col(kind)}=? AND type='audio' AND keep=1",
+            (owner_id,))}
+        if "spa" not in langs:
+            notes.append("sin audio en español")
+    return pending, notes
+
+
 def _verify_and_finalize(conn, kind, owner_id, job):
     owner = _owner_info(conn, kind, owner_id)
     kept = _kept_tracks(conn, kind, owner_id)
@@ -2110,16 +2140,21 @@ def _verify_and_finalize(conn, kind, owner_id, job):
         name = owner["title"] or owner["folder"]
         if ok:
             res = f"{owner['width']}x{owner['height']}" if owner["width"] else "?"
-            # "Lista" has to mean ready to watch, poster included. Radarr takes the
-            # artwork to the recycle bin along with the file it replaces, so the
-            # title turns up in Jellyfin with no poster; put it back before saying
-            # the film is ready, and say so when it could not be.
+            # "Lista" must mean ready to watch. Recover what is recoverable
+            # first -- Radarr moves the artwork into the recycle bin along with
+            # the file it replaces -- then refuse the word if anything we could
+            # still get is missing.
             _restore_artwork(kind, owner["folder"])
-            art = _has_artwork(kind, owner["folder"])
-            _notify(f"Lista: {name}",
-                    f"{res} · {_track_summary(conn, kind, owner_id)}"
-                    + ("" if art else " · sin carátula"),
-                    tags="white_check_mark")
+            pending, notes = _readiness(conn, kind, owner_id, owner)
+            detail = f"{res} · {_track_summary(conn, kind, owner_id)}"
+            if pending:
+                _notify(f"Incompleta: {name}",
+                        f"falta {', '.join(pending)} · {detail}",
+                        tags="warning", priority=4)
+            else:
+                _notify(f"Lista: {name}",
+                        detail + (" · " + ", ".join(notes) if notes else ""),
+                        tags="white_check_mark")
         else:
             _notify(f"Falló: {name}", msg or "la verificación no pasó",
                     tags="rotating_light", priority=4)

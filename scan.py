@@ -696,6 +696,11 @@ SPANISH_ES_RE = re.compile(
 # is the more reliable of the two signals -- both are consulted.
 # No two-letter alternatives: "Hi-Res" matched \bhi\b (the hyphen is a word
 # boundary) and would have shipped a DTS-HD track named "English (SDH)".
+# Releases name a track "Forced Only" and forget to set the flag. Captain America
+# shipped both Spanish subtitle tracks -- the forced one and the full Latino one --
+# and only the ENGLISH forced track carried forced_track=True, so the two Spanish
+# tracks came out of the remux both named "Español", indistinguishable in a player.
+_NAME_FORCED_RE = re.compile(r"\bforced\b|\bforzad[oa]s?\b|\bforc[ée]s?\b", re.IGNORECASE)
 _NAME_SDH_RE = re.compile(r"\bsdh\b|[\[(]cc[\])]|closed.?caption|hearing.?impaired",
                           re.IGNORECASE)
 _NAME_COMMENTARY_RE = re.compile(r"\bcommentar(?:y|ies)\b|\bcomentario", re.IGNORECASE)
@@ -748,7 +753,10 @@ def inspect_file(path):
             "name": name,
             "channels": tp.get("audio_channels"),
             "default_flag": 1 if tp.get("default_track") else 0,
-            "forced_flag": 1 if tp.get("forced_track") else 0,
+            # the name is evidence too: the flag is routinely omitted (see
+            # _NAME_FORCED_RE) and a subtitle track is only "forced" or not
+            "forced_flag": 1 if tp.get("forced_track") or (
+                ttype == "subtitle" and _NAME_FORCED_RE.search(name)) else 0,
             # the remux writes every one of these back explicitly, so they have to
             # be read explicitly too -- otherwise a source's SDH flag survives on a
             # track we relabelled as plain dialogue
@@ -1202,6 +1210,13 @@ if __name__ == "__main__":
     assert _spanish_variant("lat", "Español Latino") == "spa-mx"
     assert _spanish_variant("lat", "Latin") == "lat", "a real Latin track keeps its code"
     assert _spanish_variant("lat", "") == "lat", "no name, no reclassification"
+
+    # a release that names a track forced but forgets the flag: the name counts
+    assert _NAME_FORCED_RE.search("Forced Only")
+    assert _NAME_FORCED_RE.search("Español (forzados)")
+    assert _NAME_FORCED_RE.search("Forcés")
+    assert not _NAME_FORCED_RE.search("English (SDH)")
+    assert not _NAME_FORCED_RE.search("Spanish (Latin American)")
     assert _spanish_variant("spa", "") == "spa", "no name -- can't tell, stays bare"
     assert _spanish_variant("eng", "Latino") == "eng", "non-spanish langs pass through untouched"
     assert _spanish_base("spa-mx") == "spa" and _spanish_base("spa") == "spa"

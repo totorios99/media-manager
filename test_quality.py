@@ -27,8 +27,9 @@ def main():
     assert q(9e6, **scope_uhd)["tier"] == "lean"
 
     # boundaries are inclusive on both ends of the ideal band
-    assert q(25e6, **scope_uhd)["tier"] == "ideal", "at the cap is still fine"
-    assert q(25.1e6, **scope_uhd)["tier"] == "bloated"
+    assert q(32e6, **scope_uhd)["tier"] == "ideal", "at the cap is still fine"
+    assert q(32.1e6, **scope_uhd)["tier"] == "bloated"
+    assert q(28e6, **scope_uhd)["tier"] == "ideal", "the 25-32 band is no longer chased"
     assert q(15e6, **scope_uhd)["tier"] == "ideal", "at the floor is still fine"
     assert q(14.9e6, **scope_uhd)["tier"] == "lean"
 

@@ -559,7 +559,13 @@ def junk_apply():
 # so the file wants a better source, not a shrink.
 # ponytail: fixed thresholds; make settings if they ever need tuning
 # resolution class -> (cap, floor) in Mbps
-_BANDS = {"uhd": (25, 15), "fhd": (15, 8), "sd": (8, 4)}
+# The UHD cap was 25, matching Radarr's preferred size of 187 MB/min. It moved to
+# 32 because that is where the return collapses: the 19 titles sitting between
+# 25 and 32 hold 0.56 TB and chasing all of them back down would return 59 GB --
+# about 3 GB each, for a download, a verification and a remux apiece. Above 32
+# the recovery per title is worth the work. FHD and SD are unchanged: at 1080p,
+# 15 Mbps is already generous and raising it would only hide genuinely fat files.
+_BANDS = {"uhd": (32, 15), "fhd": (15, 8), "sd": (8, 4)}
 # Those floors are h264 numbers. HEVC/AV1/VP9 hold the same picture at roughly
 # 60% of the bitrate, so a codec-blind floor called 116 of 178 4K HEVC files
 # "thin" when they were fine -- 75% of the library came back `lean` and the

@@ -2138,27 +2138,40 @@ def _verify_and_finalize(conn, kind, owner_id, job):
                     tags="warning", priority=4)
     if kind == "movie":
         name = owner["title"] or owner["folder"]
-        if ok:
-            res = f"{owner['width']}x{owner['height']}" if owner["width"] else "?"
-            # "Lista" must mean ready to watch. Recover what is recoverable
-            # first -- Radarr moves the artwork into the recycle bin along with
-            # the file it replaces -- then refuse the word if anything we could
-            # still get is missing.
-            _restore_artwork(kind, owner["folder"])
-            pending, notes = _readiness(conn, kind, owner_id, owner)
-            detail = f"{res} · {_track_summary(conn, kind, owner_id)}"
-            if pending:
-                _notify(f"Incompleta: {name}",
-                        f"falta {', '.join(pending)} · {detail}",
-                        tags="warning", priority=4)
-            else:
-                _notify(f"Lista: {name}",
-                        detail + (" · " + ", ".join(notes) if notes else ""),
-                        tags="white_check_mark")
-        else:
+        if not ok:
             _notify(f"Falló: {name}", msg or "la verificación no pasó",
                     tags="rotating_light", priority=4)
+        elif owner["output_file"]:
+            # Verified but the normalised file is NOT in place yet: the job output
+            # is still a dotfile beside the original, and Jellyfin is serving the
+            # original. Announcing availability here told the user Superman was
+            # ready while the 43-track import was still what played. The
+            # announcement belongs to _announce_ready, after the swap.
+            print(f"[job] {name} verificada, pendiente de reemplazar el original",
+                  flush=True)
     return ok, msg
+
+
+def _announce_ready(conn, kind, owner_id):
+    """Say a film is available -- once it actually is, with its file in place.
+
+    Called after the job output has replaced the original, never at verification:
+    a verified output still sitting next to the source changes nothing for the
+    viewer, and the dotfile naming means Jellyfin cannot even see it."""
+    if kind != "movie":
+        return
+    owner = _owner_info(conn, kind, owner_id)
+    name = owner["title"] or owner["folder"]
+    res = f"{owner['width']}x{owner['height']}" if owner["width"] else "?"
+    _restore_artwork(kind, owner["folder"])
+    pending, notes = _readiness(conn, kind, owner_id, owner)
+    detail = f"{res} · {_track_summary(conn, kind, owner_id)}"
+    if pending:
+        _notify(f"Incompleta: {name}", f"falta {', '.join(pending)} · {detail}",
+                tags="warning", priority=4)
+    else:
+        _notify(f"Lista: {name}", detail + (" · " + ", ".join(notes) if notes else ""),
+                tags="white_check_mark")
 
 
 def _delete_original(conn, kind, owner_id):
@@ -2219,6 +2232,9 @@ def _delete_original(conn, kind, owner_id):
         total = int(_get_setting(conn, "reclaimed_bytes", "0")) + freed
         _set_setting(conn, "reclaimed_bytes", str(total))
     conn.commit()
+    # the file is in place now -- this is the first moment the film is genuinely
+    # watchable, so this is where availability gets announced
+    _announce_ready(conn, kind, owner_id)
     return {"ok": True, "file": final_name}
 
 

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import shutil
 import re
 import shlex
 import signal
@@ -2039,6 +2040,46 @@ async def radarr_hook(request: Request):
         conn.close()
 
 
+def _has_artwork(kind, folder):
+    """Whether the folder carries any image Jellyfin can use as a poster."""
+    try:
+        return any(f.lower().endswith((".jpg", ".jpeg", ".png"))
+                   for f in os.listdir(os.path.join(_root_for(kind), folder)))
+    except OSError:
+        return False
+
+
+_ARTWORK = ("poster.jpg", "folder.jpg", "backdrop.jpg", "landscape.jpg",
+            "logo.png", "banner.jpg", "clearart.png", "disc.png", "thumb.jpg")
+
+
+def _restore_artwork(kind, folder):
+    """Put back the artwork Radarr took to the recycle bin with the old file.
+
+    Replacing a movie file moves the whole set -- poster, backdrop, logo -- into
+    .recycle, leaving the library folder with nothing but the video. Jellyfin was
+    serving those images, so the title reappears with no poster. The recycled
+    copy still has them and it is a few MB, so copy them back rather than making
+    Jellyfin re-download what is already on the disk.
+
+    Returns the filenames restored. Never raises: artwork must not fail a job."""
+    restored = []
+    try:
+        dest = os.path.join(_root_for(kind), folder)
+        if any(f.lower().endswith((".jpg", ".jpeg", ".png")) for f in os.listdir(dest)):
+            return restored                      # already has its own, leave it
+        src = os.path.join(graft.RECYCLE, folder)
+        if not os.path.isdir(src):
+            return restored
+        for f in os.listdir(src):
+            if f.lower() in _ARTWORK or f.lower().endswith((".jpg", ".jpeg", ".png")):
+                shutil.copy2(os.path.join(src, f), os.path.join(dest, f))
+                restored.append(f)
+    except Exception as e:
+        print(f"[artwork] no pude restaurar en {folder!r}: {e}", flush=True)
+    return restored
+
+
 def _verify_and_finalize(conn, kind, owner_id, job):
     owner = _owner_info(conn, kind, owner_id)
     kept = _kept_tracks(conn, kind, owner_id)
@@ -2069,8 +2110,15 @@ def _verify_and_finalize(conn, kind, owner_id, job):
         name = owner["title"] or owner["folder"]
         if ok:
             res = f"{owner['width']}x{owner['height']}" if owner["width"] else "?"
+            # "Lista" has to mean ready to watch, poster included. Radarr takes the
+            # artwork to the recycle bin along with the file it replaces, so the
+            # title turns up in Jellyfin with no poster; put it back before saying
+            # the film is ready, and say so when it could not be.
+            _restore_artwork(kind, owner["folder"])
+            art = _has_artwork(kind, owner["folder"])
             _notify(f"Lista: {name}",
-                    f"{res} · {_track_summary(conn, kind, owner_id)}",
+                    f"{res} · {_track_summary(conn, kind, owner_id)}"
+                    + ("" if art else " · sin carátula"),
                     tags="white_check_mark")
         else:
             _notify(f"Falló: {name}", msg or "la verificación no pasó",

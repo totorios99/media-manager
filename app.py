@@ -18,6 +18,7 @@ import urllib.error
 import urllib.request
 
 import commands
+import graft
 import jobs
 import scan
 from scan import _now
@@ -1957,6 +1958,26 @@ def radarr_hook_probe():
     return {"ok": True, "hook": "radarr"}
 
 
+def _lost_audio_vs_recycle(conn, movie_id):
+    """Audio languages the recycled copy has and the current file does not.
+
+    Header reads only (mkvmerge -J on both files) so it is cheap enough to run
+    inside the webhook; measuring the offset for an actual graft decodes audio
+    and belongs outside the request."""
+    m = conn.execute("SELECT folder, file FROM movies WHERE id=?", (movie_id,)).fetchone()
+    if not m or not m["file"]:
+        return []
+    try:
+        old = graft.recycled_copy(m["folder"])
+        if not old:
+            return []
+        new_path = os.path.join(MEDIA_ROOT, m["folder"], m["file"])
+        return sorted(graft.audio_langs(old) - graft.audio_langs(new_path) - {"und"})
+    except Exception as e:            # a broken recycle copy must not block an import
+        print(f"[hook] no pude comparar con .recycle: {e}", flush=True)
+        return []
+
+
 @app.post("/api/hooks/radarr")
 async def radarr_hook(request: Request):
     _check_hook_auth(request)
@@ -1993,6 +2014,19 @@ async def radarr_hook(request: Request):
                     tags="warning", priority=4)
             raise HTTPException(404, f"no library row for {title!r}")
         mid = row["id"]
+        # An upgrade can arrive with fewer dubs than the copy it replaced, and
+        # Radarr has no idea: it compares quality, not audio. Shutter Island and
+        # Tokyo Drift both lost their Spanish that way. Remuxing now would ship
+        # the loss and delete-original would make it permanent, so stop here and
+        # say so -- the recycled copy is the only source for a graft, and it
+        # expires in seven days.
+        lost = _lost_audio_vs_recycle(conn, mid)
+        if lost:
+            _notify(f"Injerto pendiente: {title}",
+                    f"el reemplazo perdió {'/'.join(lost)}; la copia en .recycle aún lo tiene",
+                    tags="warning", priority=4)
+            print(f"[hook] {event} {title} -> movie {mid}: perdió {lost}, sin remux", flush=True)
+            return {"ok": True, "movie_id": mid, "needs_graft": lost}
         # the convention lives in suggest_tracks: original language first and
         # default, Spanish second, TrueHD/Atmos kept but never default
         scan.suggest_tracks(conn, mid, "movies")

@@ -2013,9 +2013,18 @@ async def radarr_hook(request: Request):
             scan.upsert_movie(conn, MEDIA_ROOT, folder, TMDB_API_KEY)
             row = conn.execute("SELECT id FROM movies WHERE folder=?", (folder,)).fetchone()
         if not row:
-            _notify("Importación sin normalizar", f"{title}: no encontré la carpeta en la biblioteca",
-                    tags="warning", priority=4)
-            raise HTTPException(404, f"no library row for {title!r}")
+            # Radarr can import into a root folder media-manager does not watch.
+            # Underworld landed in /staging and the warning just said "no
+            # encontré la carpeta", which reads as "nothing happened". Say where
+            # Radarr put it: that is the whole diagnosis.
+            where = (movie.get("folderPath") or "").rstrip("/")
+            outside = where and not where.startswith(("/movies", MEDIA_ROOT))
+            msg = (f"{title}: Radarr la dejó en {where}, fuera de la biblioteca"
+                   if outside else
+                   f"{title}: no encontré la carpeta {folder!r} en la biblioteca")
+            _notify("Importación sin normalizar", msg, tags="warning", priority=4)
+            print(f"[hook] {event} {title}: sin fila, folderPath={where!r}", flush=True)
+            raise HTTPException(404, msg)
         mid = row["id"]
         # An upgrade can arrive with fewer dubs than the copy it replaced, and
         # Radarr has no idea: it compares quality, not audio. Shutter Island and

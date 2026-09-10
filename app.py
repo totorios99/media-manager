@@ -1610,7 +1610,8 @@ def _enqueue(conn, kind, owner_id, job_kind, quality):
     if job_kind in ("remux", "propedit"):
         kept = [dict(r) for r in conn.execute(
             f"SELECT * FROM tracks WHERE {col}=? AND keep=1", (owner_id,))]
-        ok, msg = jobs.preflight(owner["file"], kept)
+        ok, msg = jobs.preflight(
+            os.path.join(_root_for(kind), owner["folder"], owner["file"]), kept)
         if not ok:
             raise HTTPException(409, msg)
 
@@ -1977,8 +1978,14 @@ async def radarr_hook(request: Request):
             row = conn.execute("SELECT id FROM movies WHERE tmdb_id=?", (tmdb,)).fetchone()
         if not row and folder:
             row = conn.execute("SELECT id FROM movies WHERE folder=?", (folder,)).fetchone()
-        # A brand-new import has no row until the folder is scanned.
-        if not row and folder:
+        # Always rescan, not just when the row is missing. Every event that gets
+        # here means Radarr just put a different file on disk, so the stored row
+        # describes the previous one: a stub still has file=NULL and _enqueue
+        # rejects it with "no source file", and an upgrade still carries the old
+        # file's track ids, which preflight then refuses. Both happened on the
+        # same import batch -- Superman and Captain America hit the first, Tokyo
+        # Drift the second.
+        if folder:
             scan.upsert_movie(conn, MEDIA_ROOT, folder, TMDB_API_KEY)
             row = conn.execute("SELECT id FROM movies WHERE folder=?", (folder,)).fetchone()
         if not row:

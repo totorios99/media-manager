@@ -2180,7 +2180,7 @@ JELLYFIN_MOVIES = os.environ.get("JELLYFIN_MOVIES", "/hdd1/Movies")
 JELLYFIN_USER = os.environ.get("JELLYFIN_USER", "")
 
 
-def _jellyfin_refresh(folder, file_name, timeout=90):
+def _jellyfin_refresh(folder, file_name, title=None, timeout=90):
     """Make Jellyfin re-read the file we just put in place, and say whether it
     now holds it. Returns (ok, detail).
 
@@ -2200,8 +2200,11 @@ def _jellyfin_refresh(folder, file_name, timeout=90):
     try:
         out = subprocess.run(
             ["curl", "-s", "--max-time", str(timeout), *hdr,
+             # search by TITLE, not by filename: Jellyfin matches the item's name
+             # and knows "Superman", never "Superman (2025)". Searching the file
+             # stem found nothing and every title came out as "falta indexar".
              f"{base}?recursive=true&includeItemTypes=Movie&fields=Path,UserData"
-             f"&searchTerm={urllib.parse.quote(os.path.splitext(file_name)[0][:40])}"],
+             f"&searchTerm={urllib.parse.quote((title or os.path.splitext(file_name)[0])[:40])}"],
             capture_output=True, text=True).stdout
         items = (json.loads(out or "{}") or {}).get("Items", [])
         match = next((i for i in items if i.get("Path") == path), None)
@@ -2280,7 +2283,7 @@ def _announce_ready(conn, kind, owner_id):
     name = owner["title"] or owner["folder"]
     _restore_artwork(kind, owner["folder"])
     pending, notes = _readiness(conn, kind, owner_id, owner)
-    seen, why = _jellyfin_refresh(owner["folder"], owner["file"])
+    seen, why = _jellyfin_refresh(owner["folder"], owner["file"], owner.get("title"))
     if not seen:
         pending.append("indexar en Jellyfin")
     elif why and why != "refrescado":

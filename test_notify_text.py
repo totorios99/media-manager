@@ -42,5 +42,19 @@ def main():
     print("test_notify_text OK")
 
 
+def test_jellyfin_lookup_uses_title():
+    """Jellyfin matches an item's NAME. The file is "Superman (2025).mkv" and the
+    item is called "Superman", so searching the filename stem found nothing and
+    every title was announced as "falta indexar en Jellyfin"."""
+    import inspect, app
+    src = inspect.getsource(app._jellyfin_refresh)
+    assert "title or os.path.splitext(file_name)[0]" in src, \
+        "la búsqueda debe partir del título, con el nombre de fichero como respaldo"
+    assert "title=None" in inspect.signature(app._jellyfin_refresh).__str__() or \
+        "title" in inspect.signature(app._jellyfin_refresh).parameters
+    print("test_jellyfin_lookup_uses_title OK")
+
+
 if __name__ == "__main__":
     main()
+    test_jellyfin_lookup_uses_title()

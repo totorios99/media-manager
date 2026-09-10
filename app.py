@@ -1495,6 +1495,12 @@ def _owner_or_404(conn, kind, owner_id):
     return owner
 
 
+# Job outputs are written as dotfiles. Jellyfin scans the movie folder while the
+# job runs -- Radarr tells it to on every import -- sees a second video beside the
+# original and indexes the half-written remux as its own movie. Twelve of those
+# phantom entries accumulated in one evening, each with artwork downloaded for it.
+# A leading dot makes Jellyfin skip the file; _delete_original renames it to the
+# visible final name once verification passes.
 def _build_job_cmd(conn, kind, owner, job_kind, quality):
     """Returns (cmd_str, out_path) for remux/propedit/encode/sample. `owner` is
     the uniform dict from _owner_info; `kind` is 'movie'|'episode'.
@@ -1507,7 +1513,7 @@ def _build_job_cmd(conn, kind, owner, job_kind, quality):
     in_path = os.path.join(folder_path, owner["file"])
     tracks = _all_tracks(conn, kind, owner["id"])
     if job_kind == "remux":
-        out_path = os.path.join(folder_path, f"{owner['out_base']}.remux.mkv")
+        out_path = os.path.join(folder_path, f".{owner['out_base']}.remux.mkv")
         return shlex.join(commands.build_mkvmerge_remux(tracks, title, in_path, out_path)), out_path
     if job_kind == "propedit":
         audio_order = sorted([t for t in tracks if t["type"] == "audio" and t["keep"]],
@@ -1520,13 +1526,13 @@ def _build_job_cmd(conn, kind, owner, job_kind, quality):
                                                 video_track=vtrack)
         return shlex.join(argv), in_path
     if job_kind == "sample":
-        out_path = os.path.join(folder_path, f"{owner['out_base']}.sample.rf{quality}.mkv")
+        out_path = os.path.join(folder_path, f".{owner['out_base']}.sample.rf{quality}.mkv")
         start = int((owner["duration"] or 1200) / 2)  # mid-movie: representative scene
         hb_argv, _ = commands.build_handbrake_encode(tracks, in_path, out_path,
                                                       quality=quality, sample_start=start)
         # throwaway preview: skip the mkvpropedit metadata pass
         return shlex.join(hb_argv), out_path
-    out_path = os.path.join(folder_path, f"{owner['out_base']}.hevc.mkv")
+    out_path = os.path.join(folder_path, f".{owner['out_base']}.hevc.mkv")
     hb_argv, sub_order = commands.build_handbrake_encode(tracks, in_path, out_path, quality=quality)
     audio_order = sorted([t for t in tracks if t["type"] == "audio" and t["keep"]], key=lambda t: t["out_order"])
     vtrack = next((t for t in tracks if t["type"] == "video"), None)

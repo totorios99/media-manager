@@ -463,7 +463,7 @@ def find_episode_files(folder):
     except OSError:
         return []
     for e in top:
-        if e.is_file() and e.name.lower().endswith(VIDEO_EXT) and not e.name.startswith("._"):
+        if e.is_file() and e.name.lower().endswith(VIDEO_EXT) and not e.name.startswith("."):
             ep = parse_episode(e.name)
             if ep:
                 candidates.append((e.name, ep[0], ep[1], e.stat().st_size))
@@ -473,7 +473,7 @@ def find_episode_files(folder):
             except OSError:
                 continue
             for f in sub:
-                if f.is_file() and f.name.lower().endswith(VIDEO_EXT) and not f.name.startswith("._"):
+                if f.is_file() and f.name.lower().endswith(VIDEO_EXT) and not f.name.startswith("."):
                     ep = parse_episode(f.name)
                     if ep:
                         candidates.append((os.path.join(e.name, f.name), ep[0], ep[1], f.stat().st_size))
@@ -614,13 +614,17 @@ def upsert_show(conn, media_root, folder_name, api_key):
 
 
 def find_main_file(folder):
+    """Largest video in the folder, ignoring dotfiles. The dot matters: job
+    outputs are written as ".Title.remux.mkv" so Jellyfin skips them while the
+    job runs, and a half-written one must never be adopted as the movie's main
+    file just because it is momentarily the largest thing in there."""
     best, best_size = None, -1
     try:
         entries = os.scandir(folder)
     except OSError:
         return None
     for e in entries:
-        if e.is_file() and e.name.lower().endswith(VIDEO_EXT) and not e.name.startswith("._"):
+        if e.is_file() and e.name.lower().endswith(VIDEO_EXT) and not e.name.startswith("."):
             size = e.stat().st_size
             if size > best_size:
                 best, best_size = e.name, size
@@ -1168,6 +1172,15 @@ if __name__ == "__main__":
         os.makedirs(os.path.join(d, "movie_one_ep_like"))
         open(os.path.join(d, "movie_one_ep_like", "Movie.S01E01.mkv"), "w").close()
         assert classify_folder(os.path.join(d, "movie_one_ep_like")) == "movie"
+
+    with tempfile.TemporaryDirectory() as d:
+        # a job output in flight must not be mistaken for the movie itself, even
+        # when it is briefly the largest file in the folder
+        open(os.path.join(d, "Movie (2016).mkv"), "w").write("x" * 100)
+        open(os.path.join(d, ".Movie (2016).remux.mkv"), "w").write("x" * 5000)
+        assert find_main_file(d) == "Movie (2016).mkv", "dotfile output must never win"
+        open(os.path.join(d, "._Movie (2016).mkv"), "w").write("x" * 9000)
+        assert find_main_file(d) == "Movie (2016).mkv", "macOS stub still ignored"
 
     # Latino vs Castellano Spanish: differentiated by track name, one of each kept,
     # out_lang written back as plain "spa" (not a real ISO code with the suffix)

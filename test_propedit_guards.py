@@ -45,5 +45,20 @@ def main():
     print("ok")
 
 
+def test_sdh_naming_is_type_aware():
+    """SDH is subtitle vocabulary. A Thunderbolts release tagged its only Spanish
+    dub hearing-impaired and the remux shipped an audio track called
+    "Español (SDH)"."""
+    import commands
+    assert commands._canonical_name(
+        {"out_lang": "eng", "sdh_flag": 1, "type": "subtitle"}) == "English (SDH)"
+    assert commands._canonical_name(
+        {"out_lang": "spa", "sdh_flag": 1, "type": "audio"}) == "Español (HI)"
+    assert commands._canonical_name(
+        {"out_lang": "spa", "type": "audio"}) == "Español"
+    print("test_sdh_naming_is_type_aware OK")
+
+
 if __name__ == "__main__":
     main()
+    test_sdh_naming_is_type_aware()

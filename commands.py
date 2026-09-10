@@ -52,7 +52,12 @@ def _canonical_name(t, siblings=()):
     if t.get("out_forced"):
         return f"{label} (forzados)" if lang.startswith("spa") else f"{label} (Forced)"
     if t.get("sdh_flag"):
-        return f"{label} (SDH)"
+        # SDH means "Subtitles for the Deaf and Hard of hearing" -- it is
+        # subtitle vocabulary. Matroska allows the hearing-impaired flag on any
+        # track (an audio track can carry a dialogue-boosted mix), but calling an
+        # audio track "Español (SDH)" is simply wrong, and it happened: a
+        # Thunderbolts release tagged its only Spanish dub that way.
+        return f"{label} (SDH)" if t.get("type") == "subtitle" else f"{label} (HI)"
     # Audio only: for audio the codec IS the difference between the two kept
     # tracks (AC-3 vs TrueHD Atmos). A subtitle's codec is a container detail --
     # naming one "English (SUBRIP)" tells the viewer nothing they asked for.

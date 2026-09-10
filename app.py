@@ -2174,6 +2174,10 @@ def _jellyfin_token():
         return ""
 # Jellyfin's path for a library that media-manager knows by MEDIA_ROOT
 JELLYFIN_MOVIES = os.environ.get("JELLYFIN_MOVIES", "/hdd1/Movies")
+# whose watch history decides "Ya disponible" vs "Mejorada" -- the person the
+# notifications go to. Empty means the distinction falls back to whether a
+# previous copy was replaced.
+JELLYFIN_USER = os.environ.get("JELLYFIN_USER", "")
 
 
 def _jellyfin_refresh(folder, file_name, timeout=90):
@@ -2186,20 +2190,24 @@ def _jellyfin_refresh(folder, file_name, timeout=90):
     there. Skipped silently when no token is configured -- it must never block a
     notification, only strengthen it."""
     token = _jellyfin_token()
+    _jellyfin_refresh.played = False
     if not (JELLYFIN_URL and token):
         return True, "sin credenciales de Jellyfin: no verificado"
     path = f"{JELLYFIN_MOVIES}/{folder}/{file_name}"
     hdr = ["-H", f'Authorization: MediaBrowser Token="{token}"']
+    # asking as a user also returns whether that user has already watched it
+    base = f"{JELLYFIN_URL}/Users/{JELLYFIN_USER}/Items" if JELLYFIN_USER else f"{JELLYFIN_URL}/Items"
     try:
         out = subprocess.run(
             ["curl", "-s", "--max-time", str(timeout), *hdr,
-             f"{JELLYFIN_URL}/Items?recursive=true&includeItemTypes=Movie&fields=Path"
+             f"{base}?recursive=true&includeItemTypes=Movie&fields=Path,UserData"
              f"&searchTerm={urllib.parse.quote(os.path.splitext(file_name)[0][:40])}"],
             capture_output=True, text=True).stdout
         items = (json.loads(out or "{}") or {}).get("Items", [])
         match = next((i for i in items if i.get("Path") == path), None)
         if not match:
             return False, "Jellyfin no tiene el fichero indexado"
+        _jellyfin_refresh.played = bool((match.get("UserData") or {}).get("Played"))
         subprocess.run(["curl", "-s", "-o", "/dev/null", "--max-time", str(timeout),
                         "-X", "POST", *hdr,
                         f"{JELLYFIN_URL}/Items/{match['Id']}/Refresh"
@@ -2208,6 +2216,56 @@ def _jellyfin_refresh(folder, file_name, timeout=90):
         return True, "refrescado"
     except Exception as e:
         return True, f"no se pudo consultar Jellyfin: {e}"
+
+
+_RES_WORD = {"uhd": "4K", "fhd": "Full HD", "sd": "SD"}
+_LANG_WORD = {"eng": "inglés", "spa": "español", "jpn": "japonés", "fre": "francés",
+              "ger": "alemán", "ita": "italiano", "por": "portugués", "kor": "coreano",
+              "chi": "chino", "rus": "ruso", "swe": "sueco", "nor": "noruego",
+              "dan": "danés", "dut": "neerlandés", "pol": "polaco", "ara": "árabe"}
+
+
+def _lang_phrase(langs):
+    """"español e inglés" -- a list a person reads, not ISO codes."""
+    words = [_LANG_WORD.get(l, l) for l in langs]
+    if not words:
+        return "sin audio"
+    if len(words) == 1:
+        return words[0].capitalize()
+    return (", ".join(w for w in words[:-1]) + " y " + words[-1]).capitalize()
+
+
+def _friendly_detail(conn, kind, owner_id, owner):
+    """What the film is, in the words someone reading a phone notification uses.
+
+    "4K Dolby Vision · Español e inglés · Atmos", not "3840x1608 · eng/spa/eng+atmos".
+    The technical line was written for me reading logs, not for the person
+    deciding whether to sit down and watch something."""
+    bits = []
+    q = _quality(dict(owner)) if owner.get("width") else None
+    if q:
+        bits.append(_RES_WORD.get(q["res"], q["res"].upper()))
+    hdr = (owner.get("hdr") or "").upper()
+    if "DV" in hdr or "DOLBY VISION" in hdr:
+        bits.append("Dolby Vision")
+    elif "HDR10+" in hdr:
+        bits.append("HDR10+")
+    elif "HDR" in hdr:
+        bits.append("HDR10")
+    rows = conn.execute(
+        f"SELECT out_lang, codec FROM tracks WHERE {_owner_col(kind)}=? AND type='audio' "
+        "AND keep=1 ORDER BY out_order", (owner_id,)).fetchall()
+    seen, atmos = [], False
+    for r in rows:
+        lg = r["out_lang"] or "und"
+        if lg not in seen:
+            seen.append(lg)
+        if "atmos" in (r["codec"] or "").lower():
+            atmos = True
+    detail = " · ".join([b for b in bits if b] + [_lang_phrase(seen)])
+    if atmos:
+        detail += " · Atmos"
+    return detail
 
 
 def _announce_ready(conn, kind, owner_id):
@@ -2220,7 +2278,6 @@ def _announce_ready(conn, kind, owner_id):
         return
     owner = _owner_info(conn, kind, owner_id)
     name = owner["title"] or owner["folder"]
-    res = f"{owner['width']}x{owner['height']}" if owner["width"] else "?"
     _restore_artwork(kind, owner["folder"])
     pending, notes = _readiness(conn, kind, owner_id, owner)
     seen, why = _jellyfin_refresh(owner["folder"], owner["file"])
@@ -2228,13 +2285,23 @@ def _announce_ready(conn, kind, owner_id):
         pending.append("indexar en Jellyfin")
     elif why and why != "refrescado":
         notes.append(why)
-    detail = f"{res} · {_track_summary(conn, kind, owner_id)}"
+    detail = _friendly_detail(conn, kind, owner_id, owner)
     if pending:
-        _notify(f"Incompleta: {name}", f"falta {', '.join(pending)} · {detail}",
+        _notify(f"Casi lista: {name}", f"falta {', '.join(pending)} · {detail}",
                 tags="warning", priority=4)
-    else:
-        _notify(f"Lista: {name}", detail + (" · " + ", ".join(notes) if notes else ""),
-                tags="white_check_mark")
+        return
+    # A title that replaced a previous copy is an upgrade, not a premiere: the
+    # recycled copy is the evidence, and saying "ya disponible" about a film the
+    # viewer already owns reads as noise.
+    # Two ways a title is an upgrade rather than a premiere: it replaced a copy
+    # we held (the recycled file proves it), or the viewer has already watched it
+    # -- Captain America was seen in June and its old file was deleted as corrupt,
+    # so only the second signal catches that one.
+    replaced = bool(graft.recycled_copy(owner["folder"])) if kind == "movie" else False
+    already_seen = bool(getattr(_jellyfin_refresh, "played", False))
+    head = "Mejorada" if (replaced or already_seen) else "Ya disponible"
+    _notify(f"{head}: {name}", detail + (" · " + ", ".join(notes) if notes else ""),
+            tags="sparkles" if replaced else "white_check_mark")
 
 
 def _delete_original(conn, kind, owner_id):

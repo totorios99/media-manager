@@ -613,18 +613,31 @@ def upsert_show(conn, media_root, folder_name, api_key):
     return show_id
 
 
+# A staged import adopted into the library is hidden on purpose (Jellyfin must
+# not index it yet) but it IS the movie's source file, unlike a job output that
+# is still being written. The suffix is the whole difference between "complete
+# and waiting to be remuxed" and "half-written, do not touch".
+IMPORT_SUFFIX = ".import"
+
+
+def _is_adopted_import(name):
+    stem, ext = os.path.splitext(name)
+    return name.startswith(".") and stem.endswith(IMPORT_SUFFIX)
+
+
 def find_main_file(folder):
-    """Largest video in the folder, ignoring dotfiles. The dot matters: job
-    outputs are written as ".Title.remux.mkv" so Jellyfin skips them while the
-    job runs, and a half-written one must never be adopted as the movie's main
-    file just because it is momentarily the largest thing in there."""
+    """Largest video in the folder. Dotfiles are skipped -- job outputs are
+    written as ".Title.remux.mkv" and a half-written one must never be adopted
+    as the movie's main file just because it is momentarily the largest thing in
+    there -- except an adopted import, which is hidden but complete."""
     best, best_size = None, -1
     try:
         entries = os.scandir(folder)
     except OSError:
         return None
     for e in entries:
-        if e.is_file() and e.name.lower().endswith(VIDEO_EXT) and not e.name.startswith("."):
+        if e.is_file() and e.name.lower().endswith(VIDEO_EXT) and (
+                not e.name.startswith(".") or _is_adopted_import(e.name)):
             size = e.stat().st_size
             if size > best_size:
                 best, best_size = e.name, size
@@ -1187,6 +1200,10 @@ if __name__ == "__main__":
         open(os.path.join(d, "Movie (2016).mkv"), "w").write("x" * 100)
         open(os.path.join(d, ".Movie (2016).remux.mkv"), "w").write("x" * 5000)
         assert find_main_file(d) == "Movie (2016).mkv", "dotfile output must never win"
+        # ...but an adopted staged import is hidden AND complete: must be found
+        open(os.path.join(d, ".Movie (2016).import.mkv"), "w").write("x" * 9000)
+        assert find_main_file(d) == ".Movie (2016).import.mkv", "el import adoptado sí cuenta"
+        os.remove(os.path.join(d, ".Movie (2016).import.mkv"))
         open(os.path.join(d, "._Movie (2016).mkv"), "w").write("x" * 9000)
         assert find_main_file(d) == "Movie (2016).mkv", "macOS stub still ignored"
 

@@ -85,7 +85,7 @@ def test_readiness_gate():
     gone = "Gone (2022)"
     os.makedirs(os.path.join(root, gone), exist_ok=True)
     pending, notes = app._readiness(conn, "movie", 1, owner(gone))
-    assert pending == [] and "carátula" in notes, (pending, notes)
+    assert pending == [] and notes == ["sin carátula"], (pending, notes)
 
     # sin español en ninguna parte: nota, nunca un bloqueo
     pending, notes = app._readiness(conn, "movie", 2, owner(full))

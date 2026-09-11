@@ -322,6 +322,50 @@ def _job_owner_kind_id(job):
     return ("movie", job["movie_id"]) if job["movie_id"] else ("episode", job["episode_id"])
 
 
+def _reconcile_staging():
+    """Pick up staged imports the process lost track of.
+
+    _STAGED lives in memory, so a restart mid-flight forgets that a title came
+    from staging: the normalised file may already be in place with the staging
+    copy still there, or the hidden import may be waiting with no job to remux
+    it. Either way nobody would ever finish it, and staging is invisible to
+    Jellyfin -- a silent failure, which is worse than the visible one it
+    replaced. This is the price of staging and it has to be paid at startup."""
+    if not os.path.isdir(STAGING_ROOT):
+        return
+    conn = get_db()
+    try:
+        for folder in sorted(os.listdir(STAGING_ROOT)):
+            if folder.startswith("."):
+                continue
+            dest = os.path.join(MEDIA_ROOT, folder)
+            row = conn.execute("SELECT id, file FROM movies WHERE folder=?", (folder,)).fetchone()
+            final = row and row["file"] and not row["file"].startswith(".")                 and os.path.exists(os.path.join(dest, row["file"]))
+            if final:
+                _STAGED[row["id"]] = folder          # so _finish_staging acts
+                _finish_staging(conn, row["id"])
+                continue
+            hidden = os.path.isdir(dest) and any(
+                f.startswith(".") and f.lower().endswith(scan.VIDEO_EXT)
+                for f in os.listdir(dest))
+            if hidden and row:
+                _STAGED[row["id"]] = folder
+                print(f"[staging] {folder!r}: import adoptado sin terminar, re-encolando",
+                      flush=True)
+                try:
+                    scan.suggest_tracks(conn, row["id"], "movies")
+                    job = _enqueue(conn, "movie", row["id"], "remux", 22)
+                    if job.get("job_id"):
+                        _AUTO_FINALIZE.add(job["job_id"])
+                except Exception as e:
+                    _notify("Staging sin terminar", f"{folder}: no pude re-encolar: {e}",
+                            tags="warning", priority=4)
+    except Exception as e:
+        print(f"[staging] reconciliación falló: {e}", flush=True)
+    finally:
+        conn.close()
+
+
 def _reap_stale_jobs():
     """Recover jobs left 'running' by a crash/power-loss. A job that finished
     while the server was down has an EXIT: marker in its log — _poll_and_finalize
@@ -385,6 +429,7 @@ def _startup():
     os.makedirs(LOG_DIR, exist_ok=True)
     init_db()
     _reap_stale_jobs()
+    _reconcile_staging()
     _install_shutdown_signal()
     threading.Thread(target=_job_ticker, daemon=True).start()
 
@@ -1981,6 +2026,44 @@ def _lost_audio_vs_recycle(conn, movie_id):
         return []
 
 
+STAGING_ROOT = os.environ.get("MM_STAGING_ROOT", "/media/hdd1/Staging")
+# Radarr's container path for that same directory, as it appears in folderPath
+STAGING_CONTAINER = os.environ.get("MM_STAGING_CONTAINER", "/staging")
+_STAGED = {}          # movie_id -> staging folder still to clean up
+
+
+def _adopt_from_staging(folder):
+    """Bring a staged import into the library WITHOUT making it visible yet.
+
+    Radarr imports into /staging, which Jellyfin does not watch, so the raw file
+    never reaches the library. We hardlink it into the movie's folder under a
+    dotfile name: same inode, zero bytes, Radarr's copy untouched and its record
+    still valid. Jellyfin skips a folder whose only video is hidden (measured:
+    indexed 0 with the dotfile, 1 once the final file lands), so the title
+    appears for the first time already normalised.
+
+    Returns the hidden filename, or None when there is nothing to adopt."""
+    src_dir = os.path.join(STAGING_ROOT, folder)
+    if not os.path.isdir(src_dir):
+        return None
+    vids = [f for f in os.listdir(src_dir)
+            if f.lower().endswith(scan.VIDEO_EXT) and not f.startswith(".")]
+    if not vids:
+        return None
+    src = os.path.join(src_dir, max(vids, key=lambda f: os.path.getsize(os.path.join(src_dir, f))))
+    dest_dir = os.path.join(MEDIA_ROOT, folder)
+    os.makedirs(dest_dir, exist_ok=True)
+    hidden = f".{os.path.splitext(os.path.basename(src))[0]}.import{os.path.splitext(src)[1]}"
+    dest = os.path.join(dest_dir, hidden)
+    if os.path.exists(dest):
+        os.remove(dest)
+    try:
+        os.link(src, dest)                    # same filesystem on the host
+    except OSError:
+        shutil.copy2(src, dest)               # never fail an import over this
+    return hidden
+
+
 @app.post("/api/hooks/radarr")
 async def radarr_hook(request: Request):
     _check_hook_auth(request)
@@ -1992,7 +2075,9 @@ async def radarr_hook(request: Request):
         return {"ok": True, "ignored": event}
 
     movie = body.get("movie") or {}
-    folder = os.path.basename((movie.get("folderPath") or "").rstrip("/"))
+    folder_path = (movie.get("folderPath") or "").rstrip("/")
+    folder = os.path.basename(folder_path)
+    staged = folder_path.startswith(STAGING_CONTAINER + "/")
     title = movie.get("title") or folder
     tmdb = movie.get("tmdbId")
     conn = get_db()
@@ -2009,6 +2094,10 @@ async def radarr_hook(request: Request):
         # file's track ids, which preflight then refuses. Both happened on the
         # same import batch -- Superman and Captain America hit the first, Tokyo
         # Drift the second.
+        if staged:
+            # hardlink the staged file in hidden, so the rescan below sees it
+            # while Jellyfin still does not
+            _adopt_from_staging(folder)
         if folder:
             scan.upsert_movie(conn, MEDIA_ROOT, folder, TMDB_API_KEY)
             row = conn.execute("SELECT id FROM movies WHERE folder=?", (folder,)).fetchone()
@@ -2042,6 +2131,8 @@ async def radarr_hook(request: Request):
         # the convention lives in suggest_tracks: original language first and
         # default, Spanish second, TrueHD/Atmos kept but never default
         scan.suggest_tracks(conn, mid, "movies")
+        if staged:
+            _STAGED[mid] = folder
         job = _enqueue(conn, "movie", mid, "remux", 22)
         if job.get("job_id"):
             _AUTO_FINALIZE.add(job["job_id"])
@@ -2108,7 +2199,9 @@ def _readiness(conn, kind, owner_id, owner):
         src = os.path.join(graft.RECYCLE, folder)
         have_src = os.path.isdir(src) and any(
             f.lower().endswith((".jpg", ".jpeg", ".png")) for f in os.listdir(src))
-        (pending if have_src else notes).append("carátula")
+        # pending is a list of things to get; notes describes what the film
+        # lacks. Same word cannot serve both: "carátula" alone said nothing.
+        pending.append("carátula") if have_src else notes.append("sin carátula")
     lost = _lost_audio_vs_recycle(conn, owner_id) if kind == "movie" else []
     if lost:
         pending.append("audio " + "/".join(lost))
@@ -2141,6 +2234,7 @@ def _verify_and_finalize(conn, kind, owner_id, job):
             # replaces the raw import with the normalised file, renames it to
             # "Title (Year).mkv" and sweeps the folder of scene junk
             _delete_original(conn, kind, owner_id)
+            _finish_staging(conn, owner_id)
             owner = _owner_info(conn, kind, owner_id)
         except Exception as e:
             print(f"[hook] no se pudo finalizar {owner_id}: {e}", flush=True)
@@ -2278,6 +2372,78 @@ def _friendly_detail(conn, kind, owner_id, owner):
     if atmos:
         detail += " · Atmos"
     return detail
+
+
+RADARR_URL = os.environ.get("RADARR_URL", "http://localhost:7878")
+_RADARR_TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  ".radarr-token")
+
+
+def _radarr_token():
+    """Radarr has no per-application keys in this version: this is the global
+    key, so a leak is "Radarr compromised", not "media-manager compromised".
+    Same handling as the webhook secret -- own file, 0600, gitignored, never in
+    a message or a log."""
+    tok = os.environ.get("RADARR_TOKEN", "")
+    if tok:
+        return tok
+    try:
+        with open(_RADARR_TOKEN_FILE) as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def _radarr(method, path, body=None, timeout=90):
+    token = _radarr_token()
+    if not token:
+        return None
+    cmd = ["curl", "-s", "--max-time", str(timeout), "-X", method,
+           "-H", f"X-Api-Key: {token}"]
+    if body is not None:
+        cmd += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
+    out = subprocess.run(cmd + [f"{RADARR_URL}/api/v3/{path}"],
+                         capture_output=True, text=True).stdout
+    try:
+        return json.loads(out or "null")
+    except ValueError:
+        return None
+
+
+def _finish_staging(conn, movie_id):
+    """Retire the staging copy once the normalised file is in place.
+
+    Order matters and it is not the obvious one: repoint Radarr first, delete
+    the staging folder second, rescan third. Deleting before repointing leaves
+    Radarr looking at a path that no longer exists, and hasFile=false does not
+    mean "upgradeable" to Radarr -- it means missing, and it re-grabs."""
+    folder = _STAGED.pop(movie_id, None)
+    if not folder:
+        return
+    owner = _owner_info(conn, "movie", movie_id)
+    dest = os.path.join(MEDIA_ROOT, folder)
+    if not (owner and owner["file"] and os.path.exists(os.path.join(dest, owner["file"]))):
+        print(f"[staging] {folder!r}: sin fichero final, no retiro nada", flush=True)
+        return
+    tmdb = owner.get("tmdb_id")
+    movies = _radarr("GET", "movie") or []
+    m = next((x for x in movies if x.get("tmdbId") == tmdb), None)
+    if not m:
+        print(f"[staging] {folder!r}: Radarr no la conoce, dejo staging intacto", flush=True)
+        return
+    m["path"] = f"/movies/{folder}"
+    m["rootFolderPath"] = "/movies"
+    if _radarr("PUT", f"movie/{m['id']}?moveFiles=false", m) is None:
+        print(f"[staging] {folder!r}: falló el repunte, dejo staging intacto", flush=True)
+        return
+    src = os.path.join(STAGING_ROOT, folder)
+    try:
+        if os.path.isdir(src):
+            shutil.rmtree(src)
+    except OSError as e:
+        print(f"[staging] no pude borrar {src!r}: {e}", flush=True)
+    _radarr("POST", "command", {"name": "RescanMovie", "movieIds": [m["id"]]})
+    print(f"[staging] {folder!r} retirada de staging y repuntada a /movies", flush=True)
 
 
 def _announce_ready(conn, kind, owner_id):

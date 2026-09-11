@@ -94,6 +94,31 @@ def test_readiness_gate():
     print("test_readiness_gate OK")
 
 
+def test_artwork_language_preference():
+    """A logo in the wrong language is worse than no logo: Spanish wins, then
+    English, then the textless image. Vote average only breaks ties inside a
+    language, never across them -- a highly-voted Japanese poster must not beat
+    a mediocre Spanish one."""
+    import artwork
+    images = {"posters": [
+        {"iso_639_1": "ja", "file_path": "/ja.jpg", "vote_average": 9.9, "width": 2000},
+        {"iso_639_1": "en", "file_path": "/en.jpg", "vote_average": 5.0, "width": 1000},
+        {"iso_639_1": "es", "file_path": "/es.jpg", "vote_average": 1.0, "width": 500},
+        {"iso_639_1": None, "file_path": "/none.jpg", "vote_average": 7.0, "width": 900},
+    ]}
+    assert artwork._best(images, "posters") == "/es.jpg"
+    images["posters"] = [i for i in images["posters"] if i["iso_639_1"] != "es"]
+    assert artwork._best(images, "posters") == "/en.jpg"
+    images["posters"] = [i for i in images["posters"] if i["iso_639_1"] != "en"]
+    assert artwork._best(images, "posters") == "/none.jpg"
+    # only a language we do not want left: take it rather than ship nothing
+    images["posters"] = [{"iso_639_1": "ja", "file_path": "/ja.jpg", "vote_average": 9.9}]
+    assert artwork._best(images, "posters") == "/ja.jpg"
+    assert artwork._best({"logos": []}, "logos") is None
+    print("test_artwork_language_preference OK")
+
+
 if __name__ == "__main__":
     main()
     test_readiness_gate()
+    test_artwork_language_preference()

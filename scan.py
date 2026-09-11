@@ -237,8 +237,12 @@ def _sub_class(t):
         return "pgs"
     if "vobsub" in c:
         return "vob"
-    if t.get("ext_path") or "subrip" in c or "srt" in c:
-        return "srt"
+    # every text-based subtitle is one class: SSA/ASS carries the same content
+    # as SRT, and classing it "other" made suggest_tracks drop it silently --
+    # The Office's 1212 subtitle tracks are all ASS and none survived.
+    if (t.get("ext_path") or "subrip" in c or "srt" in c
+            or "ass" in c or "substation" in c or "text" in c):
+        return "text"
     return "other"
 
 
@@ -354,7 +358,7 @@ def suggest_tracks(conn, owner_id, table="movies", multi_audio=False):
             mark(img, lang, default=False, forced=False)
     for lang in wanted:
         cands = [t for t in subs if t["lang"] == lang and not t["forced_flag"] and t["id"] not in plan]
-        srt = next((t for t in cands if _sub_class(t) == "srt"), None)
+        srt = next((t for t in cands if _sub_class(t) == "text"), None)
         if srt:
             mark(srt, lang, default=False, forced=False)
 
@@ -1097,6 +1101,12 @@ if __name__ == "__main__":
     assert guess_srt_lang("movie.eng.sdh.srt") == "eng"
     assert guess_srt_lang("movie.spa.srt") == "spa"
     assert guess_srt_lang("movie.srt") == "und"
+
+    # ASS/SSA is a text subtitle like SRT, not an unclassifiable "other":
+    # classing it "other" made suggest_tracks keep none of The Office's 1212
+    assert _sub_class({"codec": "SubStationAlpha", "ext_path": None}) == "text"
+    assert _sub_class({"codec": "SubRip/SRT", "ext_path": None}) == "text"
+    assert _sub_class({"codec": "HDMV PGS", "ext_path": None}) == "pgs"
 
     import tempfile
     with tempfile.TemporaryDirectory() as d:

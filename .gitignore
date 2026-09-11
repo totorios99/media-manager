@@ -8,3 +8,4 @@ data/
 media.db.bak-*
 .radarr-hook-secret
 .jellyfin-token
+.radarr-token

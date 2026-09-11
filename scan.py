@@ -723,7 +723,7 @@ _NAME_IS_SPANISH_RE = re.compile(r"\bspanish\b|\bespa[ñn]ol\b|\bcastellano\b|\b
                                  re.IGNORECASE)
 
 
-def _spanish_variant(lang, name):
+def _spanish_variant(lang, name, ttype="subtitle"):
     """'spa'|'spa-mx'|'spa-es' -- refines a bare 'spa' using the track name's
     Latino/Castellano wording. Non-Spanish or already-specific langs pass through.
 
@@ -732,7 +732,13 @@ def _spanish_variant(lang, name):
     track was headed for the discard pile because no rule about Spanish could see
     it. Only reclassify when the name itself says Spanish -- an actual Latin track
     keeps its code."""
-    if lang == "lat" and name and _NAME_IS_SPANISH_RE.search(name):
+    if lang == "lat" and (ttype == "audio" or (name and _NAME_IS_SPANISH_RE.search(name))):
+        # For AUDIO the name is not required: a dub recorded in Latin does not
+        # exist in practice, while a Latino dub tagged "lat" is common. Rick and
+        # Morty carries two, named only "GATON" (a dub group), and S02E01 has no
+        # other Spanish at all -- the strict rule would have discarded its only
+        # dub. Subtitles stay name-based: Latin subtitles are at least plausible
+        # on a period film, and the name caught Spider-Verse fine.
         lang = "spa"
     if lang != "spa" or not name:
         return lang
@@ -762,7 +768,7 @@ def inspect_file(path):
         lang = tp.get("language") or tp.get("language_ietf") or "und"
         tracks.append({
             "mkv_id": t["id"], "type": ttype, "codec": t.get("codec"),
-            "lang": _spanish_variant(lang, name),
+            "lang": _spanish_variant(lang, name, ttype),
             "name": name,
             "channels": tp.get("audio_channels"),
             "default_flag": 1 if tp.get("default_track") else 0,
@@ -1227,6 +1233,13 @@ if __name__ == "__main__":
     assert _spanish_variant("lat", "Español Latino") == "spa-mx"
     assert _spanish_variant("lat", "Latin") == "lat", "a real Latin track keeps its code"
     assert _spanish_variant("lat", "") == "lat", "no name, no reclassification"
+    # audio is different: a dub recorded in Latin does not exist, and Rick and
+    # Morty tags two Latino dubs "lat" with only the dub group as the name
+    assert _spanish_variant("lat", "GATON", "audio") == "spa-mx" or \
+           _spanish_variant("lat", "GATON", "audio") == "spa", \
+           _spanish_variant("lat", "GATON", "audio")
+    assert _spanish_variant("lat", "Latin", "audio") != "lat", "audio lat es doblaje, no latín"
+    assert _spanish_variant("lat", "", "subtitle") == "lat", "subtítulos siguen estrictos"
 
     # a release that names a track forced but forgets the flag: the name counts
     assert _NAME_FORCED_RE.search("Forced Only")

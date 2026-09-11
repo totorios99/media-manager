@@ -230,7 +230,8 @@ def preflight(source_path, kept_tracks):
     return True, "ok"
 
 
-def verify_output(out_path, kept_tracks, source_duration=None, source_path=None):
+def verify_output(out_path, kept_tracks, source_duration=None, source_path=None,
+                  order_key="out_order"):
     """kept_tracks: rows (dicts) from `tracks` table with keep=1, already the config
     we asked for. Compares output-order sequence of type/lang/default/forced.
 
@@ -243,7 +244,9 @@ def verify_output(out_path, kept_tracks, source_duration=None, source_path=None)
     if len(got) != len(kept_tracks):
         return False, f"track count mismatch: expected {len(kept_tracks)} got {len(got)}"
 
-    exp_sorted = sorted(kept_tracks, key=lambda t: (TYPE_RANK[t["type"]], t["out_order"]))
+    # order_key="mkv_id" for an in-place edit, where the output order is the
+    # source order and out_order describes a move that has not happened yet
+    exp_sorted = sorted(kept_tracks, key=lambda t: (TYPE_RANK[t["type"]], t[order_key]))
     got_sorted = sorted(got, key=lambda t: (TYPE_RANK[t["type"]], t["mkv_id"]))
     for e, g in zip(exp_sorted, got_sorted):
         if e["type"] != g["type"]:

@@ -1565,10 +1565,16 @@ def _build_job_cmd(conn, kind, owner, job_kind, quality):
         out_path = os.path.join(folder_path, f".{owner['out_base']}.remux.mkv")
         return shlex.join(commands.build_mkvmerge_remux(tracks, title, in_path, out_path)), out_path
     if job_kind == "propedit":
+        # track:a{N}/track:s{N} address positions in the FILE, and mkvpropedit
+        # moves nothing -- so the metadata written at each position must be the
+        # metadata of the track that physically sits there. Sorting by out_order
+        # would stamp each track's labels onto whichever track occupies its
+        # intended slot. The config's out_order is left untouched: it still
+        # records the order a later remux should actually produce.
         audio_order = sorted([t for t in tracks if t["type"] == "audio" and t["keep"]],
-                             key=lambda t: t["out_order"])
+                             key=lambda t: t["mkv_id"])
         sub_order = sorted([t for t in tracks if t["type"] == "subtitle" and t["keep"]],
-                           key=lambda t: t["out_order"])
+                           key=lambda t: t["mkv_id"])
         vtrack = next((t for t in tracks if t["type"] == "video"), None)
         argv = commands.build_mkvpropedit_chain(in_path, title, audio_order, sub_order,
                                                 video_lang=vtrack["out_lang"] if vtrack else None,
@@ -1633,19 +1639,10 @@ def _enqueue(conn, kind, owner_id, job_kind, quality):
             (owner_id,)).fetchone()
         if bad:
             raise HTTPException(400, "this title drops or adds tracks; use kind=remux")
-        # build_mkvpropedit_chain addresses track:a{N}/track:s{N}, which are
-        # positions in the FILE. mkvmerge reorders as it writes so the two agree
-        # for a remux; mkvpropedit moves nothing. A config that reorders would
-        # therefore stamp each track's metadata onto whichever track happens to
-        # sit at that position -- in place, over the only copy, and
-        # verify_output compares expected-by-out_order against got-by-mkv_id, so
-        # the swap verifies clean.
-        for ttype in ("audio", "subtitle"):
-            rows = conn.execute(
-                f"SELECT mkv_id, out_order FROM tracks WHERE {col}=? AND type=? AND keep=1 "
-                "ORDER BY mkv_id", (owner_id, ttype)).fetchall()
-            if [r["out_order"] for r in rows] != sorted(r["out_order"] for r in rows):
-                raise HTTPException(400, "this title reorders tracks; use kind=remux")
+        # A config whose out_order differs from the file order is still a valid
+        # propedit: the labels get fixed in place and the tracks stay where they
+        # are. Only a remux can move them, and the config still says where they
+        # belong when one runs.
 
     # propedit rewrites headers in place: no second copy, so no space needed
     need_bytes = 0 if job_kind == "propedit" else (2 * 10**9 if job_kind == "sample" else owner["size_bytes"])
@@ -2218,7 +2215,10 @@ def _verify_and_finalize(conn, kind, owner_id, job):
     owner = _owner_info(conn, kind, owner_id)
     kept = _kept_tracks(conn, kind, owner_id)
     src = os.path.join(_root_for(kind), owner["folder"], owner["file"]) if owner["file"] else None
-    ok, msg = jobs.verify_output(owner["output_file"], kept, owner["duration"], source_path=src)
+    # propedit edits in place: the file order is unchanged and IS the truth to
+    # check against, so expectations line up by mkv_id, not by out_order.
+    ok, msg = jobs.verify_output(owner["output_file"], kept, owner["duration"], source_path=src,
+                                 order_key="mkv_id" if job["kind"] == "propedit" else "out_order")
     if ok:
         conn.execute("UPDATE jobs SET status='verified' WHERE id=?", (job["id"],))
         _set_owner_status(conn, kind, owner_id, "clean")

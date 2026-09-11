@@ -20,9 +20,15 @@ SRC = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py")).r
 
 
 def main():
-    # 1. the enqueue guard exists and fires before the command is built
-    assert "this title reorders tracks; use kind=remux" in SRC, \
-        "no guard against a propedit whose config reorders tracks"
+    # 1. propedit writes each position the metadata of the track that actually
+    # sits there. Sorting by out_order would stamp a reordered config's labels
+    # onto the wrong tracks, in place, over the only copy.
+    branch = SRC[SRC.index('if job_kind == "propedit":'):]
+    branch = branch[:branch.index('if job_kind == "sample":')]
+    assert 'key=lambda t: t["mkv_id"]' in branch and 'key=lambda t: t["out_order"]' not in branch, \
+        "propedit orders its mkvpropedit targets by out_order, not by file position"
+    assert 'order_key="mkv_id" if job["kind"] == "propedit"' in SRC, \
+        "propedit is verified against out_order, which it never applied"
 
     # 2. neither delete path may run for propedit
     reaper = re.search(r'if job and job\["status"\] == "failed" and job\["kind"\][^\n]*', SRC)
@@ -59,6 +65,36 @@ def test_sdh_naming_is_type_aware():
     print("test_sdh_naming_is_type_aware OK")
 
 
+def test_verify_honours_order_key():
+    """An in-place edit never moves a track, so its expectations line up by file
+    position. Checking a reordered config by out_order would compare the English
+    track against the Spanish one that still sits in front of it."""
+    import os
+    import jobs
+    got = [
+        {"type": "video", "mkv_id": 0, "lang": "eng", "default_flag": 1, "forced_flag": 0},
+        {"type": "audio", "mkv_id": 1, "lang": "spa", "default_flag": 0, "forced_flag": 0},
+        {"type": "audio", "mkv_id": 2, "lang": "eng", "default_flag": 1, "forced_flag": 0},
+    ]
+    kept = [
+        {"type": "video", "mkv_id": 0, "out_order": 0, "out_lang": "eng", "out_default": 1, "out_forced": 0},
+        {"type": "audio", "mkv_id": 1, "out_order": 1, "out_lang": "spa", "out_default": 0, "out_forced": 0},
+        {"type": "audio", "mkv_id": 2, "out_order": 0, "out_lang": "eng", "out_default": 1, "out_forced": 0},
+    ]
+    real_inspect, real_exists = jobs.inspect_file, os.path.exists
+    jobs.inspect_file = lambda p: {"tracks": got, "duration": None, "video_duration": None}
+    os.path.exists = lambda p: True if p == "X" else real_exists(p)
+    try:
+        ok, msg = jobs.verify_output("X", kept, order_key="mkv_id")
+        assert ok, f"file-order verification should pass: {msg}"
+        ok, _ = jobs.verify_output("X", kept, order_key="out_order")
+        assert not ok, "out_order verification should fail on a file that was never reordered"
+    finally:
+        jobs.inspect_file, os.path.exists = real_inspect, real_exists
+    print("test_verify_honours_order_key OK")
+
+
 if __name__ == "__main__":
     main()
     test_sdh_naming_is_type_aware()
+    test_verify_honours_order_key()

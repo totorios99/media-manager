@@ -158,6 +158,34 @@ def get_db():
     return conn
 
 
+def _add_missing_columns(conn):
+    """Additive columns, checked on EVERY startup.
+
+    These used to live at the end of _migrate, past its `user_version >= 1`
+    early return -- so once a database was stamped, no column added later ever
+    reached it. `animation` silently never appeared and suggest_tracks died with
+    "no such column". Column presence is the only guard these need: adding one
+    is idempotent and cheap, unlike the table rebuild _migrate gates.
+
+    Must still run AFTER that rebuild: it recreates `tracks` from
+    _TRACKS_OLD_COLS and renames it over the top, which would drop them again.
+    """
+    for table, col, decl in (
+        ("movies", "atmos", "INTEGER DEFAULT 0"),
+        ("episodes", "atmos", "INTEGER DEFAULT 0"),
+        ("shows", "animation", "INTEGER DEFAULT 0"),
+        ("movies", "animation", "INTEGER DEFAULT 0"),
+        ("tracks", "sdh_flag", "INTEGER DEFAULT 0"),
+        ("tracks", "commentary_flag", "INTEGER DEFAULT 0"),
+    ):
+        if not conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+            continue
+        if col not in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+            conn.commit()
+
+
 def _migrate(conn):
     """One-shot rebuild for pre-TV databases: tracks.movie_id was NOT NULL, which
     SQLite can't alter away, so the table must be recreated. Gated on
@@ -213,22 +241,6 @@ def _migrate(conn):
             raise
         finally:
             conn.execute("PRAGMA foreign_keys=ON")
-    # Additive columns, after the rebuild above: run before it, the pre-TV
-    # migration recreated `tracks` from _TRACKS_OLD_COLS and renamed it over
-    # the top, dropping both new columns and breaking every later scan.
-    # Each stays NULL/0 until the next scan re-inspects the file.
-    for table, col, decl in (
-        ("movies", "atmos", "INTEGER DEFAULT 0"),
-        ("episodes", "atmos", "INTEGER DEFAULT 0"),
-        ("tracks", "sdh_flag", "INTEGER DEFAULT 0"),
-        ("tracks", "commentary_flag", "INTEGER DEFAULT 0"),
-    ):
-        if not conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
-            continue
-        if col not in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
-            conn.commit()
     conn.execute("PRAGMA user_version=1")
     conn.commit()
 
@@ -239,6 +251,7 @@ def init_db():
     # old NOT NULL shape, and the script's own `idx_tracks_episode` index would
     # fail against it since CREATE TABLE IF NOT EXISTS no-ops on the existing table
     _migrate(conn)
+    _add_missing_columns(conn)
     conn.executescript(SCHEMA)
     conn.commit()
     conn.close()

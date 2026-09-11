@@ -162,6 +162,7 @@ def tmdb_search(title, year, api_key):
         "year": int(top["release_date"][:4]) if top.get("release_date") else year,
         "original_language": top.get("original_language"),
         "poster_path": top.get("poster_path"),
+        "animation": _is_animation(top),
     }
 
 
@@ -209,6 +210,7 @@ def tmdb_get_movie(tmdb_id, api_key):
         "tmdb_id": d["id"], "title": d.get("title"),
         "year": int(d["release_date"][:4]) if d.get("release_date") else None,
         "original_language": d.get("original_language"), "poster_path": d.get("poster_path"),
+        "animation": _is_animation(d),
     }
 
 
@@ -268,9 +270,12 @@ def suggest_tracks(conn, owner_id, table="movies", multi_audio=False):
     # episodes hold no original_language of their own -- it lives on the parent show
     if table == "movies":
         original_language = movie["original_language"]
+        animation = movie["animation"]
     else:
-        show = conn.execute("SELECT original_language FROM shows WHERE id=?", (movie["show_id"],)).fetchone()
+        show = conn.execute("SELECT original_language, animation FROM shows WHERE id=?",
+                            (movie["show_id"],)).fetchone()
         original_language = show["original_language"] if show else None
+        animation = show["animation"] if show else 0
     orig3 = LANG_ISO1_TO_3.get(original_language or "")
     wanted = [l for l in ([orig3] if orig3 else []) + ["eng", "spa"] if l]
     wanted = list(dict.fromkeys(wanted))  # de-dup, preserve order (original lang first)
@@ -339,6 +344,18 @@ def suggest_tracks(conn, owner_id, table="movies", multi_audio=False):
                       and t["id"] not in plan), None)
             if t:
                 mark(t, lang, default=False, forced=False)
+
+    # Animation is the exception to "original language plays by default":
+    # Antonio watches anime and animated films dubbed in Spanish. The Japanese
+    # track and its subtitles still ship -- only which one starts changes, and
+    # only when a Spanish dub actually exists.
+    if animation:
+        spa = next((t for t in audio if t["id"] in plan
+                    and _spanish_base(t["lang"]) == "spa"), None)
+        if spa:
+            for t in audio:
+                if t["id"] in plan:
+                    plan[t["id"]]["out_default"] = 1 if t is spa else 0
 
     # subs, output order: forced (movie language first, that one default),
     # then one image sub (PGS, VobSub fallback) per language, then one SRT
@@ -494,6 +511,16 @@ def find_episode_files(folder):
     return out
 
 
+TMDB_ANIMATION_GENRE = 16
+
+
+def _is_animation(d):
+    """TMDB reports genres two ways: `genre_ids` in a search result, `genres`
+    (objects) in a detail fetch. 16 is Animation in both."""
+    ids = d.get("genre_ids") or [g.get("id") for g in (d.get("genres") or [])]
+    return 1 if TMDB_ANIMATION_GENRE in (ids or []) else 0
+
+
 def tmdb_search_tv(name, api_key):
     if not api_key or not name:
         return None
@@ -513,6 +540,7 @@ def tmdb_search_tv(name, api_key):
         "year": int(top["first_air_date"][:4]) if top.get("first_air_date") else None,
         "original_language": top.get("original_language"),
         "poster_path": top.get("poster_path"),
+        "animation": _is_animation(top),
     }
 
 
@@ -549,12 +577,14 @@ def upsert_show(conn, media_root, folder_name, api_key):
     if show_id:
         existing = conn.execute("SELECT * FROM shows WHERE id=?", (show_id,)).fetchone()
         tmdb = {"tmdb_id": existing["tmdb_id"], "title": existing["title"], "year": existing["year"],
-                "original_language": existing["original_language"], "poster_path": existing["poster_path"]}
+                "original_language": existing["original_language"], "poster_path": existing["poster_path"],
+                "animation": existing["animation"]}
 
     fields = dict(
         folder=folder_name, clean_title=clean_title, guess_year=guess_year,
         tmdb_id=(tmdb or {}).get("tmdb_id"), title=(tmdb or {}).get("title"), year=(tmdb or {}).get("year"),
         original_language=(tmdb or {}).get("original_language"), poster_path=(tmdb or {}).get("poster_path"),
+        animation=(tmdb or {}).get("animation") or 0,
         updated_at=now,
     )
     if show_id:
@@ -873,12 +903,12 @@ def upsert_movie(conn, media_root, folder_name, api_key):
     # 2014-03-14 release date, so a year-strict search on the folder's 2013
     # picks "Class Enemy" instead, and the next propedit stamped that wrong
     # title into the file. upsert_show already worked this way.
-    existing = conn.execute("SELECT tmdb_id, title, year, original_language, poster_path "
+    existing = conn.execute("SELECT tmdb_id, title, year, original_language, poster_path, animation "
                             "FROM movies WHERE id=?", (movie_id,)).fetchone() if movie_id else None
     if existing and existing["tmdb_id"]:
         tmdb = {"tmdb_id": existing["tmdb_id"], "title": existing["title"],
                 "year": existing["year"], "original_language": existing["original_language"],
-                "poster_path": existing["poster_path"]}
+                "poster_path": existing["poster_path"], "animation": existing["animation"]}
     else:
         tmdb = tmdb_search(clean_title, guess_year, api_key)
     info = inspect_file(file_path)
@@ -894,6 +924,7 @@ def upsert_movie(conn, media_root, folder_name, api_key):
         folder=folder_name, file=main_file, clean_title=clean_title, guess_year=guess_year,
         tmdb_id=(tmdb or {}).get("tmdb_id"), title=(tmdb or {}).get("title"), year=(tmdb or {}).get("year"),
         original_language=(tmdb or {}).get("original_language"), poster_path=(tmdb or {}).get("poster_path"),
+        animation=(tmdb or {}).get("animation") or 0,
         container_title=info["container_title"], video_codec=info["video_codec"],
         width=info["width"], height=info["height"], bitrate=info["bitrate"],
         duration=info["duration"], size_bytes=info["size_bytes"], hdr=info["hdr"],
@@ -1132,12 +1163,13 @@ if __name__ == "__main__":
     c = _sq.connect(":memory:")
     c.row_factory = _sq.Row
     c.executescript("""
-      CREATE TABLE movies (id INTEGER PRIMARY KEY, original_language TEXT, status TEXT, updated_at TEXT);
+      CREATE TABLE movies (id INTEGER PRIMARY KEY, original_language TEXT, status TEXT,
+                           updated_at TEXT, animation INT DEFAULT 0);
       CREATE TABLE tracks (id INTEGER PRIMARY KEY, movie_id INT, mkv_id INT, type TEXT, codec TEXT,
         lang TEXT, name TEXT, channels INT, default_flag INT DEFAULT 0, forced_flag INT DEFAULT 0,
         ext_path TEXT, keep INT DEFAULT 1, out_order INT DEFAULT 0, out_lang TEXT DEFAULT '',
         out_default INT DEFAULT 0, out_forced INT DEFAULT 0, out_name TEXT DEFAULT '');
-      INSERT INTO movies VALUES (1, 'en', 'unprocessed', NULL);
+      INSERT INTO movies VALUES (1, 'en', 'unprocessed', NULL, 0);
       INSERT INTO tracks (id, movie_id, mkv_id, type, codec, lang, forced_flag) VALUES
         (1,1,0,'video','HEVC','und',0),
         (2,1,1,'audio','TrueHD Atmos','eng',0),
@@ -1163,14 +1195,14 @@ if __name__ == "__main__":
     c2 = _sq.connect(":memory:")
     c2.row_factory = _sq.Row
     c2.executescript("""
-      CREATE TABLE shows (id INTEGER PRIMARY KEY, original_language TEXT);
+      CREATE TABLE shows (id INTEGER PRIMARY KEY, original_language TEXT, animation INT DEFAULT 0);
       CREATE TABLE episodes (id INTEGER PRIMARY KEY, show_id INT, original_language TEXT,
         status TEXT, updated_at TEXT);
       CREATE TABLE tracks (id INTEGER PRIMARY KEY, episode_id INT, mkv_id INT, type TEXT, codec TEXT,
         lang TEXT, name TEXT, channels INT, default_flag INT DEFAULT 0, forced_flag INT DEFAULT 0,
         ext_path TEXT, keep INT DEFAULT 1, out_order INT DEFAULT 0, out_lang TEXT DEFAULT '',
         out_default INT DEFAULT 0, out_forced INT DEFAULT 0, out_name TEXT DEFAULT '');
-      INSERT INTO shows VALUES (1, 'en');
+      INSERT INTO shows VALUES (1, 'en', 0);
       INSERT INTO episodes (id, show_id, status, updated_at) VALUES (1, 1, 'unprocessed', NULL);
       INSERT INTO tracks (id, episode_id, mkv_id, type, codec, lang, forced_flag) VALUES
         (1,1,0,'video','HEVC','und',0),
@@ -1270,12 +1302,13 @@ if __name__ == "__main__":
     c3 = _sq.connect(":memory:")
     c3.row_factory = _sq.Row
     c3.executescript("""
-      CREATE TABLE movies (id INTEGER PRIMARY KEY, original_language TEXT, status TEXT, updated_at TEXT);
+      CREATE TABLE movies (id INTEGER PRIMARY KEY, original_language TEXT, status TEXT,
+                           updated_at TEXT, animation INT DEFAULT 0);
       CREATE TABLE tracks (id INTEGER PRIMARY KEY, movie_id INT, mkv_id INT, type TEXT, codec TEXT,
         lang TEXT, name TEXT, channels INT, default_flag INT DEFAULT 0, forced_flag INT DEFAULT 0,
         ext_path TEXT, keep INT DEFAULT 1, out_order INT DEFAULT 0, out_lang TEXT DEFAULT '',
         out_default INT DEFAULT 0, out_forced INT DEFAULT 0, out_name TEXT DEFAULT '');
-      INSERT INTO movies VALUES (1, 'en', 'unprocessed', NULL);
+      INSERT INTO movies VALUES (1, 'en', 'unprocessed', NULL, 0);
       INSERT INTO tracks (id, movie_id, mkv_id, type, codec, lang, name, forced_flag) VALUES
         (1,1,0,'video','HEVC','und','',0),
         (2,1,1,'audio','AC-3','eng','',0),
@@ -1295,5 +1328,35 @@ if __name__ == "__main__":
     got4 = {r["id"]: dict(r) for r in c3.execute("SELECT * FROM tracks")}
     assert got4[4]["keep"] == 1, "Castellano survives when Spanish is the original language"
     assert got4[3]["out_order"] != got4[4]["out_order"], "distinct slots, not overwriting each other"
+
+    # animation: Spanish plays by default, the original track still ships
+    c3 = _sq.connect(":memory:")
+    c3.row_factory = _sq.Row
+    c3.executescript("""
+      CREATE TABLE shows (id INTEGER PRIMARY KEY, original_language TEXT, animation INT);
+      CREATE TABLE episodes (id INTEGER PRIMARY KEY, show_id INT, status TEXT, updated_at TEXT);
+      CREATE TABLE tracks (id INTEGER PRIMARY KEY, episode_id INT, movie_id INT, mkv_id INT,
+        type TEXT, codec TEXT, lang TEXT, name TEXT, channels INT,
+        default_flag INT DEFAULT 0, forced_flag INT DEFAULT 0, ext_path TEXT,
+        keep INT DEFAULT 1, out_order INT DEFAULT 0, out_lang TEXT DEFAULT '',
+        out_default INT DEFAULT 0, out_forced INT DEFAULT 0, out_name TEXT DEFAULT '',
+        sdh_flag INT DEFAULT 0, commentary_flag INT DEFAULT 0);
+      INSERT INTO shows VALUES (1, 'ja', 1), (2, 'ja', 0);
+      INSERT INTO episodes VALUES (1, 1, 'unprocessed', ''), (2, 2, 'unprocessed', '');
+    """)
+    for eid in (1, 2):
+        for mkv, ttype, lang in ((0, 'video', 'und'), (1, 'audio', 'jpn'),
+                                 (2, 'audio', 'spa-mx'), (3, 'subtitle', 'spa')):
+            c3.execute("INSERT INTO tracks (episode_id, mkv_id, type, codec, lang, name) "
+                       "VALUES (?,?,?,?,?,'')", (eid, mkv, ttype, 'AC-3', lang))
+    suggest_tracks(c3, 1, table="episodes", multi_audio=True)
+    suggest_tracks(c3, 2, table="episodes", multi_audio=True)
+    got = {(r["episode_id"], r["lang"]): r["out_default"]
+           for r in c3.execute("SELECT * FROM tracks WHERE type='audio'")}
+    assert got[(1, "spa-mx")] == 1 and got[(1, "jpn")] == 0, ("animation must default to Spanish", got)
+    assert got[(2, "jpn")] == 1 and got[(2, "spa-mx")] == 0, ("live action keeps original default", got)
+    # the original track is kept either way -- only which one starts changes
+    kept = {r["lang"] for r in c3.execute("SELECT * FROM tracks WHERE episode_id=1 AND keep=1")}
+    assert "jpn" in kept and "spa-mx" in kept, kept
 
     print("scan.py self-check OK")

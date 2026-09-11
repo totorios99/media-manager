@@ -27,7 +27,7 @@ def main():
         clean_title TEXT, guess_year INT, tmdb_id INT, title TEXT, year INT,
         original_language TEXT, poster_path TEXT, container_title TEXT,
         video_codec TEXT, width INT, height INT, bitrate INT, duration REAL,
-        size_bytes INT, hdr TEXT, atmos INT DEFAULT 0, status TEXT,
+        size_bytes INT, hdr TEXT, atmos INT DEFAULT 0, animation INT DEFAULT 0, status TEXT,
         output_file TEXT, updated_at TEXT)""")
     conn.execute("""CREATE TABLE tracks (id INTEGER PRIMARY KEY, movie_id INT, episode_id INT,
         mkv_id INT, type TEXT, codec TEXT, lang TEXT, name TEXT, channels INT,

@@ -20,11 +20,16 @@ import app  # noqa: E402
 def test_hook_ignores_events_it_does_not_handle():
     src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py")).read()
     body = src[src.index("async def sonarr_hook"):src.index("def _fetch_show_artwork")]
-    assert '"Download", "Rename", "EpisodeFileDelete"' in body, \
-        "the Sonarr hook no longer names the events it acts on"
+    for ev in ("Download", "Upgrade", "Rename", "EpisodeFileDelete",
+               "EpisodeFileDeleteForUpgrade"):
+        assert f'"{ev}"' in body, f"the hook stopped handling {ev}"
     # a Grab fires long before any file exists; acting on it would enqueue a job
-    # against a path Sonarr has not written yet
-    assert '"Grab"' not in body, "the hook would act on Grab, before the file exists"
+    # against a path Sonarr has not written yet. Check the accept list itself,
+    # not the whole function: a comment naming Grab is not the hook acting on it,
+    # and the substring version failed on exactly that.
+    accept = body[body.index("if event not in ("):body.index("return {\"ok\": True, \"ignored\"")]
+    assert '"Grab"' not in accept, "Grab is in the accept list; the file does not exist yet"
+    assert '"Download"' in accept and '"Upgrade"' in accept
     assert "scan.upsert_show" in body, "the hook looks up rows without rescanning first"
     idx_scan = body.index("scan.upsert_show")
     idx_lookup = body.index("SELECT id FROM episodes")

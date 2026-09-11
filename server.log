@@ -1,10 +1,10 @@
-INFO:     Started server process [995593]
+INFO:     Started server process [1002982]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8500 (Press CTRL+C to quit)
-INFO:     127.0.0.1:39498 - "GET /api/shows HTTP/1.1" 200 OK
-[hook] sonarr Download Fake: fuera de la biblioteca, path='/staging/Fake'
-INFO:     127.0.0.1:39504 - "POST /api/hooks/sonarr HTTP/1.1" 404 Not Found
-[hook] sonarr Download Peaky Blinders: 0 en cola, 1 sin encolar
-INFO:     127.0.0.1:60398 - "POST /api/hooks/sonarr HTTP/1.1" 200 OK
-INFO:     127.0.0.1:34056 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48636 - "GET /api/shows HTTP/1.1" 200 OK
+[hook] sonarr Download Peaky Blinders: 1 en cola, 0 sin encolar
+INFO:     127.0.0.1:48640 - "POST /api/hooks/sonarr HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34124 - "GET /api/jobs/1215 HTTP/1.1" 200 OK
+INFO:     172.17.0.10:53064 - "POST /api/hooks/sonarr HTTP/1.1" 200 OK
+INFO:     172.17.0.10:53066 - "POST /api/hooks/sonarr HTTP/1.1" 200 OK

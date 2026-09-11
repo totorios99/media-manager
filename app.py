@@ -2080,7 +2080,14 @@ async def sonarr_hook(request: Request):
     event = body.get("eventType", "")
     if event == "Test":
         return {"ok": True, "test": True}
-    if event not in ("Download", "Rename", "EpisodeFileDelete"):
+    # "Upgrade" and "EpisodeFileDeleteForUpgrade" are accepted defensively: an
+    # upgrade import and a delete-for-upgrade are reported under different
+    # eventType strings across Sonarr versions, and the cost of listing one that
+    # never fires is nothing, while missing one leaves our rows describing a file
+    # that no longer exists. "Grab" stays out on purpose: it arrives before the
+    # file does, and a job enqueued then points at a path Sonarr has not written.
+    if event not in ("Download", "Upgrade", "Rename",
+                     "EpisodeFileDelete", "EpisodeFileDeleteForUpgrade"):
         return {"ok": True, "ignored": event}
 
     series = body.get("series") or {}
@@ -2114,7 +2121,7 @@ async def sonarr_hook(request: Request):
             msg = f"{title}: no encontré la carpeta {folder!r} tras el rescan"
             _notify("Importación sin normalizar", msg, tags="warning", priority=4)
             raise HTTPException(404, msg)
-        if event == "EpisodeFileDelete":
+        if event.startswith("EpisodeFileDelete"):
             # the rescan above already pruned the row; nothing left to normalise
             return {"ok": True, "show_id": show["id"], "rescanned": True}
 

@@ -2648,6 +2648,39 @@ def _announce_ready(conn, kind, owner_id):
             tags="sparkles" if replaced else "white_check_mark")
 
 
+def _reinspect_in_place(conn, kind, owner_id, path):
+    """Re-read the file that just replaced the original and rewrite its tracks.
+
+    Nothing did this, so after every remux the tracks table still described the
+    file that had been deleted: Inside Out 2 carried 41 rows for a file with 8.
+    Worse, the UPDATE above stamps updated_at to now, so path_unchanged then
+    decides the row is newer than the file and never looks again -- the lie is
+    permanent and preflight starts refusing jobs on titles that are correct.
+
+    Scanning through upsert_movie/upsert_show would hit that same skip, so the
+    file is inspected directly. _upsert_tracks matches on track_sig, so the rows
+    that survived the remux keep their config and the dropped ones are pruned.
+    """
+    try:
+        info = scan.inspect_file(path)
+    except Exception as e:
+        print(f"[finalize] no pude releer {path}: {e}", flush=True)
+        return
+    col = "movie_id" if kind == "movie" else "episode_id"
+    owner = _owner_info(conn, kind, owner_id)
+    ext_subs = scan.find_external_subs(os.path.dirname(path),
+                                       os.path.splitext(os.path.basename(path))[0])
+    scan._upsert_tracks(conn, owner_id, info["tracks"], ext_subs,
+                        owner.get("original_language"), owner_col=col)
+    table = _owner_table(kind)
+    conn.execute(
+        f"UPDATE {table} SET video_codec=?, width=?, height=?, bitrate=?, "
+        f"duration=?, size_bytes=?, hdr=? WHERE id=?",
+        (info["video_codec"], info["width"], info["height"], info["bitrate"],
+         info["duration"], info["size_bytes"], info["hdr"], owner_id))
+    conn.commit()
+
+
 def _delete_original(conn, kind, owner_id):
     owner = _owner_or_404(conn, kind, owner_id)
     if owner["status"] != "clean":
@@ -2702,6 +2735,7 @@ def _delete_original(conn, kind, owner_id):
     now = _now()
     conn.execute(f"UPDATE {table} SET file=?, output_file=NULL, updated_at=? WHERE id=?",
                  (final_name, now, owner_id))
+    _reinspect_in_place(conn, kind, owner_id, final_path)
     if freed > 0:
         total = int(_get_setting(conn, "reclaimed_bytes", "0")) + freed
         _set_setting(conn, "reclaimed_bytes", str(total))

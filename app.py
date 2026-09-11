@@ -2061,6 +2061,123 @@ def _adopt_from_staging(folder):
     return hidden
 
 
+@app.get("/api/hooks/sonarr")
+def sonarr_hook_probe():
+    """Sonarr validates a webhook URL before saving it and refuses a 404."""
+    return {"ok": True, "hook": "sonarr"}
+
+
+@app.post("/api/hooks/sonarr")
+async def sonarr_hook(request: Request):
+    """Sonarr's counterpart to the Radarr hook.
+
+    The payload shape is different enough that sharing one handler would be a
+    tangle of `if "series" in body`: Sonarr sends a `series` plus a LIST of
+    `episodes`, and one file can carry several of them (a double episode).
+    """
+    _check_hook_auth(request)
+    body = await request.json()
+    event = body.get("eventType", "")
+    if event == "Test":
+        return {"ok": True, "test": True}
+    if event not in ("Download", "Rename", "EpisodeFileDelete"):
+        return {"ok": True, "ignored": event}
+
+    series = body.get("series") or {}
+    series_path = (series.get("path") or "").rstrip("/")
+    folder = os.path.basename(series_path)
+    title = series.get("title") or folder
+    conn = get_db()
+    try:
+        if not folder:
+            raise HTTPException(400, "payload sin series.path")
+        # Check the folder is really ours BEFORE upserting anything. Sonarr's
+        # path is a container path (/data/Shows/...) that need not match
+        # SHOWS_ROOT textually, so the test that matters is whether the folder
+        # exists under the root we watch. Upserting first would mint a show row
+        # for any basename Sonarr sends -- an import into /staging created a
+        # phantom "Fake" show in exactly this spot, which is how Underworld
+        # disappeared quietly on the Radarr side.
+        if not os.path.isdir(os.path.join(SHOWS_ROOT, folder)):
+            msg = (f"{title}: Sonarr la dejó en {series_path or '?'}, "
+                   f"fuera de la biblioteca")
+            _notify("Importación sin normalizar", msg, tags="warning", priority=4)
+            print(f"[hook] sonarr {event} {title}: fuera de la biblioteca, "
+                  f"path={series_path!r}", flush=True)
+            raise HTTPException(404, msg)
+        # Always rescan: the event means Sonarr just changed what is on disk, so
+        # every stored episode row for this show may describe the previous file.
+        # Same reasoning as the Radarr hook, same bugs avoided.
+        scan.upsert_show(conn, SHOWS_ROOT, folder, TMDB_API_KEY)
+        show = conn.execute("SELECT * FROM shows WHERE folder=?", (folder,)).fetchone()
+        if not show:
+            msg = f"{title}: no encontré la carpeta {folder!r} tras el rescan"
+            _notify("Importación sin normalizar", msg, tags="warning", priority=4)
+            raise HTTPException(404, msg)
+        if event == "EpisodeFileDelete":
+            # the rescan above already pruned the row; nothing left to normalise
+            return {"ok": True, "show_id": show["id"], "rescanned": True}
+
+        # A new show arrives with bare shelves: Jellyfin renders its own images
+        # but nothing writes them to disk, and no Sonarr metadata consumer is on.
+        if TMDB_API_KEY and show["tmdb_id"]:
+            try:
+                _fetch_show_artwork(show)
+            except Exception as e:      # artwork is never worth failing an import
+                print(f"[hook] sonarr artwork {title}: {e}", flush=True)
+
+        wanted = [(e.get("seasonNumber"), e.get("episodeNumber"))
+                  for e in (body.get("episodes") or [])]
+        queued, skipped = [], []
+        for season, number in wanted:
+            row = conn.execute(
+                "SELECT id FROM episodes WHERE show_id=? AND season=? AND episode=?",
+                (show["id"], season, number)).fetchone()
+            if not row:
+                skipped.append(f"S{season or 0:02d}E{number or 0:02d}: sin fila tras el rescan")
+                continue
+            eid = row["id"]
+            scan.suggest_tracks(conn, eid, table="episodes", multi_audio=True)
+            # propedit when nothing has to be dropped -- it rewrites headers in
+            # place instead of copying the whole episode across a 40 MB/s bus.
+            # _enqueue refuses it with 400 when the config drops or adds a track,
+            # which is exactly when a real remux is the only option.
+            for kind in ("propedit", "remux"):
+                try:
+                    job = _enqueue(conn, "episode", eid, kind, 22)
+                except HTTPException as exc:
+                    if kind == "propedit" and exc.status_code == 400:
+                        continue
+                    skipped.append(f"ep{eid}: {exc.detail}")
+                    break
+                if job.get("job_id"):
+                    _AUTO_FINALIZE.add(job["job_id"])
+                queued.append({"episode_id": eid, "kind": kind, **job})
+                break
+        print(f"[hook] sonarr {event} {title}: {len(queued)} en cola, "
+              f"{len(skipped)} sin encolar", flush=True)
+        if skipped and not queued:
+            _notify(f"Requiere atención: {title}", "; ".join(skipped[:3]),
+                    tags="warning", priority=4)
+        return {"ok": True, "show_id": show["id"], "queued": queued, "skipped": skipped}
+    finally:
+        conn.close()
+
+
+def _fetch_show_artwork(show):
+    """poster/backdrop/logo for the show and a poster per season, from TMDB."""
+    import artwork
+    d = os.path.join(SHOWS_ROOT, show["folder"])
+    seasons = []
+    for name in sorted(os.listdir(d)):
+        if name.lower().startswith("season ") and os.path.isdir(os.path.join(d, name)):
+            try:
+                seasons.append((int(name.split()[1]), os.path.join(d, name)))
+            except ValueError:
+                pass
+    return artwork.fetch_show(show["tmdb_id"], d, TMDB_API_KEY, seasons)
+
+
 @app.post("/api/hooks/radarr")
 async def radarr_hook(request: Request):
     _check_hook_auth(request)
@@ -2211,6 +2328,33 @@ def _readiness(conn, kind, owner_id, owner):
     return pending, notes
 
 
+def _refresh_after_propedit(conn, kind, owner_id):
+    """Write back what the in-place edit just put in the file.
+
+    path_unchanged is mtime-based and says so: an mkvpropedit retag can leave the
+    row describing the labels the file had BEFORE the edit. preflight then
+    compares its stored lang against the file and refuses the next job on a
+    title that is in fact correct -- it rejected an already-tagged Peaky Blinders
+    episode with "la pista 0 es 'eng' en el origen y la config espera 'und'".
+
+    Copying the config onto the observed columns is only honest because
+    verify_output has just re-read the file and confirmed lang/default/forced
+    match; the name is the same string that was handed to mkvpropedit.
+    """
+    col = "movie_id" if kind == "movie" else "episode_id"
+    rows = [dict(r) for r in conn.execute(
+        f"SELECT * FROM tracks WHERE {col}=? AND keep=1", (owner_id,))]
+    by_type = {}
+    for t in rows:
+        by_type.setdefault(t["type"], []).append(t)
+    for t in rows:
+        name = "" if t["type"] == "video" else commands._canonical_name(t, by_type[t["type"]])
+        conn.execute(
+            "UPDATE tracks SET lang=?, default_flag=?, forced_flag=?, name=? WHERE id=?",
+            (t["out_lang"] or t["lang"], t["out_default"], t["out_forced"], name, t["id"]))
+    conn.commit()
+
+
 def _verify_and_finalize(conn, kind, owner_id, job):
     owner = _owner_info(conn, kind, owner_id)
     kept = _kept_tracks(conn, kind, owner_id)
@@ -2222,6 +2366,8 @@ def _verify_and_finalize(conn, kind, owner_id, job):
     if ok:
         conn.execute("UPDATE jobs SET status='verified' WHERE id=?", (job["id"],))
         _set_owner_status(conn, kind, owner_id, "clean")
+        if job["kind"] == "propedit":
+            _refresh_after_propedit(conn, kind, owner_id)
     else:
         conn.execute("UPDATE jobs SET status='failed', exit_code=-1 WHERE id=?", (job["id"],))
         _set_owner_status(conn, kind, owner_id, "error")

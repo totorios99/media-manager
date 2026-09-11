@@ -94,7 +94,35 @@ def test_verify_honours_order_key():
     print("test_verify_honours_order_key OK")
 
 
+def test_refresh_after_propedit_clears_the_stale_row():
+    """path_unchanged is mtime-based, so a retag can leave the row describing the
+    labels the file had before the edit -- and preflight then refuses the next
+    job on a title that is already correct."""
+    import sqlite3
+    import app
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    c.executescript("""
+      CREATE TABLE tracks (id INTEGER PRIMARY KEY, movie_id INT, episode_id INT, mkv_id INT,
+        type TEXT, codec TEXT, lang TEXT, name TEXT, channels INT,
+        default_flag INT, forced_flag INT, ext_path TEXT, keep INT,
+        out_order INT, out_lang TEXT, out_default INT, out_forced INT, out_name TEXT,
+        sdh_flag INT DEFAULT 0, commentary_flag INT DEFAULT 0);
+      INSERT INTO tracks VALUES
+        (1,NULL,7,0,'video','HEVC','und','',NULL,1,0,NULL,1,0,'eng',1,0,'',0,0),
+        (2,NULL,7,1,'audio','E-AC-3','eng','RARBG',6,0,0,NULL,1,0,'eng',1,0,'',0,0);
+    """)
+    app._refresh_after_propedit(c, "episode", 7)
+    rows = {r["id"]: r for r in c.execute("SELECT * FROM tracks")}
+    assert rows[1]["lang"] == "eng", "video lang still stale; preflight will refuse the next job"
+    assert rows[2]["default_flag"] == 1, "default flag not written back"
+    assert rows[2]["name"] == "English", f"release junk survived: {rows[2]['name']!r}"
+    assert rows[1]["name"] == "", "video track should carry no name"
+    print("test_refresh_after_propedit_clears_the_stale_row OK")
+
+
 if __name__ == "__main__":
     main()
     test_sdh_naming_is_type_aware()
     test_verify_honours_order_key()
+    test_refresh_after_propedit_clears_the_stale_row()

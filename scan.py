@@ -433,12 +433,24 @@ SEASON_DIR_RE = re.compile(r"^season\s*0*(\d+)$|^s0*(\d+)$", re.IGNORECASE)
 EPISODE_RE = re.compile(r"s0*(\d+)\s*e0*(\d+)|(?<!\d)(\d{1,2})x(\d{2})(?!\d)", re.IGNORECASE)
 
 
-def parse_episode(name):
+# Anime releases number episodes without a season: "[0x539] One Punch Man - 01",
+# "[Erai-raws] One Punch Man (2025) - 02 (REPACK)". Only trusted inside a
+# Season NN folder, which supplies the season -- at the top level " - 2" is as
+# likely to be part of a movie title.
+SEASONLESS_EP_RE = re.compile(r"\s-\s0*(\d{1,3})(?:v\d)?(?=[\s\[\(.]|$)")
+
+
+def parse_episode(name, season=None):
     """(season, episode) or None. Tries SxxExx first, then 1x03; a year
     (Show 2019 S02E10) never matches by itself since EPISODE_RE requires
-    the S/E or x separator, not bare digits."""
+    the S/E or x separator, not bare digits. `season` is the number of the
+    Season folder the file sits in, enabling the seasonless " - NN" form."""
     m = EPISODE_RE.search(name)
     if not m:
+        if season is not None:
+            m2 = SEASONLESS_EP_RE.search(os.path.splitext(name)[0])
+            if m2:
+                return season, int(m2.group(1))
         return None
     if m.group(1) is not None:
         return int(m.group(1)), int(m.group(2))
@@ -493,9 +505,11 @@ def find_episode_files(folder):
                 sub = list(os.scandir(e.path))
             except OSError:
                 continue
+            sm = SEASON_DIR_RE.match(e.name)
+            season_no = int(sm.group(1) or sm.group(2))
             for f in sub:
                 if f.is_file() and f.name.lower().endswith(VIDEO_EXT) and not f.name.startswith("."):
-                    ep = parse_episode(f.name)
+                    ep = parse_episode(f.name, season_no)
                     if ep:
                         candidates.append((os.path.join(e.name, f.name), ep[0], ep[1], f.stat().st_size))
 
@@ -1222,6 +1236,11 @@ if __name__ == "__main__":
     assert parse_episode("show.1x03.mkv") == (1, 3)
     assert parse_episode("Show 2019 S02E10.mkv") == (2, 10)
     assert parse_episode("Show 2019.mkv") is None, "bare year must not parse as an episode"
+    # seasonless anime numbering, only with a Season folder to supply the season
+    assert parse_episode("[0x539] One Punch Man - 10 (Dual Audio BD 1080p x264 10bit FLAC) [8C8536EA].mkv", 1) == (1, 10)
+    assert parse_episode("[Erai-raws] One Punch Man (2025) - 02 (REPACK) [1080p CR WEB-DL AVC AAC][MultiSub][7DC55E0F].mkv", 3) == (3, 2)
+    assert parse_episode("[0x539] One Punch Man - 10 (Dual Audio).mkv") is None, "no season folder, no guess"
+    assert parse_episode("Show S02E05 - 07.mkv", 9) == (2, 5), "SxxExx always wins over the folder"
 
     with tempfile.TemporaryDirectory() as d:
         os.makedirs(os.path.join(d, "show_seasondir", "Season 01"))

@@ -175,6 +175,7 @@ def _add_missing_columns(conn):
         ("episodes", "atmos", "INTEGER DEFAULT 0"),
         ("shows", "animation", "INTEGER DEFAULT 0"),
         ("movies", "animation", "INTEGER DEFAULT 0"),
+        ("jobs", "auto_finalize", "INTEGER DEFAULT 0"),
         ("tracks", "sdh_flag", "INTEGER DEFAULT 0"),
         ("tracks", "commentary_flag", "INTEGER DEFAULT 0"),
     ):
@@ -368,8 +369,7 @@ def _reconcile_staging():
                 try:
                     scan.suggest_tracks(conn, row["id"], "movies")
                     job = _enqueue(conn, "movie", row["id"], "remux", 22)
-                    if job.get("job_id"):
-                        _AUTO_FINALIZE.add(job["job_id"])
+                    _mark_auto_finalize(conn, job.get("job_id"))
                 except Exception as e:
                     _notify("Staging sin terminar", f"{folder}: no pude re-encolar: {e}",
                             tags="warning", priority=4)
@@ -1948,10 +1948,20 @@ def get_stats():
 # The container address, not the tailnet hostname: a "your film is ready"
 # message must not depend on the tailnet being up to arrive.
 NTFY_URL = os.environ.get("NTFY_URL", "http://172.17.0.1:8095/media")
-# job ids created by the Radarr hook, which finalize without a human.
-# In memory on purpose: after a restart these fall back to manual, and losing
-# automation is the safe direction to fail in when deletion is involved.
-_AUTO_FINALIZE = set()
+def _mark_auto_finalize(conn, job_id):
+    """Flag a hook-created job to finalize without a human once it verifies.
+
+    This used to be an in-memory set, on the reasoning that after a restart
+    falling back to manual is the safe direction when deletion is involved.
+    With the service now started by systemd, a restart is routine rather than
+    rare, and that "safe" fallback became a silent one: the 13 September reboot
+    left every import raw -- verified, never swapped in, no artwork, no
+    notification. Persisting it removes no safety: finalize still runs only
+    after verify_output has passed on the new file.
+    """
+    if job_id:
+        conn.execute("UPDATE jobs SET auto_finalize=1 WHERE id=?", (job_id,))
+        conn.commit()
 _HOOK_SECRET = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             ".radarr-hook-secret")
 
@@ -2170,8 +2180,7 @@ async def sonarr_hook(request: Request):
                         continue
                     skipped.append(f"ep{eid}: {exc.detail}")
                     break
-                if job.get("job_id"):
-                    _AUTO_FINALIZE.add(job["job_id"])
+                _mark_auto_finalize(conn, job.get("job_id"))
                 queued.append({"episode_id": eid, "kind": kind, **job})
                 break
         print(f"[hook] sonarr {event} {title}: {len(queued)} en cola, "
@@ -2268,8 +2277,7 @@ async def radarr_hook(request: Request):
         if staged:
             _STAGED[mid] = folder
         job = _enqueue(conn, "movie", mid, "remux", 22)
-        if job.get("job_id"):
-            _AUTO_FINALIZE.add(job["job_id"])
+        _mark_auto_finalize(conn, job.get("job_id"))
         print(f"[hook] {event} {title} -> movie {mid}, job {job.get('job_id')}", flush=True)
         return {"ok": True, "movie_id": mid, **job}
     finally:
@@ -2394,8 +2402,11 @@ def _verify_and_finalize(conn, kind, owner_id, job):
     conn.commit()
     # The single point that knows a job both finished AND passed verification.
     # A notification here means normalized and checked -- never merely downloaded.
-    if ok and job["id"] in _AUTO_FINALIZE:
-        _AUTO_FINALIZE.discard(job["id"])
+    auto = conn.execute("SELECT auto_finalize FROM jobs WHERE id=?", (job["id"],)).fetchone()
+    if ok and auto and auto["auto_finalize"]:
+        # cleared before acting, so a crash mid-finalize cannot repeat a delete
+        conn.execute("UPDATE jobs SET auto_finalize=0 WHERE id=?", (job["id"],))
+        conn.commit()
         try:
             # replaces the raw import with the normalised file, renames it to
             # "Title (Year).mkv" and sweeps the folder of scene junk

@@ -1,3 +1,9 @@
+# STALE - DO NOT `docker compose up` THIS (noted 2026-09-15).
+# It mounts only /media/hdd1/Movies (no Shows, Staging or .recycle) and points
+# the DB at /DATA/AppData/media-manager, while the real service uses
+# ~/media-manager/media.db. `restart: unless-stopped` would make that broken
+# container look healthy. The service runs from systemd --user instead:
+#   ~/.config/systemd/user/media-manager.service
 name: media-manager
 services:
   media-manager:

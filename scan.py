@@ -745,7 +745,10 @@ def _detect_atmos(streams):
 # defeats the rule that drops Castellano: the pick fell back to file order.
 SPANISH_MX_RE = re.compile(
     r"\blatino\b|\blat(?:am)?\b|\bmex(?:ico|ican)?\b|\b(?:es-)?419\b"
-    r"|\blatin[\s-]*americ\w*\b|\bhispanoameric\w*\b|\bam[eé]rica\s+latina\b",
+    # "latino" runs into the next word in Spanish: "Latinoamérica" is one token,
+    # so the optional o/a has to sit inside the alternative -- \blatino\b misses
+    # it too. The Office labels 193 episodes exactly that way.
+    r"|\blatin[oa]?[\s-]*am[eé]ric\w*\b|\bhispanoam[eé]ric\w*\b|\bam[eé]rica\s+latina\b",
     re.IGNORECASE)
 SPANISH_ES_RE = re.compile(
     r"\bcastellano\b|\bcastilian\b|\bespa[ñn]a\b|\bspain\b|\bspanish\s+european\b"
@@ -1323,6 +1326,19 @@ if __name__ == "__main__":
     assert _spanish_variant("spa", "Spanish (Latin American)") == "spa-mx"
     assert _spanish_variant("spa", "Latin American PGS") == "spa-mx"
     assert _spanish_variant("spa", "Hispanoamericano") == "spa-mx"
+    # one token, and accented: neither \blatino\b nor a bare "americ" reaches it
+    assert _spanish_variant("spa", "Español (Latinoamérica)") == "spa-mx"
+    assert _spanish_variant("spa", "Español (España)") == "spa-es"
+    # the BCP-47 tag outranks the name -- Erai-raws names both tracks "CR"
+    assert _spanish_variant("spa", "CR", "subtitle", "es-419") == "spa-mx"
+    assert _spanish_variant("spa", "CR", "subtitle", "es-ES") == "spa-es"
+    assert _spanish_variant("spa", "CR", "subtitle", "es") == "spa", "bare es stays generic"
+    _t = [{"type": "subtitle", "lang": "spa-mx"}, {"type": "subtitle", "lang": "spa"},
+          {"type": "audio", "lang": "spa"}]
+    _resolve_bare_spanish(_t)
+    assert [t["lang"] for t in _t] == ["spa-mx", "spa-es", "spa"], _t
+    _t = [{"type": "subtitle", "lang": "spa"}]
+    assert _resolve_bare_spanish(_t)[0]["lang"] == "spa", "a lone spa is not Castellano"
     assert _spanish_variant("por", "Portuguese (Iberian)") == "por", "Iberian only reclassifies Spanish"
     # 'lat' is Latin in ISO 639; releases misuse it for Latin American Spanish
     assert _spanish_variant("lat", "Spanish (Latin American)") == "spa-mx"

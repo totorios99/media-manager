@@ -771,9 +771,16 @@ _NAME_IS_SPANISH_RE = re.compile(r"\bspanish\b|\bespa[ñn]ol\b|\bcastellano\b|\b
                                  re.IGNORECASE)
 
 
-def _spanish_variant(lang, name, ttype="subtitle"):
-    """'spa'|'spa-mx'|'spa-es' -- refines a bare 'spa' using the track name's
-    Latino/Castellano wording. Non-Spanish or already-specific langs pass through.
+def _spanish_variant(lang, name, ttype="subtitle", ietf=None):
+    """'spa'|'spa-mx'|'spa-es' -- refines a bare 'spa' from the BCP-47 tag when
+    the file carries one, else from the track name's Latino/Castellano wording.
+    Non-Spanish or already-specific langs pass through.
+
+    The IETF tag comes first because it is the file stating the variant outright
+    rather than us inferring it: Erai-raws ships "es-419" and "es" as separate
+    subtitle tracks named "Latin_America_CR" and "CR", and the name-based rules
+    read both as a bare "spa" -- so the Castellano filter in suggest_tracks had
+    no "spa-es" to drop and One-Punch Man S03E07 shipped with both.
 
     'lat' is ISO 639 for Latin, the dead language, and releases use it for Latin
     American Spanish. Spider-Verse carried its Latino subtitles that way, and the
@@ -788,13 +795,40 @@ def _spanish_variant(lang, name, ttype="subtitle"):
         # dub. Subtitles stay name-based: Latin subtitles are at least plausible
         # on a period film, and the name caught Spider-Verse fine.
         lang = "spa"
-    if lang != "spa" or not name:
+    if lang != "spa":
+        return lang
+    if ietf:
+        sub = ietf.lower().split("-")[1:]
+        if "419" in sub or "mx" in sub or "ar" in sub or "us" in sub:
+            return "spa-mx"
+        if "es" in sub:  # es-ES, explicit; bare "es" is generic -- see _resolve_bare_spanish
+            return "spa-es"
+    if not name:
         return lang
     if SPANISH_MX_RE.search(name):
         return "spa-mx"
     if SPANISH_ES_RE.search(name):
         return "spa-es"
     return lang
+
+
+def _resolve_bare_spanish(tracks):
+    """A bare "spa" sitting next to an explicit Latino track, same type, is the
+    Castellano of the pair.
+
+    Alone, a bare "spa"/"es" means nothing -- most files tag their only Spanish
+    that way and it is usually Latino, so guessing Castellano would be wrong far
+    more often than right. Next to an "es-419" it is different evidence: the
+    release separated the two variants and only labelled one, which is what
+    Erai-raws does ("es-419" + "es") and what put two Spanish subtitle tracks
+    into One-Punch Man S03E07."""
+    for ttype in {t["type"] for t in tracks}:
+        same = [t for t in tracks if t["type"] == ttype]
+        if any(t["lang"] == "spa-mx" for t in same):
+            for t in same:
+                if t["lang"] == "spa":
+                    t["lang"] = "spa-es"
+    return tracks
 
 
 def _spanish_base(lang):
@@ -816,7 +850,7 @@ def inspect_file(path):
         lang = tp.get("language") or tp.get("language_ietf") or "und"
         tracks.append({
             "mkv_id": t["id"], "type": ttype, "codec": t.get("codec"),
-            "lang": _spanish_variant(lang, name, ttype),
+            "lang": _spanish_variant(lang, name, ttype, tp.get("language_ietf")),
             "name": name,
             "channels": tp.get("audio_channels"),
             "default_flag": 1 if tp.get("default_track") else 0,
@@ -831,6 +865,7 @@ def inspect_file(path):
             "commentary_flag": 1 if tp.get("flag_commentary") or _NAME_COMMENTARY_RE.search(name) else 0,
             "ext_path": None,
         })
+    _resolve_bare_spanish(tracks)
 
     ff = _run_json(["ffprobe", "-v", "quiet", "-print_format", "json",
                      "-show_format", "-show_streams", path], timeout=30)

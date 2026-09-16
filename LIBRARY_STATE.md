@@ -60,6 +60,16 @@ Leídas del código, no de memoria: `suggest_tracks` en `scan.py`.
 - Un mensaje de error no es una medición: FlareSolverr decía "probablemente tu
   IP" y la IP estaba bien; era solo el dominio `1337x.to`. El control que
   faltaba era alcanzar otro host con reto desde la misma IP.
+- **El orden de las pistas no dice qué variante son.** En One-Punch Man S03E07
+  el castellano va ANTES que el latino; en Club de Cuervos el SDH va siempre
+  después. Dos series, dos órdenes opuestos: si hay que elegir entre dos pistas
+  del mismo idioma, se mide el contenido, no la posición.
+- `mkvmerge -J` da `language` **y** `language_ietf`, y solo el segundo separa
+  `es-419` de `es`. Leer únicamente el primero tira la única evidencia dura que
+  hay sobre latino/castellano (ver `_spanish_variant`).
+- Contar "dos subtítulos en español" sin agrupar por clase **no mide nada**: un
+  PGS y un SRT del mismo idioma conviven a propósito, igual que un forzado y un
+  completo. De 37 películas "duplicadas" quedaron 15 reales.
 
 ## El patrón que más costó: trabajo hecho, resultado no registrado
 
@@ -118,6 +128,33 @@ el remux y avisa**. La copia caduca a los 7 días.
 7. **Dragon Ball Super**: 131 episodios con numeración absoluta en un solo
    `Season 01`. No monitorizar esas temporadas hasta renombrar: leerían como 131
    episodios faltantes.
+8. **5 películas con dos subtítulos PGS en español** y ninguna metadata que los
+   separe: 2 Fast 2 Furious, Avengers: Age of Ultron, Joker: Folie à Deux, Man
+   of Steel, Star Wars: The Last Jedi. `suggest_tracks` se quedó con la primera,
+   que es una elección **sin evidencia** (ver la trampa del orden de pistas).
+   Medirlas pide OCR, que no está instalado. Son `clean`, así que corregirlas
+   cuesta un remux completo y puede ir con la cola del cable.
+
+## Distinguir latino de castellano
+
+Por orden de fuerza de la evidencia:
+
+1. **El tag BCP-47** (`es-419` vs `es-ES`): el fichero lo dice. `_spanish_variant`
+   lo lee primero.
+2. **El nombre de la pista**: `SPANISH_MX_RE` / `SPANISH_ES_RE`. Cubre los 34
+   nombres distintos que hay hoy en la biblioteca.
+3. **Un par limpio**: un `es-419` explícito y UNA pista sin marcar, sin
+   castellano ya nombrado y sin comentarios → la pista muda es la castellana
+   (`_resolve_bare_spanish`). Solo un par: Sonic 2 tiene cuatro y la regla laxa
+   etiquetaba mal sus comentarios.
+4. **El texto**, cuando no queda metadata: el castellano usa vosotros
+   (`prestad`, `habéis`, `tenéis`) y léxico ibérico que el latino nunca usa.
+   Herramienta de un solo uso en el scratchpad, no en el código: es una
+   heurística cara y solo hace falta para limpiar lo ya importado.
+
+El SDH sin etiquetar se reconoce igual, por contenido: acotaciones entre
+corchetes (`[inhala profundo]`). En Club de Cuervos la pista de diálogo da 0% y
+la SDH entre 10% y 28%, en los 25 episodios medidos.
 
 ## Credenciales
 

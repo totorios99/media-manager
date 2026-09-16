@@ -824,13 +824,21 @@ def _resolve_bare_spanish(tracks):
     more often than right. Next to an "es-419" it is different evidence: the
     release separated the two variants and only labelled one, which is what
     Erai-raws does ("es-419" + "es") and what put two Spanish subtitle tracks
-    into One-Punch Man S03E07."""
+    into One-Punch Man S03E07.
+
+    Strictly a PAIR: exactly one Latino and one bare track, with no Castellano
+    already named. Sonic 2 is why -- it carries a named Castilian, a named Latin
+    American and two Spanish commentary tracks, and a looser rule relabelled the
+    commentaries as Castellano. Nothing was lost there because the real
+    Castellano was already named, but the same shape without that name would
+    have discarded the wrong track."""
     for ttype in {t["type"] for t in tracks}:
-        same = [t for t in tracks if t["type"] == ttype]
-        if any(t["lang"] == "spa-mx" for t in same):
-            for t in same:
-                if t["lang"] == "spa":
-                    t["lang"] = "spa-es"
+        same = [t for t in tracks if t["type"] == ttype
+                and not (t.get("commentary_flag") or t.get("forced_flag"))]
+        bare = [t for t in same if t["lang"] == "spa"]
+        if (len(bare) == 1 and sum(t["lang"] == "spa-mx" for t in same) == 1
+                and not any(t["lang"] == "spa-es" for t in same)):
+            bare[0]["lang"] = "spa-es"
     return tracks
 
 
@@ -1333,12 +1341,17 @@ if __name__ == "__main__":
     assert _spanish_variant("spa", "CR", "subtitle", "es-419") == "spa-mx"
     assert _spanish_variant("spa", "CR", "subtitle", "es-ES") == "spa-es"
     assert _spanish_variant("spa", "CR", "subtitle", "es") == "spa", "bare es stays generic"
-    _t = [{"type": "subtitle", "lang": "spa-mx"}, {"type": "subtitle", "lang": "spa"},
-          {"type": "audio", "lang": "spa"}]
+    _s = lambda l, **kw: dict(type="subtitle", lang=l, **kw)
+    _t = [_s("spa-mx"), _s("spa"), {"type": "audio", "lang": "spa"}]
     _resolve_bare_spanish(_t)
     assert [t["lang"] for t in _t] == ["spa-mx", "spa-es", "spa"], _t
-    _t = [{"type": "subtitle", "lang": "spa"}]
-    assert _resolve_bare_spanish(_t)[0]["lang"] == "spa", "a lone spa is not Castellano"
+    assert _resolve_bare_spanish([_s("spa")])[0]["lang"] == "spa", "a lone spa is not Castellano"
+    # Sonic 2: a named Castellano already present, plus two commentary tracks
+    _t = [_s("spa-es"), _s("spa-mx"), _s("spa", commentary_flag=1), _s("spa", commentary_flag=1)]
+    assert [t["lang"] for t in _resolve_bare_spanish(_t)] == ["spa-es", "spa-mx", "spa", "spa"], _t
+    # two bare tracks are not a pair: no way to tell which one is Castellano
+    _t = [_s("spa-mx"), _s("spa"), _s("spa")]
+    assert [t["lang"] for t in _resolve_bare_spanish(_t)] == ["spa-mx", "spa", "spa"], _t
     assert _spanish_variant("por", "Portuguese (Iberian)") == "por", "Iberian only reclassifies Spanish"
     # 'lat' is Latin in ISO 639; releases misuse it for Latin American Spanish
     assert _spanish_variant("lat", "Spanish (Latin American)") == "spa-mx"

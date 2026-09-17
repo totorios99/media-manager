@@ -17,6 +17,10 @@ JUNK_TOKENS = re.compile(
     r"multi|dual|dubbed|subs?|espanol|latino|castellano)\b",
     re.IGNORECASE,
 )
+# Bazarr owns external subtitles since 2026-09-16 -- see find_external_subs.
+# Flip to True to go back to muxing them into the file.
+ADOPT_EXTERNAL_SUBS = False
+
 LANG_SUFFIX_RE = re.compile(r"\.([a-z]{2,3}(?:-[a-z0-9]{2,4})?)(?:\.\w+)?\.srt$",
                             re.IGNORECASE)
 
@@ -419,10 +423,25 @@ def guess_srt_lang(filename):
 
 
 def find_external_subs(folder, stem=None):
-    """stem: if given (episode path), only .srt files whose name starts with the
+    """Always empty: external subtitles belong to Bazarr, not to us.
+
+    Antonio's decision on 2026-09-16, once Bazarr took over subtitles. Adopting
+    a .srt meant muxing it into the MKV on the next remux -- rewriting a 30 GB
+    film to embed 90 KB of text -- and then deleting the external copy, which is
+    the file Bazarr maintains and re-syncs. Jellyfin reads external subtitles
+    natively, so nothing is gained by pulling them in.
+
+    The walk below is kept, not deleted: it is the part that is easy to get
+    wrong (the stem check stops every episode in a season folder from adopting
+    its siblings' subtitles), and reverting the policy should be a one-line
+    change, not a rewrite.
+
+    stem: if given (episode path), only .srt files whose name starts with the
     video's own stem are matched -- otherwise a season folder makes every
     episode adopt every sibling's subtitle files (and delete_original would
     then delete them out from under the other episodes)."""
+    if not ADOPT_EXTERNAL_SUBS:
+        return []
     subs = []
     try:
         entries = os.listdir(folder)

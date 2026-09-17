@@ -2718,9 +2718,14 @@ def _delete_original(conn, kind, owner_id):
         freed = os.path.getsize(old_path) - os.path.getsize(out)
         os.remove(old_path)
     col = _owner_col(kind)
+    # External .srt files are Bazarr's, not ours: it maintains and re-syncs
+    # them, and deleting one only makes it download the file again. We stopped
+    # adopting them (scan.ADOPT_EXTERNAL_SUBS), so nothing here should carry an
+    # ext_path any more -- but a row written before that change still could,
+    # and deleting a subtitle we did not mux in would be silent data loss.
     for t in conn.execute(f"SELECT ext_path FROM tracks WHERE {col}=? AND ext_path IS NOT NULL", (owner_id,)):
         if t["ext_path"] and os.path.exists(t["ext_path"]):
-            os.remove(t["ext_path"])
+            print(f"[delete-original] conservo el subtítulo externo {t['ext_path']!r}", flush=True)
     # old source/subs are gone now, so keep only the job output plus any
     # sibling episode's own files when sweeping junk (shared season folder)
     keep = {os.path.basename(out)}

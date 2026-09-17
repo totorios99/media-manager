@@ -176,10 +176,27 @@ Por orden de fuerza de la evidencia:
    castellano ya nombrado y sin comentarios → la pista muda es la castellana
    (`_resolve_bare_spanish`). Solo un par: Sonic 2 tiene cuatro y la regla laxa
    etiquetaba mal sus comentarios.
-4. **El texto**, cuando no queda metadata: el castellano usa vosotros
-   (`prestad`, `habéis`, `tenéis`) y léxico ibérico que el latino nunca usa.
-   Herramienta de un solo uso en el scratchpad, no en el código: es una
-   heurística cara y solo hace falta para limpiar lo ya importado.
+4. **El texto**, cuando no queda metadata. Herramienta de un solo uso en el
+   scratchpad, no en el código: es cara y solo hace falta para limpiar lo ya
+   importado.
+
+   Deciden los marcadores **estructurales**, porque son gramática y no elección
+   de palabras: las formas de vosotros (`habéis`, `tenéis`, `sois`, `mirad`), el
+   pronombre `os` (`os he dicho`), `coger`, y el leísmo (`le vi`). Un traductor
+   español no los evita aunque escriba neutro; uno latino no los produce nunca.
+   American Psycho dio **cero de los cuatro en 1325 líneas**, y eso zanjó el
+   caso frente a dos `patatas` que parecían peninsulares.
+
+   El **léxico solo corrobora**, nunca decide solo. Dos trampas medidas:
+   `papa` casa con "el Papa" (22 veces en Angels & Demons, habría dado un
+   latino falso con mucha confianza), y `piso` o `pasta` son palabras normales
+   en las dos variantes. Los que sí valen, por tener palabra distinta a cada
+   lado: `ustedes`/`vosotros`, `celular`/`móvil`, `computadora`/`ordenador`,
+   `departamento`/`piso`, `rentar`/`alquilar`.
+
+   Cuidado con los híbridos: "patatas a la francesa" es la construcción latina
+   ("papas a la francesa") con el sustantivo cambiado. En España sería
+   "patatas fritas".
 
 El SDH sin etiquetar se reconoce igual, por contenido: acotaciones entre
 corchetes (`[inhala profundo]`). En Club de Cuervos la pista de diálogo da 0% y

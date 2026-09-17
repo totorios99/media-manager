@@ -135,6 +135,35 @@ el remux y avisa**. La copia caduca a los 7 días.
    Medirlas pide OCR, que no está instalado. Son `clean`, así que corregirlas
    cuesta un remux completo y puede ir con la cola del cable.
 
+## Actualizar la biblioteca (WEB-DL y el suelo de tamaño)
+
+El bitrate de `movies.bitrate` es el **total del contenedor**, audios incluidos,
+así que sobreestima el vídeo. Medido el 2026-09-16 sobre 341 películas:
+
+| grupo | qué es | n |
+|---|---|---|
+| A | 720p o menos | 10 |
+| B | 1080p h264, media 2.3 Mbps | 107 |
+| D | 2160p HEVC con HDR, media 6.9 Mbps | 114 |
+
+A y B se lanzaron a actualizar (perfil 8 `1080p Upgrade`, de homelab). D espera
+al cable: son ~2.3 TB y no caben.
+
+**Radarr no mide bitrate.** Etiqueta por el nombre del release: cree que las 117
+de A+B son `WEBDL-1080p` cuando son h264 a 2.3 Mbps. Funciona igualmente porque
+`WEBDL-1080p` está por debajo del cutoff `Bluray-1080p`, no porque acierte.
+
+**El suelo de tamaño era lo que faltaba.** `minSize` estaba a 0 en todas las
+Quality Definitions, así que un YIFY de 1.5 GB entraba como `Bluray-1080p` de
+pleno derecho — 4 de los primeros 10 grabs. Ahora 30 MB/min en 1080p (≈4 Mbps)
+y 35 en 2160p. El 720p se dejó a 0 a propósito: ningún perfil admite esas
+calidades, así que nunca se evalúa.
+
+Para leer un grab, mirar el **historial**, no la cola: la cola muestra un
+re-parseo del nombre interno del torrent (salía `HDTV-1080p` y `Unknown` en
+releases grabeados como `Bluray-1080p`). La decisión se toma con la calidad del
+indexador.
+
 ## Distinguir latino de castellano
 
 Por orden de fuerza de la evidencia:

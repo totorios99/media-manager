@@ -252,8 +252,12 @@ def init_db():
     # old NOT NULL shape, and the script's own `idx_tracks_episode` index would
     # fail against it since CREATE TABLE IF NOT EXISTS no-ops on the existing table
     _migrate(conn)
-    _add_missing_columns(conn)
     conn.executescript(SCHEMA)
+    # AFTER the schema script, not before: on a fresh database the tables do not
+    # exist yet when this runs, so every column it adds is silently lost. That
+    # is why a new DB came up without `animation` while `atmos` survived -- the
+    # latter is spelled out in SCHEMA, the former only here.
+    _add_missing_columns(conn)
     conn.commit()
     conn.close()
 

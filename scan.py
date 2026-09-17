@@ -17,7 +17,15 @@ JUNK_TOKENS = re.compile(
     r"multi|dual|dubbed|subs?|espanol|latino|castellano)\b",
     re.IGNORECASE,
 )
-LANG_SUFFIX_RE = re.compile(r"\.([a-z]{2,3})(?:\.\w+)?\.srt$", re.IGNORECASE)
+LANG_SUFFIX_RE = re.compile(r"\.([a-z]{2,3}(?:-[a-z0-9]{2,4})?)(?:\.\w+)?\.srt$",
+                            re.IGNORECASE)
+
+# Bazarr writes Latin American Spanish as "ea"/"spl" -- its own invention, not
+# ISO 639, and the only Spanish variant it can download here ("es" is disabled
+# on purpose so Castellano never arrives). Without these, its subtitles came
+# back as "und" and suggest_tracks had no reason to keep them.
+SRT_LANG_ALIASES = {"ea": "spa-mx", "spl": "spa-mx", "es-419": "spa-mx",
+                    "es-mx": "spa-mx", "es-la": "spa-mx", "es-es": "spa-es"}
 
 # Jellyfin/Kodi artwork we must never touch, regardless of source-junk sweeps.
 # Matched by suffix, not exact stem: some scrapers name files
@@ -403,6 +411,10 @@ def guess_srt_lang(filename):
     if not m:
         return "und"
     code = m.group(1).lower()
+    if code in SRT_LANG_ALIASES:
+        return SRT_LANG_ALIASES[code]
+    if "-" in code:                      # a region we do not map is still its base language
+        code = code.split("-")[0]
     return code if len(code) == 3 else LANG_2TO3.get(code, "und")
 
 
@@ -1192,6 +1204,13 @@ if __name__ == "__main__":
     assert guess_srt_lang("movie.eng.sdh.srt") == "eng"
     assert guess_srt_lang("movie.spa.srt") == "spa"
     assert guess_srt_lang("movie.srt") == "und"
+    # Bazarr's own codes for Latin American Spanish, and a region tag it may add
+    assert guess_srt_lang("movie.ea.srt") == "spa-mx"
+    assert guess_srt_lang("movie.spl.srt") == "spa-mx"
+    assert guess_srt_lang("movie.ea.forced.srt") == "spa-mx"
+    assert guess_srt_lang("movie.es-419.srt") == "spa-mx"
+    assert guess_srt_lang("movie.es-ES.srt") == "spa-es"
+    assert guess_srt_lang("movie.pt-BR.srt") == "por", "an unmapped region keeps its base language"
 
     # ASS/SSA is a text subtitle like SRT, not an unclassifiable "other":
     # classing it "other" made suggest_tracks keep none of The Office's 1212

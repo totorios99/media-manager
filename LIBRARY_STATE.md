@@ -7,7 +7,7 @@ el código o el historial de git.
 
 ## Reparto
 
-- **media-manager (yo)**: `/media/hdd1/Movies`, `/media/hdd1/Shows`, `.recycle`,
+- **media-manager (yo)**: `/srv/storage/Movies`, `/srv/storage/Shows`, `.recycle`,
   la base `~/media-manager/media.db` y esta app.
 - **homelab**: Radarr, Sonarr, Prowlarr, seerr, transmission, Jellyfin,
   contenedores, red. No toco su configuración sin avisarle.

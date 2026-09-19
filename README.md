@@ -47,7 +47,7 @@ TMDB_API_KEY=... docker compose up -d
 | Var | Default | Purpose |
 |---|---|---|
 | `TMDB_API_KEY` | — | TMDB matching (required) |
-| `MEDIA_ROOT` | `/media/hdd1/Movies` | library root |
+| `MEDIA_ROOT` | `/srv/storage/Movies` | library root |
 | `HANDBRAKE_CLI` | `HandBrakeCLI` | encoder binary (may be a command with args) |
 | `MM_DB_PATH` / `MM_LOG_DIR` | alongside app | state location |
 | `MM_WORK_HOURS` | `9-23` | default throttle window (editable in UI) |

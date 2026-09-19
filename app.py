@@ -27,7 +27,7 @@ import scan
 from scan import _now
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "/media/hdd1/Movies")
+MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "/srv/storage/Movies")
 # TV shows live in their own root, separate from MEDIA_ROOT's movies. Falls
 # back to MEDIA_ROOT so a single-root setup keeps working unchanged.
 SHOWS_ROOT = os.environ.get("MM_SHOWS_ROOT", MEDIA_ROOT)
@@ -2058,7 +2058,7 @@ def _lost_audio_vs_recycle(conn, movie_id):
         return []
 
 
-STAGING_ROOT = os.environ.get("MM_STAGING_ROOT", "/media/hdd1/Staging")
+STAGING_ROOT = os.environ.get("MM_STAGING_ROOT", "/srv/storage/Staging")
 # Radarr's container path for that same directory, as it appears in folderPath
 STAGING_CONTAINER = os.environ.get("MM_STAGING_CONTAINER", "/staging")
 _STAGED = {}          # movie_id -> staging folder still to clean up

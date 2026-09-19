@@ -17,7 +17,7 @@ ENV MM_NO_SYSTEMD=1 \
     MM_DB_PATH=/app/data/media.db \
     MM_LOG_DIR=/app/data/logs \
     HANDBRAKE_CLI=HandBrakeCLI \
-    MEDIA_ROOT=/media/hdd1/Movies
+    MEDIA_ROOT=/srv/storage/Movies
 
 EXPOSE 8500
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8500"]

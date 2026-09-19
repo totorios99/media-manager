@@ -21,7 +21,7 @@ import subprocess
 
 import numpy as np
 
-RECYCLE = os.environ.get("RECYCLE_DIR", "/media/hdd1/.recycle")
+RECYCLE = os.environ.get("RECYCLE_DIR", "/srv/storage/.recycle")
 SR, WIN, MAX_LAG = 8000, 45, 15
 # Beyond this the two files are not the same cut, whatever the titles say.
 SANE_OFFSET_MS = 15_000

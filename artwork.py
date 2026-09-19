@@ -86,7 +86,7 @@ if __name__ == "__main__":
     # MM_SHOWS_ROOT is the name run.sh and the service export (app.py reads it too).
     # This used to read SHOWS_ROOT, which nothing sets, so the hardcoded default
     # was what actually ran -- harmless until the mount point moves.
-    root = os.environ.get("MM_SHOWS_ROOT") or os.environ.get("SHOWS_ROOT") or "/media/hdd1/Shows"
+    root = os.environ.get("MM_SHOWS_ROOT") or os.environ.get("SHOWS_ROOT") or "/srv/storage/Shows"
     db = os.path.join(os.path.dirname(os.path.abspath(__file__)), "media.db")
     conn = sqlite3.connect(db)
     conn.row_factory = sqlite3.Row

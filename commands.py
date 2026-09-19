@@ -20,7 +20,7 @@ import shlex
 
 # Arch's handbrake-cli is built without libdovi and silently strips Dolby
 # Vision RPU on every encode. Point HANDBRAKE_CLI at a libdovi-enabled build
-# (e.g. "flatpak run --filesystem=/media/hdd1/Movies fr.handbrake.HandBrakeCLI")
+# (e.g. "flatpak run --filesystem=/srv/storage/Movies fr.handbrake.HandBrakeCLI")
 # to keep DV. May be multiple argv words, hence shlex.split.
 HANDBRAKE_CLI = shlex.split(os.environ.get("HANDBRAKE_CLI", "HandBrakeCLI"))
 

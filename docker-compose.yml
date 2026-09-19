@@ -1,5 +1,5 @@
 # STALE - DO NOT `docker compose up` THIS (noted 2026-09-15).
-# It mounts only /media/hdd1/Movies (no Shows, Staging or .recycle) and points
+# It mounts only /srv/storage/Movies (no Shows, Staging or .recycle) and points
 # the DB at /DATA/AppData/media-manager, while the real service uses
 # ~/media-manager/media.db. `restart: unless-stopped` would make that broken
 # container look healthy. The service runs from systemd --user instead:
@@ -18,7 +18,7 @@ services:
       # ponytail: no live work-hours throttle in docker; cap total CPU below instead
     volumes:
       # same path inside and out — DB stores absolute paths
-      - /media/hdd1/Movies:/media/hdd1/Movies
+      - /srv/storage/Movies:/srv/storage/Movies
       - /DATA/AppData/media-manager:/app/data
     cpus: 5.0
 

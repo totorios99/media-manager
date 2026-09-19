@@ -135,6 +135,38 @@ el remux y avisa**. La copia caduca a los 7 días.
    Medirlas pide OCR, que no está instalado. Son `clean`, así que corregirlas
    cuesta un remux completo y puede ir con la cola del cable.
 
+## Incidente del 2026-09-18: corte de luz
+
+Apagón sin sincronizar hacia las 23:15 (arranque a las 23:23). Consecuencias
+medidas:
+
+- **hdd1 (`/dev/sdb2`, ext4 tras el puente USB JMicron) registró un error**:
+  `ext4_validate_block_bitmap: bg 55193: bad block bitmap checksum`.
+  `/sys/fs/ext4/sdb2/errors_count` = 1 y vive en el superblock, así que antes del
+  corte era 0. Sigue montado rw con `errors=continue`; el kernel deja de asignar
+  bloques a ese grupo, pero el checksum malo sigue en disco. **Pendiente: e2fsck
+  offline.** Guion y comparador antes/después en `~/fsck-prep/` (`RUNBOOK.md`,
+  `fsck_snapshot.py`). Tarda minutos: solo hay 35.463 inodos usados de 244 M.
+- **Alcance**: `filefrag` sobre 4.385 ficheros (sin `nextcloud_data`, que son datos
+  personales) da solo 4 con bloques en ese grupo: tres descargas pendientes de
+  importar y una copia de `.recycle`. Ningún fichero procesado de la biblioteca.
+- **Un import de Radarr quedó a medias**: Mrs. Doubtfire tenía en Movies una copia de
+  9,03 de 16,5 GB con 8,4 MB de ceros al final. Los primeros 256 MB y los 17 MB previos
+  a los ceros eran idénticos al origen (`cmp`), que estaba entero. Tras el reinicio
+  Radarr reescaneó y adoptó la copia a medias como el fichero de la película.
+
+Lecciones que valen para siempre:
+
+- **Verificar un fichero recién escrito leyéndolo desde la caché no prueba que esté
+  en el disco.** Tras un corte la caché ya no existe, así que una lectura posterior
+  sí refleja lo que sobrevivió. `_delete_original` borraba el original justo tras esa
+  verificación; ahora hace `fsync` de la salida antes (`7a9e4fd`, con test de orden).
+- `ffprobe -read_intervals 99%+#400` significa "desde el **segundo** 99, 400
+  paquetes", no "desde el 99 % del fichero". Para mirar el final: empezar en
+  `duración - 30` (`{start}%+#2000`).
+- Un aviso de "low on memory" del arnés no es un OOM del kernel: mirar
+  `/proc/pressure/memory` y `available`, no `free`.
+
 ## Actualizar la biblioteca (WEB-DL y el suelo de tamaño)
 
 El bitrate de `movies.bitrate` es el **total del contenedor**, audios incluidos,

@@ -230,8 +230,12 @@ def build_mkvpropedit_chain(out_path, title, audio_output_order, sub_output_orde
         # The video track is always the default one: a file has exactly one, and
         # reading out_default here wrote a source's flag-default=0 straight back
         # -- the very thing this line exists to correct.
+        # flag-forced=0 because "forced" is meaningless on video and the source's
+        # value rides along otherwise: Perfect Blue and Enemy both arrived with a
+        # forced video track, the propedit job reported verified, and the flag was
+        # still there afterwards -- nothing wrote it, so nothing cleared it.
         argv += ["--edit", "track:v1", "--set", f"language={video_lang or 'und'}", "--set", "name=",
-                 "--set", "flag-default=1"]
+                 "--set", "flag-default=1", "--set", "flag-forced=0"]
     for i, t in enumerate(audio_output_order, start=1):
         argv += [
             "--edit", f"track:a{i}",

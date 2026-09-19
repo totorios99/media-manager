@@ -460,6 +460,7 @@ def _job_ticker():
     read-only mirror of what this thread has already written, so finalization
     can't race between the ticker and every open browser tab."""
     n = 0
+    last_err = None
     while True:
         time.sleep(TICK_SECONDS)
         n += 1
@@ -482,8 +483,15 @@ def _job_ticker():
                         jobs.set_cpu_quota(r["id"], quota)
             finally:
                 conn.close()
-        except Exception:
-            pass  # ticker must survive any transient error (db lock, tmux hiccup)
+        except Exception as e:
+            # The ticker must survive any transient error (db lock, tmux hiccup),
+            # but it used to do so in silence. A queued job that fails before it
+            # launches is retried every tick and, being first in line, blocks the
+            # whole queue -- with nothing in the log to say why. Print each
+            # DISTINCT error once; a persistent one would otherwise repeat every 2 s.
+            if repr(e) != last_err:
+                last_err = repr(e)
+                print(f"[ticker] {e!r}", flush=True)
 
 
 @app.get("/")

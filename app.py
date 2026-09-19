@@ -2696,6 +2696,15 @@ def _reinspect_in_place(conn, kind, owner_id, path):
     conn.commit()
 
 
+def _fsync_file(path):
+    """Block until `path` is durably on disk."""
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def _delete_original(conn, kind, owner_id):
     owner = _owner_or_404(conn, kind, owner_id)
     if owner["status"] != "clean":
@@ -2720,6 +2729,14 @@ def _delete_original(conn, kind, owner_id):
     freed = 0
     if old_path and os.path.exists(old_path) and old_path != out:
         freed = os.path.getsize(old_path) - os.path.getsize(out)
+        # The output has to be on the disk before the only other copy goes. The
+        # verification that got us here read it through the page cache, which
+        # proves nothing about the platter: on a disk that writes at 40 MB/s the
+        # kernel can hold gigabytes of dirty pages, so a power cut shortly after
+        # this point loses the output AND the original. On 2026-09-18 a cut left
+        # a Radarr import 8 MB short; a remux finished minutes earlier survived
+        # only because it was old enough to have been flushed.
+        _fsync_file(out)
         os.remove(old_path)
     col = _owner_col(kind)
     # External .srt files are Bazarr's, not ours: it maintains and re-syncs

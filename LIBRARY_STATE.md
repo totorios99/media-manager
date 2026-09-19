@@ -128,6 +128,11 @@ el remux y avisa**. La copia caduca a los 7 días.
 7. **Dragon Ball Super**: 131 episodios con numeración absoluta en un solo
    `Season 01`. No monitorizar esas temporadas hasta renombrar: leerían como 131
    episodios faltantes.
+9. **e2fsck de hdd1**: pendiente desde el corte del 2026-09-18 (ver «Incidente»). Guion,
+   comprobación previa (`fsck_preflight.py`) y comparador antes/después en `~/fsck-prep/`.
+10. **One-Punch Man Season 1 sin subtítulos en español** (12 episodios, solo inglés). Es
+    trabajo para Bazarr: falta asignarle perfil a la serie. Season 3 está cerrada; en E01,
+    E02 y E06 el español es el subtítulo por defecto pero va segundo en la lista.
 8. **5 películas con dos subtítulos PGS en español** y ninguna metadata que los
    separe: 2 Fast 2 Furious, Avengers: Age of Ultron, Joker: Folie à Deux, Man
    of Steel, Star Wars: The Last Jedi. `suggest_tracks` se quedó con la primera,

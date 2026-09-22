@@ -2059,8 +2059,12 @@ def _lost_audio_vs_recycle(conn, movie_id):
 
 
 STAGING_ROOT = os.environ.get("MM_STAGING_ROOT", "/srv/storage/Staging")
-# Radarr's container path for that same directory, as it appears in folderPath
-STAGING_CONTAINER = os.environ.get("MM_STAGING_CONTAINER", "/staging")
+# Radarr's container path for its movies root, as it appears in folderPath /
+# rootFolderPath. With the identity mount (/srv/storage:/srv/storage) this is
+# MEDIA_ROOT itself; kept as its own var for a future non-identity mapping.
+RADARR_MOVIES_CONTAINER = os.environ.get("MM_RADARR_MOVIES_CONTAINER", MEDIA_ROOT)
+# Radarr's container path for that same staging directory, as it appears in folderPath
+STAGING_CONTAINER = os.environ.get("MM_STAGING_CONTAINER", STAGING_ROOT)
 _STAGED = {}          # movie_id -> staging folder still to clean up
 
 
@@ -2262,7 +2266,7 @@ async def radarr_hook(request: Request):
             # encontré la carpeta", which reads as "nothing happened". Say where
             # Radarr put it: that is the whole diagnosis.
             where = (movie.get("folderPath") or "").rstrip("/")
-            outside = where and not where.startswith(("/movies", MEDIA_ROOT))
+            outside = where and not where.startswith((RADARR_MOVIES_CONTAINER, MEDIA_ROOT))
             msg = (f"{title}: Radarr la dejó en {where}, fuera de la biblioteca"
                    if outside else
                    f"{title}: no encontré la carpeta {folder!r} en la biblioteca")
@@ -2620,8 +2624,8 @@ def _finish_staging(conn, movie_id):
     if not m:
         print(f"[staging] {folder!r}: Radarr no la conoce, dejo staging intacto", flush=True)
         return
-    m["path"] = f"/movies/{folder}"
-    m["rootFolderPath"] = "/movies"
+    m["path"] = f"{RADARR_MOVIES_CONTAINER}/{folder}"
+    m["rootFolderPath"] = RADARR_MOVIES_CONTAINER
     if _radarr("PUT", f"movie/{m['id']}?moveFiles=false", m) is None:
         print(f"[staging] {folder!r}: falló el repunte, dejo staging intacto", flush=True)
         return
@@ -2632,7 +2636,7 @@ def _finish_staging(conn, movie_id):
     except OSError as e:
         print(f"[staging] no pude borrar {src!r}: {e}", flush=True)
     _radarr("POST", "command", {"name": "RescanMovie", "movieIds": [m["id"]]})
-    print(f"[staging] {folder!r} retirada de staging y repuntada a /movies", flush=True)
+    print(f"[staging] {folder!r} retirada de staging y repuntada a {RADARR_MOVIES_CONTAINER}", flush=True)
 
 
 def _announce_ready(conn, kind, owner_id):

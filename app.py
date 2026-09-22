@@ -2044,15 +2044,19 @@ def _lost_audio_vs_recycle(conn, movie_id):
     Header reads only (mkvmerge -J on both files) so it is cheap enough to run
     inside the webhook; measuring the offset for an actual graft decodes audio
     and belongs outside the request."""
-    m = conn.execute("SELECT folder, file FROM movies WHERE id=?", (movie_id,)).fetchone()
+    m = conn.execute("SELECT folder, file, original_language FROM movies WHERE id=?",
+                     (movie_id,)).fetchone()
     if not m or not m["file"]:
         return []
     try:
         old = graft.recycled_copy(m["folder"])
         if not old:
             return []
-        new_path = os.path.join(MEDIA_ROOT, m["folder"], m["file"])
-        return sorted(graft.audio_langs(old) - graft.audio_langs(new_path) - {"und"})
+        # the tracks rows were just rescanned by the hook, variants resolved
+        new_langs = [r["lang"] for r in conn.execute(
+            "SELECT lang FROM tracks WHERE movie_id=? AND type='audio'", (movie_id,))]
+        spanish_film = scan.LANG_ISO1_TO_3.get(m["original_language"] or "") == "spa"
+        return graft.lost_langs(old, new_langs, spanish_film)
     except Exception as e:            # a broken recycle copy must not block an import
         print(f"[hook] no pude comparar con .recycle: {e}", flush=True)
         return []

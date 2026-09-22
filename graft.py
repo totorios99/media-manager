@@ -44,6 +44,20 @@ def audio_langs(path):
             for t in tracks(path) if t["type"] == "audio"}
 
 
+def lost_langs(old_path, new_track_langs, spanish_film):
+    """Audio languages the recycled copy has that the new file will NOT ship.
+
+    `new_track_langs` are the scanned, variant-resolved langs of the new file's
+    audio ('spa-mx', 'spa-es', ...). Comparing raw tags was blind to a Latino
+    dub replaced by a Castilian one: both read 'spa', so no loss was reported,
+    and then suggest_tracks dropped the Castilian (it only survives on
+    Spanish-original films) and the film shipped with no Spanish at all.
+    The recycled copy is our own remux, so its bare 'spa' is what the policy kept."""
+    kept = {("spa" if l.startswith("spa") else l) for l in new_track_langs
+            if spanish_film or l != "spa-es"}
+    return sorted(audio_langs(old_path) - kept - {"und"})
+
+
 def recycled_copy(folder):
     """The recycled file for a library folder, or None. Largest wins: Radarr
     keeps the folder name, and a title recycled twice leaves more than one."""

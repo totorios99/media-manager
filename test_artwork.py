@@ -54,7 +54,7 @@ def test_readiness_gate():
     conn.executescript("""
       CREATE TABLE tracks (id INTEGER PRIMARY KEY, movie_id INT, type TEXT,
                            out_lang TEXT, keep INT);
-      CREATE TABLE movies (id INTEGER PRIMARY KEY, folder TEXT, file TEXT);
+      CREATE TABLE movies (id INTEGER PRIMARY KEY, folder TEXT, file TEXT, original_language TEXT);
       INSERT INTO tracks (movie_id, type, out_lang, keep) VALUES
         (1,'audio','eng',1), (1,'audio','spa',1),
         (2,'audio','eng',1);

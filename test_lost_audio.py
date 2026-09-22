@@ -41,6 +41,14 @@ def main():
         richer = _mkv(os.path.join(movies, folder, "richer.mkv"), ["eng", "spa", "fre"])
         assert sorted(graft.audio_langs(old) - graft.audio_langs(richer) - {"und"}) == []
 
+        # Latino replaced by Castilian reads 'spa' on both sides, but the policy
+        # drops Castilian on a non-Spanish film: that IS a loss
+        assert graft.lost_langs(old, ["eng", "spa-es"], spanish_film=False) == ["spa"]
+        assert graft.lost_langs(old, ["eng", "spa-es"], spanish_film=True) == []
+        assert graft.lost_langs(old, ["eng", "spa-mx"], spanish_film=False) == []
+        assert graft.lost_langs(old, ["eng", "spa"], spanish_film=False) == []
+        assert graft.lost_langs(old, ["eng"], spanish_film=False) == ["spa"]
+
         # no recycled copy at all: nothing to compare, never a false alarm
         graft.RECYCLE = os.path.join(d, "empty")
         assert graft.recycled_copy(folder) is None

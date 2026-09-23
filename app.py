@@ -2286,6 +2286,10 @@ async def radarr_hook(request: Request):
         # expires in seven days.
         lost = _lost_audio_vs_recycle(conn, mid)
         if lost:
+            # the file on disk is now the raw upgrade; leaving the old "clean"
+            # hid Lilo & Stitch from every status filter until a graft
+            _set_owner_status(conn, "movie", mid, "graft")
+            conn.commit()
             _notify(f"Injerto pendiente: {title}",
                     f"el reemplazo perdió {'/'.join(lost)}; la copia en .recycle aún lo tiene",
                     tags="warning", priority=4)

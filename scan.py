@@ -1039,7 +1039,9 @@ def upsert_movie(conn, media_root, folder_name, api_key):
     existing_status = None
     if movie_id:
         existing_status = conn.execute("SELECT status FROM movies WHERE id=?", (movie_id,)).fetchone()["status"]
-    status = existing_status if existing_status in ("ready", "working", "clean", "cleaning", "encoding") else "unprocessed"
+    # "graft": the hook stopped because the upgrade lost a dub -- a rescan must not
+    # bury that under "unprocessed", or the pending graft disappears from view
+    status = existing_status if existing_status in ("ready", "working", "clean", "cleaning", "encoding", "graft") else "unprocessed"
 
     fields = dict(
         folder=folder_name, file=main_file, clean_title=clean_title, guess_year=guess_year,

@@ -968,7 +968,7 @@ async function renderDetail(id) {
 
   const STMAP = { unprocessed: ['NEW', 'var(--mut)'], ready: ['READY', 'var(--fine)'], cleaning: ['REMUXING', 'var(--acc)'],
     encoding: ['ENCODING', 'var(--acc)'], working: ['WORKING', 'var(--acc)'], clean: ['CLEAN', 'var(--fine)'],
-    stub: ['STUB', 'var(--mut)'], error: ['ERROR', 'var(--err)'] };
+    stub: ['STUB', 'var(--mut)'], graft: ['GRAFT', 'var(--err)'], error: ['ERROR', 'var(--err)'] };
   const [stL, stC] = STMAP[m.status] || STMAP.unprocessed;
   const poster = posterUrl(m.poster_path);
   const shrink = tierOf(m) === 'bloated';

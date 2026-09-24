@@ -139,7 +139,11 @@ el remux y avisa**. La copia caduca a los 7 días.
    ninguna forma de vosotros). Joker, sin marcadores claros (solo *vale*, que también
    es mexicano; cero vosotros en 18.000 palabras): probablemente latino. **Man of Steel
    se quedó con el castellano** (34 formas de vosotros) y además no tiene audio español:
-   el subtítulo latino se descartó en el remux y solo vuelve con un SRT de Bazarr.
+   el subtítulo latino se descartó en el remux y solo vuelve con un SRT de Bazarr. **Hecho el 2026-09-24:**
+   `Man of Steel (2013).es-MX.srt` junto al vídeo, bajado de subx y comprobado: 1.347
+   diálogos, latino (*ustedes* ×4, ninguna forma de vosotros) y sincronizado (1.332
+   diálogos emparejados con el PGS del fichero, mediana −16 ms). El primer SRT que bajó
+   Bazarr eran solo los forzados (13 diálogos) sin marcar; quedó en su lista negra.
 
 ## Incidente del 2026-09-18: corte de luz
 

@@ -133,12 +133,13 @@ el remux y avisa**. La copia caduca a los 7 días.
 10. **One-Punch Man Season 1 sin subtítulos en español** (12 episodios, solo inglés). Es
     trabajo para Bazarr: falta asignarle perfil a la serie. Season 3 está cerrada; en E01,
     E02 y E06 el español es el subtítulo por defecto pero va segundo en la lista.
-8. **5 películas con dos subtítulos PGS en español** y ninguna metadata que los
-   separe: 2 Fast 2 Furious, Avengers: Age of Ultron, Joker: Folie à Deux, Man
-   of Steel, Star Wars: The Last Jedi. `suggest_tracks` se quedó con la primera,
-   que es una elección **sin evidencia** (ver la trampa del orden de pistas).
-   Medirlas pide OCR, que no está instalado. Son `clean`, así que corregirlas
-   cuesta un remux completo y puede ir con la cola del cable.
+8. **5 películas con dos subtítulos PGS en español**, resuelto por OCR el 2026-09-24.
+   El remux ya había dejado solo uno; tesseract sobre ~1 fotograma/s dice cuál quedó:
+   2 Fast 2 Furious, Avengers: Age of Ultron y The Last Jedi, **latino** (*ustedes*, sin
+   ninguna forma de vosotros). Joker, sin marcadores claros (solo *vale*, que también
+   es mexicano; cero vosotros en 18.000 palabras): probablemente latino. **Man of Steel
+   se quedó con el castellano** (34 formas de vosotros) y además no tiene audio español:
+   el subtítulo latino se descartó en el remux y solo vuelve con un SRT de Bazarr.
 
 ## Incidente del 2026-09-18: corte de luz
 

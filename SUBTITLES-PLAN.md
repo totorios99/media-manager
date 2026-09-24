@@ -56,6 +56,20 @@ Lo que no pasa se queda fuera, en una lista de revisión manual.
    cada película, en qué formato, con qué marcas, y qué `.srt` hay al lado. Sustituye
    las cifras sacadas de la base de datos (159 sin español completo, 102 solo PGS,
    78 texto), que no están comprobadas.
+   **Resultado (2026-09-24, 342 películas, 0 ilegibles):**
+
+   | | texto | imagen (PGS) | ninguno |
+   |---|---|---|---|
+   | Español completo | 80 | 103 | 159 |
+   | English completo | 176 | 119 | 47 |
+   | Español forzados | 33 | 10 | 299 |
+
+   - De las 159 sin español completo, 11 son habladas en español y 4 son animación.
+   - 44 no tienen ni español ni inglés completos.
+   - 155 llevan algún PGS dentro. 26 tienen subtítulo al lado (24 `.es-MX`, 2 `.hi`).
+   - 72 ya llevan español e inglés completos en texto; les falta comprobar la variante
+     y el orden.
+
 1. **Variante de lo que ya es texto**: latino, castellano o forzados mal marcados.
 2. **OCR a SRT de los PGS oficiales** (español completo y los 10 forzados en imagen),
    con tiempos por evento, no por muestreo.

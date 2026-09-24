@@ -11,3 +11,6 @@ media.db.bak-*
 .radarr-token
 .env.systemd
 server.log
+.subxtoken
+.subdltoken
+.subsourcetoken

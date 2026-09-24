@@ -71,6 +71,15 @@ Lo que no pasa se queda fuera, en una lista de revisión manual.
      y el orden.
 
 1. **Variante de lo que ya es texto**: latino, castellano o forzados mal marcados.
+   **Subtítulos sueltos, resultado (2026-09-24):** 26 `.es*.srt`, todos completos
+   (cobertura 0,96-0,97, ninguno es de forzados sin marcar). 14 latinos claros, 9
+   probablemente latinos (0 formas de vosotros en más de 400 frases). A revisión:
+   - The Rocky Horror Picture Show: **castellano con etiqueta `es-MX`** (21 frente a 0).
+     Hay que sustituirlo.
+   - Mrs. Doubtfire (2 frente a 4) y Nine to Five (1 frente a 2): muy pocas marcas.
+   Los subtítulos de dentro de los `.mkv` se revisan en una pasada nocturna
+   (`subs_variant.py embedded`), porque hay que leer cada fichero entero.
+
 2. **OCR a SRT de los PGS oficiales** (español completo y los 10 forzados en imagen),
    con tiempos por evento, no por muestreo.
 3. **Proveedores** para lo que siga faltando; configurar Bazarr para que cuente los

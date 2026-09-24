@@ -596,19 +596,43 @@ def _is_animation(d):
     return 1 if TMDB_ANIMATION_GENRE in (ids or []) else 0
 
 
-def tmdb_search_tv(name, api_key):
-    if not api_key or not name:
+def _pick_tv(results, year):
+    """First result whose first-air year matches the folder's, else the first.
+
+    results[0] alone is TMDB's popularity order: "The Seven Deadly Sins" returned
+    the 2023 sequel "Four Knights of the Apocalypse" ahead of the 2014 show, and
+    every episode got renamed after the wrong series."""
+    if year:
+        for r in results:
+            if (r.get("first_air_date") or "")[:4] == str(year):
+                return r
+    return results[0]
+
+
+def tmdb_search_tv(name, api_key, year=None, tvdb_id=None):
+    if not api_key or not (name or tvdb_id):
         return None
-    params = {"api_key": api_key, "query": name, "include_adult": "false"}
-    url = f"{TMDB_BASE}/search/tv?{urllib.parse.urlencode(params)}"
-    try:
-        with urllib.request.urlopen(url, timeout=10) as r:
-            results = json.load(r).get("results") or []
-    except Exception:
-        results = []
+    results = []
+    if tvdb_id:
+        # Sonarr writes [tvdbid-N] into the folder: an exact id beats any title search
+        url = (f"{TMDB_BASE}/find/{tvdb_id}?"
+               f"{urllib.parse.urlencode({'api_key': api_key, 'external_source': 'tvdb_id'})}")
+        try:
+            with urllib.request.urlopen(url, timeout=10) as r:
+                results = json.load(r).get("tv_results") or []
+        except Exception:
+            results = []
+    if not results and name:
+        params = {"api_key": api_key, "query": name, "include_adult": "false"}
+        url = f"{TMDB_BASE}/search/tv?{urllib.parse.urlencode(params)}"
+        try:
+            with urllib.request.urlopen(url, timeout=10) as r:
+                results = json.load(r).get("results") or []
+        except Exception:
+            results = []
     if not results:
         return None
-    top = results[0]
+    top = _pick_tv(results, year)
     return {
         "tmdb_id": top["id"],
         "title": top.get("name") or name,
@@ -648,7 +672,9 @@ def upsert_show(conn, media_root, folder_name, api_key):
 
     row = conn.execute("SELECT id FROM shows WHERE folder=?", (folder_name,)).fetchone()
     show_id = row["id"] if row else None
-    tmdb = tmdb_search_tv(clean_title, api_key) if not show_id else None
+    tvdb = re.search(r"\[tvdbid-(\d+)\]", folder_name)
+    tmdb = (tmdb_search_tv(clean_title, api_key, guess_year, tvdb.group(1) if tvdb else None)
+            if not show_id else None)
     if show_id:
         existing = conn.execute("SELECT * FROM shows WHERE id=?", (show_id,)).fetchone()
         tmdb = {"tmdb_id": existing["tmdb_id"], "title": existing["title"], "year": existing["year"],

@@ -76,10 +76,20 @@ Lo que no pasa se queda fuera, en una lista de revisión manual.
 3. **Proveedores** para lo que siga faltando; configurar Bazarr para que cuente los
    subtítulos internos como presentes e ignore los PGS internos.
 4. **media-manager**: nuevo orden y marcas en `suggest_tracks`; los SRT verificados
-   entran por `ext_path` en el remux de cada import; no se conservan PGS.
+   entran por `ext_path` en el remux de cada import. **El OCR de PGS pasa a ser un paso
+   automático del import**: casi todos los releases BluRay que baja Radarr traen PGS, y
+   sin este paso la biblioteca volvería a llenarse de ellos. Si el OCR pasa el filtro,
+   el SRT sustituye al PGS en ese mismo remux. Si no, la película entra con su PGS y
+   va a la lista de revisión.
 5. **Pasada masiva** (cuando esté el cable SATA): una reescritura por película con el
    estándar completo, quitando los PGS. Unas 110-140 h de disco por USB 2.0.
    **No se quita ningún PGS sin su sustituto verificado.**
+
+## Qué PGS pueden quedar
+
+Solo los de películas sin ningún sustituto verificado (sin proveedor y con un OCR que
+no pasa la revisión). Están en una lista con nombre y motivo, y se retiran en cuanto
+aparece un SRT que pase el filtro. No hay excepciones silenciosas.
 
 ## Pendiente de comprobar
 

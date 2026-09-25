@@ -44,8 +44,13 @@ verifica antes:
 - **Completo**: número de frases y tramo cubierto frente a la duración de la película.
   El primer SRT de Man of Steel eran 13 frases de forzados sin marcar.
 - **Variante**: formas de *vosotros* frente a *ustedes* y léxico; se rechaza el castellano.
-- **Sincronía**: desfase medido contra una referencia (la pista oficial o el audio),
-  con umbral.
+- **Sincronía**: desfase medido **por tramos** contra una referencia (la pista oficial,
+  aunque sea PGS: sus eventos dan los tiempos, o el audio).
+  - Si la mediana es igual en todos los tramos, es un desfase fijo: se **corrige**
+    moviendo todos los tiempos. Straight Outta Compton iba 0,19 s tarde en los cuatro
+    tramos y se adelantó 190 ms. Man of Steel salía con 16 ms, no hizo falta.
+  - Si la mediana crece de un tramo a otro, el subtítulo es de otro montaje u otra
+    velocidad (cines frente a Director's Cut, 23,976 frente a 25): se **rechaza**.
 - **OCR**: diccionario español; revisión de `l`/`I`, `¿¡` y cursivas.
 
 Lo que no pasa se queda fuera, en una lista de revisión manual.

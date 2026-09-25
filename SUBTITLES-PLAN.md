@@ -49,8 +49,15 @@ verifica antes:
   - Si la mediana es igual en todos los tramos, es un desfase fijo: se **corrige**
     moviendo todos los tiempos. Straight Outta Compton iba 0,19 s tarde en los cuatro
     tramos y se adelantó 190 ms. Man of Steel salía con 16 ms, no hizo falta.
-  - Si la mediana crece de un tramo a otro, el subtítulo es de otro montaje u otra
-    velocidad (cines frente a Director's Cut, 23,976 frente a 25): se **rechaza**.
+  - Si la mediana crece de un tramo a otro, puede ser **otra velocidad**, y eso se
+    corrige, o **otro montaje**, y eso no. Se mide con `ffsubsync --gss`, que busca el
+    factor de velocidad. Si el factor es uno estándar (25/24 = 1,042 o 24/23,976 = 1,001),
+    se reescalan los tiempos y **se vuelve a medir**: tiene que salir factor 1,000 y
+    desfase 0. The Hunt: su SRT latino era de la versión PAL (factor 1,042, +4,9 s);
+    corregido y re-medido con 1,000 y 0,000 s. Cualquier otro caso se rechaza.
+  - Detectar voz a mano por la energía del audio **no sirve** para medir: en The Hunt
+    dio cuatro tramos al borde del rango de búsqueda y cambiando de signo. Hay que usar
+    ffsubsync (`uvx ffsubsync`, sin añadirlo como dependencia).
 - **OCR**: diccionario español; revisión de `l`/`I`, `¿¡` y cursivas.
 
 Lo que no pasa se queda fuera, en una lista de revisión manual.

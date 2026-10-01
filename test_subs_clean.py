@@ -77,7 +77,41 @@ def test_render_roundtrip_and_shift():
     print("test_render_roundtrip_and_shift OK")
 
 
+def _fake_measure(truth_first, factor=1.0):
+    """Stands in for ffsubsync: the 'media' says the first cue belongs at truth_first."""
+    def m(media, path):
+        first = sc.parse(sc.decode(open(path, "rb").read()))[0][0]
+        return truth_first - first * factor, factor
+    return m
+
+
+def _write(name, cues):
+    p = os.path.join("/var/tmp", name)
+    open(p, "w", encoding="utf-8").write(sc.render(cues))
+    return p
+
+
+def test_fix_constant_offset_is_corrected_and_remeasured():
+    p = _write("mm-test-off.srt", sc.shift(sc.parse(SRT), -1.93))
+    r = sc.fix("media", p, _fake_measure(1.0))
+    assert r["status"] == "ok" and r["action"].startswith("shift"), r
+    assert abs(r["offset"]) < 0.01 and r["ads"] == 5, r
+    assert "SUBTITULOS" not in r["text"]
+    os.unlink(p)
+    print("test_fix_constant_offset_is_corrected_and_remeasured OK")
+
+
+def test_fix_rejects_nonstandard_speed():
+    p = _write("mm-test-speed.srt", sc.parse(SRT))
+    r = sc.fix("media", p, lambda m, s: (0.0, 1.2))
+    assert r["status"] == "rejected" and r["text"] is None, r
+    os.unlink(p)
+    print("test_fix_rejects_nonstandard_speed OK")
+
+
 if __name__ == "__main__":
+    test_fix_constant_offset_is_corrected_and_remeasured()
+    test_fix_rejects_nonstandard_speed()
     test_mid_file_ad_removed_dialogue_kept()
     test_credit_block_loses_the_name_too()
     test_cue_with_dialogue_keeps_dialogue()

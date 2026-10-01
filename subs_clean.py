@@ -109,6 +109,54 @@ def measure(media, srt):
     return float(off[-1]), float(fac[-1])
 
 
+# Framerate pairs that explain a pure speed mismatch (The Hunt: PAL 25/24). Anything
+# else is another cut of the film, and rescaling it would only hide that.
+STANDARD = [24 / 23.976, 25 / 24, 25 / 23.976]
+STANDARD += [1 / f for f in STANDARD]
+OFF_OK, FAC_OK = 0.1, 0.0005
+
+
+def _settled(off, fac):
+    return abs(off) <= OFF_OK and abs(fac - 1) <= FAC_OK
+
+
+def fix(media, srt, measure_fn=None):
+    """Clean ads, then bring the timing right. Never writes.
+
+    -> {"status": "ok"|"rejected", "text": str|None, "ads": n, "action": str,
+        "offset": float, "factor": float}   (offset/factor = the FINAL re-measure)
+    "ok" means the result was re-measured and came out at factor 1.000, offset ~0:
+    the gate in SUBTITLES-PLAN.md, not just "we applied a correction"."""
+    import tempfile
+    measure_fn = measure_fn or measure
+    kept, removed = strip_ads(parse(decode(open(srt, "rb").read())))
+
+    def trial(cues):
+        with tempfile.NamedTemporaryFile("w", suffix=".srt", dir="/var/tmp", delete=False,
+                                         encoding="utf-8") as fh:
+            fh.write(render(cues))
+        try:
+            return measure_fn(media, fh.name)
+        finally:
+            os.unlink(fh.name)
+
+    off, fac = trial(kept)
+    res = lambda status, cues, action, o, f: {"status": status, "ads": len(removed), "action": action,
+        "offset": o, "factor": f, "text": render(cues) if status == "ok" else None}
+    if _settled(off, fac):
+        return res("ok", kept, "none", off, fac)
+    if abs(fac - 1) <= FAC_OK:                       # constant offset: the same in every window
+        action, fixed = f"shift {off:+.3f}s", shift(kept, off)
+    elif any(abs(fac - s) <= 0.0005 for s in STANDARD):
+        action, fixed = f"scale {fac:.4f} + shift", scale(kept, fac)
+        o2, f2 = trial(fixed)
+        fixed = shift(fixed, o2)
+    else:
+        return res("rejected", kept, f"non-standard speed {fac:.4f}: another cut?", off, fac)
+    o3, f3 = trial(fixed)
+    return res("ok" if _settled(o3, f3) else "rejected", fixed, action, o3, f3)
+
+
 def sweep(roots):
     """Read-only. One record per .srt that has provider cues; never prints dialogue."""
     hits = []

@@ -377,6 +377,12 @@ def _reconcile_staging():
                     scan.suggest_tracks(conn, row["id"], "movies")
                     job = _enqueue(conn, "movie", row["id"], "remux", 22)
                     _mark_auto_finalize(conn, job.get("job_id"))
+                except HTTPException as e:
+                    if e.status_code != 409:       # 409: a job already covers it
+                        _notify("Staging sin terminar", f"{folder}: no pude re-encolar: {e.detail}",
+                                tags="warning", priority=4)
+                    else:
+                        print(f"[staging] {folder!r}: ya hay un job, no re-encolo", flush=True)
                 except Exception as e:
                     _notify("Staging sin terminar", f"{folder}: no pude re-encolar: {e}",
                             tags="warning", priority=4)
@@ -2580,6 +2586,7 @@ JELLYFIN_MOVIES = os.environ.get("JELLYFIN_MOVIES", "/hdd1/Movies")
 # notifications go to. Empty means the distinction falls back to whether a
 # previous copy was replaced.
 JELLYFIN_USER = os.environ.get("JELLYFIN_USER", "")
+JELLYFIN_SCAN_WAIT = int(os.environ.get("MM_JELLYFIN_SCAN_WAIT", "60"))   # seconds
 
 
 def _jellyfin_refresh(folder, file_name, title=None, timeout=90):
@@ -2599,19 +2606,35 @@ def _jellyfin_refresh(folder, file_name, title=None, timeout=90):
     hdr = ["-H", f'Authorization: MediaBrowser Token="{token}"']
     # asking as a user also returns whether that user has already watched it
     base = f"{JELLYFIN_URL}/Users/{JELLYFIN_USER}/Items" if JELLYFIN_USER else f"{JELLYFIN_URL}/Items"
+    # search by TITLE, not by filename: Jellyfin matches the item's name
+    # and knows "Superman", never "Superman (2025)". Searching the file
+    # stem found nothing and every title came out as "falta indexar".
+    query = (f"{base}?recursive=true&includeItemTypes=Movie&fields=Path,UserData"
+             f"&searchTerm={urllib.parse.quote((title or os.path.splitext(file_name)[0])[:40])}")
     try:
-        out = subprocess.run(
-            ["curl", "-s", "--max-time", str(timeout), *hdr,
-             # search by TITLE, not by filename: Jellyfin matches the item's name
-             # and knows "Superman", never "Superman (2025)". Searching the file
-             # stem found nothing and every title came out as "falta indexar".
-             f"{base}?recursive=true&includeItemTypes=Movie&fields=Path,UserData"
-             f"&searchTerm={urllib.parse.quote((title or os.path.splitext(file_name)[0])[:40])}"],
-            capture_output=True, text=True).stdout
-        items = (json.loads(out or "{}") or {}).get("Items", [])
-        match = next((i for i in items if i.get("Path") == path), None)
+        out = subprocess.run(["curl", "-s", "--max-time", str(timeout), *hdr, query],
+                             capture_output=True, text=True).stdout
+        def find():
+            items = (json.loads(out or "{}") or {}).get("Items", [])
+            return next((i for i in items if i.get("Path") == path), None)
+
+        match = find()
         if not match:
-            return False, "Jellyfin no tiene el fichero indexado"
+            # A new film is not in Jellyfin yet and its Movies library is not watched
+            # in real time (POST /Library/Media/Updated returned 204 and did nothing;
+            # /Library/Refresh found Titans and the Hobbit in under 20 s). Ask for a
+            # scan, then wait for the item: searching alone can never find it.
+            subprocess.run(["curl", "-s", "-o", "/dev/null", "--max-time", "30",
+                            "-X", "POST", *hdr, f"{JELLYFIN_URL}/Library/Refresh"], check=False)
+            for _ in range(JELLYFIN_SCAN_WAIT // 5):
+                time.sleep(5)
+                out = subprocess.run(["curl", "-s", "--max-time", str(timeout), *hdr, query],
+                                     capture_output=True, text=True).stdout
+                match = find()
+                if match:
+                    break
+        if not match:
+            return False, f"Jellyfin no lo indexó tras escanear ({JELLYFIN_SCAN_WAIT} s)"
         _jellyfin_refresh.played = bool((match.get("UserData") or {}).get("Played"))
         subprocess.run(["curl", "-s", "-o", "/dev/null", "--max-time", str(timeout),
                         "-X", "POST", *hdr,

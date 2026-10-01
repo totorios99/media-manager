@@ -2107,6 +2107,89 @@ def _adopt_from_staging(folder):
     return hidden
 
 
+_SUBFIX_LOCK = threading.Lock()      # ffsubsync decodes a whole episode: one at a time
+_SUBFIX_BUSY = set()
+
+
+def _media_for_subtitle(srt):
+    """The video a sidecar belongs to: the longest stem that prefixes the .srt name
+    ("Show - S01E01.es-MX.hi.srt" -> "Show - S01E01.mkv"), so one season folder
+    never hands an episode its sibling's video."""
+    d, name = os.path.split(srt)
+    best = None
+    for f in os.listdir(d):
+        stem, ext = os.path.splitext(f)
+        if ext.lower() in scan.VIDEO_EXT and name.startswith(stem + ".") and not f.startswith("."):
+            if best is None or len(stem) > len(best[0]):
+                best = (stem, f)
+    return os.path.join(d, best[1]) if best else None
+
+
+def _fix_subtitle(srt, measure_fn=None):
+    """subs_clean.fix on a Bazarr sidecar, in place. The original is kept once as
+    <name>.srt.orig (Jellyfin and Bazarr both ignore that extension). A result that
+    does not re-measure at factor 1.000 / offset ~0 is never written."""
+    import subs_clean
+    real = os.path.realpath(srt)
+    roots = [os.path.realpath(r) + os.sep for r in {MEDIA_ROOT, SHOWS_ROOT}]
+    if not real.lower().endswith(".srt") or not real.startswith(tuple(roots)) or not os.path.isfile(real):
+        raise ValueError(f"not a subtitle under the library roots: {srt!r}")
+    media = _media_for_subtitle(real)
+    if not media:
+        raise ValueError(f"no video next to {real!r}")
+    r = subs_clean.fix(media, real, measure_fn)
+    if r["status"] != "ok":
+        return {**r, "written": False, "media": media}
+    if r["action"] == "none" and r["ads"] == 0:
+        return {**r, "written": False, "media": media}
+    if not os.path.exists(real + ".orig"):
+        shutil.copy2(real, real + ".orig")
+    tmp = os.path.join(os.path.dirname(real), "." + os.path.basename(real) + ".fix.tmp")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(r["text"])
+    shutil.copymode(real, tmp)
+    os.replace(tmp, real)
+    return {**r, "written": True, "media": media}
+
+
+def _fix_subtitle_job(srt):
+    with _SUBFIX_LOCK:
+        try:
+            r = _fix_subtitle(srt)
+            name = os.path.basename(srt)
+            print(f"[subs] {name}: {r['status']} ads={r['ads']} {r['action']} "
+                  f"final={r['offset']:+.2f}s/{r['factor']:.4f} written={r['written']}", flush=True)
+            if r["status"] != "ok":
+                _notify("Subtítulo rechazado", f"{name}: {r['action']}", tags="warning", priority=3)
+        except Exception as e:
+            print(f"[subs] {srt!r}: {e}", flush=True)
+            _notify("Subtítulo sin procesar", f"{os.path.basename(srt)}: {e}", tags="warning", priority=3)
+        finally:
+            _SUBFIX_BUSY.discard(srt)
+
+
+@app.post("/api/subs/fix")
+async def subs_fix(request: Request):
+    """Bazarr's post-processing hook: {"subtitle": "<path of the .srt just written>"}.
+
+    Same HTTP Basic as the Radarr/Sonarr hooks. Answers 202 at once -- measuring takes
+    a minute and Bazarr should not wait -- and the work runs in a thread. A path
+    outside the library roots is refused here, not in the thread, so a bad path
+    mapping shows up as a 400 in Bazarr's log."""
+    _check_hook_auth(request)
+    body = await request.json()
+    srt = (body.get("subtitle") or "").strip()
+    real = os.path.realpath(srt) if srt else ""
+    roots = tuple(os.path.realpath(r) + os.sep for r in {MEDIA_ROOT, SHOWS_ROOT})
+    if not real.lower().endswith(".srt") or not real.startswith(roots) or not os.path.isfile(real):
+        raise HTTPException(400, f"subtitle is not an .srt under the library roots: {srt!r}")
+    if real in _SUBFIX_BUSY:
+        return JSONResponse({"ok": True, "queued": False, "reason": "already queued"}, status_code=202)
+    _SUBFIX_BUSY.add(real)
+    threading.Thread(target=_fix_subtitle_job, args=(real,), daemon=True).start()
+    return JSONResponse({"ok": True, "queued": True}, status_code=202)
+
+
 @app.get("/api/hooks/sonarr")
 def sonarr_hook_probe():
     """Sonarr validates a webhook URL before saving it and refuses a 404."""

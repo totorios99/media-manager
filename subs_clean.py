@@ -99,7 +99,7 @@ def measure(media, srt):
     """ffsubsync --gss -> (offset_s, factor). `uvx`, not a dependency: it is a measuring
     tool, and its output file is discarded. Detecting speech by audio energy by hand
     does not work (The Hunt: four windows at the search limit, flipping sign)."""
-    out = subprocess.run(["uvx", "ffsubsync", media, "-i", srt, "-o", os.devnull, "--gss"],
+    out = subprocess.run(["nice", "-n", "10", "uvx", "ffsubsync", media, "-i", srt, "-o", os.devnull, "--gss"],
                          capture_output=True, text=True, timeout=900)
     log = out.stdout + out.stderr
     off = re.findall(r"offset seconds: (-?[\d.]+)", log)

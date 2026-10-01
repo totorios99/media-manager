@@ -13,7 +13,7 @@ import json, os, re, time, urllib.parse, urllib.request
 BATCH = 25
 PROFILE = 1
 BASE = "http://localhost:6767/api"
-INV = os.path.expanduser("~/media-manager/subs_inventory.json")
+INV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "subs_inventory.json")
 KEY = re.search(r"^\s+apikey: ([0-9a-f]{32})", open(
     "/DATA/AppData/bazarr/config/config/config.yaml").read(), re.M).group(1)
 

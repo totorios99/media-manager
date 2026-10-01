@@ -2,7 +2,7 @@
 "3840x1608 · eng/spa/eng+atmos" was written for logs, not for that."""
 import os, sqlite3, sys, tempfile
 
-sys.path.insert(0, os.path.expanduser("~/media-manager"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("MEDIA_ROOT", tempfile.mkdtemp())
 import app
 

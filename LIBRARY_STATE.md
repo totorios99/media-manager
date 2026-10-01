@@ -8,7 +8,7 @@ el código o el historial de git.
 ## Reparto
 
 - **media-manager (yo)**: `/srv/storage/Movies`, `/srv/storage/Shows`, `.recycle`,
-  la base `~/media-manager/media.db` y esta app.
+  la base `~/Documents/code/apps/media-manager/media.db` y esta app.
 - **homelab**: Radarr, Sonarr, Prowlarr, seerr, transmission, Jellyfin,
   contenedores, red. No toco su configuración sin avisarle.
 
@@ -22,9 +22,9 @@ sola tras reiniciar. Antes era un `nohup ./run.sh` a mano, y **el reinicio del
 13 de septiembre lo dejó caído tres días**: Radarr y Sonarr importaron contra un
 puerto cerrado y nada se normalizó, sin que ningún servicio se quejara.
 
-- Entorno: `~/media-manager/.env.systemd` (0600, gitignored). Incluye
+- Entorno: `~/Documents/code/apps/media-manager/.env.systemd` (0600, gitignored). Incluye
   `TMDB_API_KEY` y `HANDBRAKE_CLI`.
-- **Logs: `~/media-manager/server.log`**, no journalctl. El journal de usuario no
+- **Logs: `~/Documents/code/apps/media-manager/server.log`**, no journalctl. El journal de usuario no
   se persiste en esta máquina ("No journal files were found"); hay un drop-in en
   `media-manager.service.d/log.conf` que redirige stdout allí.
 - `docker-compose.yml` está **obsoleto** y marcado como tal en su cabecera: monta

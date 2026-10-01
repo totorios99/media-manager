@@ -4,7 +4,7 @@ final visible file lands it is indexed once. So the title appears for the first
 time already normalised, and the window between import and remux closes."""
 import os, sys, tempfile
 
-sys.path.insert(0, os.path.expanduser("~/media-manager"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("MEDIA_ROOT", tempfile.mkdtemp())
 os.environ.setdefault("MM_STAGING_ROOT", tempfile.mkdtemp())
 

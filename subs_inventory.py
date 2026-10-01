@@ -20,7 +20,7 @@ def classify(tracks):
 
 
 def main():
-    conn = sqlite3.connect(os.path.expanduser("~/media-manager/media.db"))
+    conn = sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), "media.db"))
     rows = conn.execute("select folder, file, original_language, animation from movies "
                         "where coalesce(file,'')!='' order by folder").fetchall()
     out = []

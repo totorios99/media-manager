@@ -4,7 +4,7 @@ serving those images, so the title comes back with no poster -- which is how
 Tokyo Drift, Inside Out 2 and Shutter Island all lost theirs."""
 import os, sys, tempfile
 
-sys.path.insert(0, os.path.expanduser("~/media-manager"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("MEDIA_ROOT", tempfile.mkdtemp())
 
 

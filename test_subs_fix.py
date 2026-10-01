@@ -44,6 +44,11 @@ def main():
     r2 = app._fix_subtitle(srt, fake(6.93))
     assert r2["written"] is False and open(srt + ".orig", encoding="utf-8").read() == SRT
 
+    # Bazarr's container path maps onto the host path; other paths are left alone
+    assert app._host_subtitle_path("/data/Shows/X/a.srt") == "/srv/storage/Shows/X/a.srt"
+    assert app._host_subtitle_path("/srv/storage/Shows/a.srt") == "/srv/storage/Shows/a.srt"
+    assert app._host_subtitle_path("/database/a.srt") == "/database/a.srt"
+
     # paths outside the library are refused
     outside = os.path.join(tempfile.mkdtemp(), "x.srt")
     open(outside, "w").write(SRT)

@@ -2107,6 +2107,18 @@ def _adopt_from_staging(folder):
     return hidden
 
 
+# Bazarr's container mounts host /srv/storage as /data and sends its own paths.
+SUBS_PATH_MAP = os.environ.get("MM_SUBS_PATH_MAP", "/data=/srv/storage")
+
+
+def _host_subtitle_path(p):
+    for pair in SUBS_PATH_MAP.split(","):
+        src, _, dst = pair.partition("=")
+        if src and dst and p.startswith(src.rstrip("/") + "/"):
+            return dst.rstrip("/") + p[len(src.rstrip("/")):]
+    return p
+
+
 _SUBFIX_LOCK = threading.Lock()      # ffsubsync decodes a whole episode: one at a time
 _SUBFIX_BUSY = set()
 
@@ -2178,7 +2190,7 @@ async def subs_fix(request: Request):
     mapping shows up as a 400 in Bazarr's log."""
     _check_hook_auth(request)
     body = await request.json()
-    srt = (body.get("subtitle") or "").strip()
+    srt = _host_subtitle_path((body.get("subtitle") or "").strip())
     real = os.path.realpath(srt) if srt else ""
     roots = tuple(os.path.realpath(r) + os.sep for r in {MEDIA_ROOT, SHOWS_ROOT})
     if not real.lower().endswith(".srt") or not real.startswith(roots) or not os.path.isfile(real):

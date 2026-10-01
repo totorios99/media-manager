@@ -371,6 +371,9 @@ def _reconcile_staging():
                 print(f"[staging] {folder!r}: import adoptado sin terminar, re-encolando",
                       flush=True)
                 try:
+                    # the row may predate the import or have been scanned while
+                    # mkvmerge was unreachable: empty tracks make an empty --track-order
+                    scan.upsert_movie(conn, MEDIA_ROOT, folder, TMDB_API_KEY)
                     scan.suggest_tracks(conn, row["id"], "movies")
                     job = _enqueue(conn, "movie", row["id"], "remux", 22)
                     _mark_auto_finalize(conn, job.get("job_id"))

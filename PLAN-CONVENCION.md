@@ -18,8 +18,8 @@ que es justo lo que el plan de subtítulos aún no ha aplicado.
 | PGS / VobSub | 157 / 13 | 211 | OCR + **remux** |
 | sin inglés de texto incrustado | 46 | 453 | proveedor u OCR + remux |
 | sin Latino de texto incrustado | 159 (138 con sidecar es-MX) | 215 | incrustar el sidecar o proveedor |
-| audio por defecto incorrecto | ~25 | ~200 (193 The Office, Yellowstone, Sopranos) | propedit (en curso) |
-| idioma de vídeo `und` / título vacío o con basura | ~22 | ~290 | propedit (en curso) |
+| audio por defecto incorrecto | ~25 → 3 falsos positivos | ~200 → 193 The Office (decisión §8.1) | propedit (hecho, F1) |
+| idioma de vídeo `und` / título vacío o con basura | ~22 → 0 | ~290 → 0 (más 37 de Death Note, corregidos) | propedit (hecho, F1) |
 | sin doblaje latino (límite de la fuente) | 229 | 264 | otro release (§5) |
 | castellano presente (audio / subs) | 2 (subs) | 74 audio (DBZ) / 193 subs (The Office) | decisión §8, remux |
 
@@ -55,14 +55,21 @@ como ya estimaba el plan de subtítulos. Bloqueado por hardware (§6).
 - Importaciones: escaneo de Jellyfin al importar y avisos "Ya disponible / No disponible".
 - Faltantes: búsquedas en curso con homelab (§5).
 
-### F1. Etiquetas con propedit (en curso, hoy)
-`propedit_batch.py` lanza el job `propedit` de la propia app sobre los 299 ficheros que la
-auditoría marcó por audio por defecto o metadata: aplica `suggest_tracks`
-(original primero, TrueHD/Atmos nunca por defecto, idioma de vídeo, título, nombres) y se
-verifica con la auditoría (`--verify`). La app **rechaza** un propedit que quite o añada
-pistas: esos títulos (castellano, extras) quedan para la pasada de remux, que es lo
-correcto. No borra nada. Criterio de cierre: `--verify` sin
-"still failing" salvo los rechazados.
+### F1. Etiquetas con propedit (HECHO, 2026-10-02)
+Dos herramientas, porque la primera no alcanza:
+- `propedit_batch.py` lanza el job `propedit` de la app (aplica `suggest_tracks`). Aceptó
+  **26 de 299**: la app rechaza (400) cualquier título cuyo plan quite o añada pistas
+  (castellano, extras): 272 casos, que quedan para F6.
+- `meta_fix.py` repara **sin tocar pistas**: idioma de vídeo `und` → el original, título
+  vacío → `title_display`, y audio por defecto (nunca un comentario; un default válido no se
+  mueve; TrueHD/Atmos solo cede ante una pista ligera **del mismo idioma**). 268 ficheros
+  editados + los 37 de Death Note, 0 fallos, valores anteriores en `meta_fix.jsonl`.
+  The Office queda fuera del audio por defecto hasta la decisión §8.1.
+- Efecto medido con la auditoría: fallos de audio y metadata de ~25 películas y ~500
+  episodios a un puñado, todos con decisión pendiente (The Office 193, DBZ castellano 74)
+  o falso positivo conocido (idiomas `nob`/`und`).
+- Lección: dos reglas mías de la auditoría marcaban falsos positivos (TrueHD sin pista
+  ligera del mismo idioma; animación sin doblaje español). Se corrigieron antes de actuar.
 
 ### F2. Variante y etiqueta es-419 (sin remux, esfuerzo bajo)
 - Lanzar de noche `subs_variant.py embedded` (lee cada fichero entero: horas) para saber
@@ -73,9 +80,14 @@ correcto. No borra nada. Criterio de cierre: `--verify` sin
 - Resultado: baja a casi 0 el fallo más grande (793 + 183) sin tocar un solo fotograma.
 
 ### F3. Filtro de entrada en producción (depende de una decisión)
-- Activar el post-procesado de Bazarr (`{{subtitles}}` → `POST /api/subs/fix`,
-  `172.17.0.1:8500`, mapa `/data`→`/srv/storage` ya hecho). Lo configura homelab cuando
-  Antonio lo confirme en su sesión. Hasta entonces, cada subtítulo nuevo entra sin filtro.
+- **Activo desde 2026-10-02**: Bazarr llama a `/config/mm-subs-fix.sh {{subtitles}}` →
+  `POST 172.17.0.1:8500/api/subs/fix` (mapa `/data`→`/srv/storage`; el script sale siempre
+  con 0 en 10 s). Sin comprobar aún: la primera línea `[subs]` que venga de Bazarr y no de mí.
+- El perfil 1 de Bazarr ahora pide también **inglés** completo (el estándar lo exige):
+  faltan 43 películas y 141 episodios. Bazarr los busca cada 6 h y cada uno pasa por el
+  filtro de uno en uno. Coste: los episodios son rápidos, pero cada película obliga a
+  leer ~20 GB (~10 min de disco USB 2.0 saturado), unas 7 h en total para las 43. Si choca
+  con descargas o remuxes, homelab puede espaciar la búsqueda.
 - Pendiente de comprobar (ya en `SUBTITLES-PLAN.md`): que Radarr no pierda `.srt` en
   mejoras ("extra files"); SubDL no devuelve resultados.
 
@@ -125,14 +137,16 @@ empezar ya, porque beneficia a todo lo que se descargue a partir de hoy.
 
 ## 5. Faltantes y doblaje latino
 
-- Faltantes que busca homelab (Antonio: "las demás sí me gustaría tenerlas completas";
-  Formula 1 es intencional; Mr. Robot S02–S04 se queda sin monitorizar "de momento",
-  dicho por él a homelab). Según homelab: Rick and Morty S08–S09 buscadas y en cola;
-  BoJack (31), Death Note (11), The Office S04E14, Yellowstone S01E08 (llegó como fichero
-  doble E08-E09) en curso; **sin release todavía**: The Office "Goodbye, Michael" (S07E22),
-  The Sopranos "Two Tonys" (S05E01) y DBZ 251/253.
-- Radarr: *The Good Girls* (2019) no está en Radarr; *Never Back Down* (release casi sin
-  seeders) y *The Hobbit: An Unexpected Journey* en curso.
+- Faltantes (Antonio: "las demás sí me gustaría tenerlas completas"; Formula 1 es
+  intencional; Mr. Robot S02–S04 sin monitorizar "de momento", dicho por él a homelab).
+  Estado según homelab a 2026-10-02: Rick and Morty S08–S09 descargadas; **Death Note**:
+  la versión BD completa sustituyó los 37 episodios (los 26 HDTV antiguos están 7 días en la
+  papelera de Sonarr); BoJack se queda en 1080p como mínimo (Antonio), así que los
+  episodios que solo existen en 720p siguen faltando (~22); The Office S04E14 y S07E22
+  ("Goodbye, Michael", Extended Cut) y Yellowstone S01E08 (fichero doble E08-E09) grabados;
+  **sin release**: The Sopranos S05E01 "Two Tonys" y DBZ 251/253 (0–2 seeders).
+- Radarr: *The Good Girls* **cancelada** por Antonio (quitada de Radarr y Seerr);
+  *Never Back Down* (casi sin seeders) y *The Hobbit: An Unexpected Journey* en curso.
 - **Doblaje latino ausente: 229 películas y 264 episodios.** No se arregla en la
   biblioteca: exige otro release con audio Latino. Sonarr no tiene hoy preferencia de
   idioma. Propuesta, **si Antonio la quiere**: un formato personalizado "Latino" en
@@ -166,5 +180,5 @@ ligero y se hace ya.
 3. **Subtítulos externos de Bazarr**: ¿se incrustan en F6 (estándar del plan) o se
    mantienen como sidecar de Bazarr (decisión del 2026-09-16)? Recomiendo incrustar en
    la pasada, no antes.
-4. **Bazarr post-procesado**: confirmar en la sesión de homelab (§3, F3).
+4. ~~Bazarr post-procesado~~: hecho (F3).
 5. **Búsqueda de doblaje latino** (§5): ¿sí o no, y para qué títulos?

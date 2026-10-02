@@ -19,6 +19,7 @@ import scan
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOG = os.path.join(HERE, "meta_fix.jsonl")
+CACHE = "/var/tmp/mm_probe_cache.json"          # keyed by path+mtime+size, safe to delete
 SKIP_DEFAULT = {"The Office (US)"}          # 193 eps default to Latino; pending decision
 
 
@@ -26,14 +27,35 @@ def heavy(t):
     return bool(re.search(r"truehd|atmos", f"{t['codec']} {t['properties'].get('track_name', '')}", re.I))
 
 
-def pick_default(audio, orig, animation):
+SIDE = re.compile(r"commentar|comentari|descript|audio desc|karaoke", re.I)
+
+
+def side(t):
+    p = t["properties"]
+    return bool(p.get("flag_commentary") or p.get("flag_visual_impaired")
+                or SIDE.search(p.get("track_name") or ""))
+
+
+def pick_default(audio, orig, animation, current=None):
+    """The track that should be default, or None to leave the file alone.
+    A default that is already an acceptable candidate stays: two identical 'Español (FLAC)'
+    tracks (DBS) cannot be told apart by tags, and flipping between them could swap Latino
+    and castellano. Heavy (TrueHD/Atmos) only gives way to a lighter track of ITS language."""
     v = lambda t: la.variant(t, "audio")
-    cands = [t for t in audio if v(t) in ("spa-mx", "spa")] if animation else []
+    main = [t for t in audio if not side(t)]
+    cands = [t for t in main if v(t) in ("spa-mx", "spa")] if animation else []
     if not cands:
         want = scan.LANG_ISO1_TO_3.get(orig or "", "eng")
-        cands = [t for t in audio if v(t) == want or (orig == "es" and v(t) in ("spa", "spa-mx", "spa-es"))]
+        cands = [t for t in main if v(t) == want or (orig == "es" and v(t) in ("spa", "spa-mx", "spa-es"))]
+    if not cands:
+        return None
     light = [t for t in cands if not heavy(t)]
-    return (light or cands or [None])[0]
+    if current is not None and current in cands:
+        same_lang_light = [t for t in light if v(t) == v(current)]
+        if not heavy(current) or not same_lang_light:
+            return current
+        return same_lang_light[0]
+    return (light or cands)[0]
 
 
 def plan(info, orig, animation, title_display, skip_default):
@@ -51,8 +73,8 @@ def plan(info, orig, animation, title_display, skip_default):
             before[f"v{j}.language"] = t["properties"].get("language"); fixes.append("video-lang")
     audio = [t for t in info["tracks"] if t["type"] == "audio"]
     if audio and not skip_default:
-        target = pick_default(audio, orig, animation)
         cur = [t for t in audio if t["properties"].get("default_track")]
+        target = pick_default(audio, orig, animation, cur[0] if len(cur) == 1 else None)
         if target is not None and cur != [target]:
             for i, t in enumerate(audio, 1):
                 want = 1 if t is target else 0
@@ -90,16 +112,24 @@ def main(run, limit):
     conn.row_factory = sqlite3.Row
     todo, counts, ex = [], {}, {}
 
+    cache = json.load(open(CACHE)) if os.path.exists(CACHE) else {}
+
     def one(row):
         kind, id_, path, orig, anim, td, show = row
-        info = la.probe(path) if os.path.exists(path) else None
-        if not info:
+        if not os.path.exists(path):
             return None
+        st = os.stat(path)
+        key = f"{path}|{st.st_mtime_ns}|{st.st_size}"
+        info = cache.get(key) or la.probe(path)
+        if not info or "tracks" not in info:
+            return None
+        cache[key] = info
         argv, before, fixes = plan(info, orig, bool(anim), td, show in SKIP_DEFAULT)
         return (kind, id_, path, argv, before, fixes) if fixes else None
 
     with cf.ThreadPoolExecutor(4) as pool:           # mkvmerge -J is I/O-bound: sequential took >30 min
         results = [r for r in pool.map(one, list(rows(conn))) if r]
+    json.dump(cache, open(CACHE, "w"))
     for r in results:
         kind, id_, path, argv, before, fixes = r
         todo.append(r)
@@ -107,13 +137,30 @@ def main(run, limit):
             counts[f] = counts.get(f, 0) + 1
             ex.setdefault(f, []).append(os.path.basename(path)[:60])
     print(len(todo), "files to edit;", counts)
+    by = {}
+    for kind, id_, path, argv, before, fixes in todo:
+        k = (os.path.relpath(path, la.SHOWS).split("/")[0] if kind == "episode" else "(películas)")
+        for f in set(fixes):
+            by.setdefault(k, {}).setdefault(f, 0)
+            by[k][f] += 1
+    for k, v in sorted(by.items()):
+        print("   ", k[:34].ljust(34), v)
     for f, names in ex.items():
         print(" ", f, names[:3])
     if not run:
         return
     log = open(LOG, "a")
     done = bad = 0
+    busy = {(("movie_id" if k == "movie" else "episode_id"), i) for k, i in (
+        ("movie", r[0]) for r in conn.execute("SELECT movie_id FROM jobs WHERE status IN ('running','queued') AND movie_id IS NOT NULL")
+    )} | {("episode_id", r[0]) for r in conn.execute(
+        "SELECT episode_id FROM jobs WHERE status IN ('running','queued') AND episode_id IS NOT NULL")}
+    skipped = 0
     for kind, id_, path, argv, before, fixes in todo[: limit or None]:
+        if (("movie_id" if kind == "movie" else "episode_id"), id_) in busy:
+            skipped += 1                    # a remux/propedit owns this file right now: never edit under it
+            print("SKIP (job active)", os.path.basename(path))
+            continue
         log.write(json.dumps({"path": path, "before": before, "fixes": fixes}, ensure_ascii=False) + "\n")
         log.flush()
         r = subprocess.run(["mkvpropedit", path, *argv], capture_output=True, text=True)
@@ -123,7 +170,7 @@ def main(run, limit):
         bad += not ok
         if not ok:
             print("FAILED", os.path.basename(path), r.stdout[-150:], r.stderr[-150:])
-    print(f"{done} edited, {bad} failed. Rerun library_audit.py to confirm; the app's DB rows refresh on its next rescan.")
+    print(f"{done} edited, {bad} failed, {skipped} skipped (job active). Rerun library_audit.py to confirm; the app's DB rows refresh on its next rescan.")
 
 
 if __name__ == "__main__":

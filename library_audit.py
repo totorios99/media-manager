@@ -53,7 +53,9 @@ def check(info, orig, animation, sidecars):
         want = {"spa-mx", "spa"} if animation and has_spa else {scan.LANG_ISO1_TO_3.get(orig or "", "eng")}
         if dv not in want and not (orig == "es" and dv in ("spa", "spa-es", "spa-mx")):
             bad.append(f"audio: default is {dv}, expected {'/'.join(sorted(want))}")
-        if re.search(r"truehd|atmos", f"{d['codec']} {d['properties'].get('track_name', '')}", re.I):
+        heavy = lambda t: re.search(r"truehd|atmos", f"{t['codec']} {t['properties'].get('track_name', '')}", re.I)
+        # only a fault when the SAME language has a lighter track (F1's English is TrueHD only: nothing to switch to)
+        if heavy(d) and any(not heavy(t) and variant(t, "audio") == dv for t in audio):
             bad.append("audio: default is TrueHD/Atmos")
     variants = [variant(t, "audio") for t in audio]
     if orig != "es" and "spa-mx" not in variants and "spa" not in variants:

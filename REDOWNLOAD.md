@@ -42,7 +42,7 @@ quinta monitorizada, alguien amplió la excepción sin decidirlo.
 | Captain America: Brave New World | 822119 | borrado, monitorizado, seerr #24 |
 | Sinners | 1233413 | borrado, monitorizado, seerr #26 |
 | Superman | 1061474 | borrado, monitorizado, seerr #27 |
-| The Good Girls | 541339 | borrado, monitorizado, seerr #25 |
+| The Good Girls | 541339 | borrado; **cancelada por Antonio el 2026-10-02**: quitada de Radarr (id 241) y de Seerr (#25) |
 
 ## Anterior
 

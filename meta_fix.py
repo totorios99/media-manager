@@ -23,8 +23,21 @@ import scan
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOG = os.path.join(HERE, "meta_fix.jsonl")
 CACHE = "/var/tmp/mm_probe_cache.json"          # keyed by path+mtime+size, safe to delete
-SKIP_DEFAULT = {"Dragon Ball Z (1989) [tvdbid-81472]"}   # until its castellano track is removed: both Spanish tracks look alike
-SKIP_ALL = {"Dragon Ball Z (1989) [tvdbid-81472]"}       # dbz_castellano.py is rewriting those files right now
+DBZ = "Dragon Ball Z (1989) [tvdbid-81472]"
+
+
+def dbz_running():
+    """dbz_castellano.py is rewriting DBZ files (its pid is in /var/tmp/dbz_run.pid). Until it ends the
+    two Spanish tracks still look alike (a compat-based default could pick the castellano one) and
+    editing a file under its mkvmerge would race it."""
+    try:
+        os.kill(int(open("/var/tmp/dbz_run.pid").read().split()[-1]), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+SKIP_DEFAULT = SKIP_ALL = {DBZ} if dbz_running() else set()
 
 
 def plan(info, orig, animation, title_display, skip_default):

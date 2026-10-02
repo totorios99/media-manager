@@ -71,13 +71,16 @@ Dos herramientas, porque la primera no alcanza:
 - Lección: dos reglas mías de la auditoría marcaban falsos positivos (TrueHD sin pista
   ligera del mismo idioma; animación sin doblaje español). Se corrigieron antes de actuar.
 
-### F2. Variante y etiqueta es-419 (sin remux, esfuerzo bajo)
-- Lanzar de noche `subs_variant.py embedded` (lee cada fichero entero: horas) para saber
-  qué español de texto es Latino y cuál castellano **por el contenido**, no por la etiqueta.
-- **Código nuevo**: `build_mkvpropedit_chain` escribe `language=spa` y nunca
-  `language-ietf`, así que no puede poner `es-419`. Añadir `--set language-ietf=es-419`
-  para los Latino verificados y `es-ES` para los castellanos, con test.
-- Resultado: baja a casi 0 el fallo más grande (793 + 183) sin tocar un solo fotograma.
+### F2. Variante y etiqueta es-419 (sin remux)
+- **Hecho (2026-10-02):** `language=spa` por sí solo **reseteaba un es-419 existente a "es"**
+  (medido con `mkvpropedit` v101), de modo que cada job propedit que estampó idiomas borró
+  la única evidencia dura Latino/castellano. `commands.py` escribe ahora `language-ietf`
+  (propedit) y `--language id:es-419` (remux), con test sobre un mkv real.
+  `meta_fix.py` etiqueta es-419/es-ES donde el **nombre** de la pista ya lo dice (sin leer el
+  contenido).
+- **Pendiente:** `subs_variant.py embedded` de noche, para el español de texto sin
+  evidencia en el nombre. Lee cada fichero entero (mkvextract recorre todos los clusters):
+  horas de disco USB, así que va después de DBZ y no junto a otras cargas.
 
 ### F3. Filtro de entrada en producción (depende de una decisión)
 - **Activo desde 2026-10-02**: Bazarr llama a `/config/mm-subs-fix.sh {{subtitles}}` →
@@ -92,17 +95,27 @@ Dos herramientas, porque la primera no alcanza:
   mejoras ("extra files"); SubDL no devuelve resultados.
 
 ### F4. Que el import ya nazca conforme (código)
-- `suggest_tracks`: nuevo orden y marcas del estándar (Latino completo, Inglés completo,
-  Latino forzado; default según el audio original); sin forzados en inglés; castellano
-  solo si el original es español.
-- Los SRT verificados entran por `ext_path` en el remux del import (hoy
-  `ADOPT_EXTERNAL_SUBS` está apagado por la decisión del 2026-09-16; el plan del
-  2026-09-24 la revierte para lo que pase el filtro).
-- **OCR de PGS como paso del import**: `tesseract` con `spa` y `eng` ya está instalado, y
-  `ffmpeg` renderiza el PGS (probado con F&F6: reconoce frases completas). Falta el
-  empaquetado: tiempos por evento (no por muestreo), diccionario español, revisión de
-  `l`/`I`, `¿¡` y cursivas, y el filtro de §2.6. Si el OCR no pasa el filtro, el título
-  entra con su PGS y va a la lista de revisión.
+- **Hecho:** `suggest_tracks` aplica el estándar de subtítulos: Latino completo, inglés
+  completo (SDH solo si no hay otro), Latino forzado; sin forzados en inglés ni subtítulos
+  de otros idiomas; castellano solo si el original es español; default = Latino completo
+  cuando el audio que suena no es español (Neptune no activa el forzado por su marca) y
+  ninguno cuando suena un español, original o doblaje de animación. PGS solo si su idioma
+  no tiene texto. Tests en `test_sub_policy.py`.
+- **Hecho:** el default de audio lo decide `audio_default.py` (TrueHD/Atmos solo si es la
+  única pista del idioma; si no, el codec más compatible; nunca un comentario).
+- **Corrección al plan original:** Bazarr descarga los subtítulos **después** del import,
+  así que al remuxear en el import el SRT casi nunca existe todavía. Incrustar solo puede
+  hacerse en una pasada posterior (F6, y luego un barrido periódico que incruste los SRT
+  que Bazarr haya dejado desde la última vez), no dentro del remux del import.
+- **Pendiente:** los SRT verificados entran por `ext_path` en el remux del import
+  (`ADOPT_EXTERNAL_SUBS` sigue apagado: decisión del 2026-09-16; Antonio confirmó el
+  2026-10-02 que se incrustan en F6 y el plan del 09-24 la revierte para lo que pase el
+  filtro).
+- **Pendiente:** OCR de PGS como paso del import: `tesseract` con `spa` y `eng` ya está
+  instalado, y `ffmpeg` renderiza el PGS (probado con F&F6: reconoce frases completas).
+  Falta el empaquetado: tiempos por evento, diccionario español, revisión de `l`/`I`, `¿¡` y
+  cursivas, y el filtro de §2.6. Si el OCR no pasa el filtro, el título entra con su PGS y
+  va a la lista de revisión.
 - Criterio: un título nuevo de Radarr/Sonarr sale del import con 0 fallos en la auditoría.
 
 ### F5. Faltantes y doblaje (homelab; ver §5)
@@ -147,12 +160,9 @@ empezar ya, porque beneficia a todo lo que se descargue a partir de hoy.
   **sin release**: The Sopranos S05E01 "Two Tonys" y DBZ 251/253 (0–2 seeders).
 - Radarr: ~~The Good Girls~~ cancelada y borrada por Antonio (2026-10-02);
   *Never Back Down* (casi sin seeders) y *The Hobbit: An Unexpected Journey* en curso.
-- **Doblaje latino ausente: 229 películas y 264 episodios.** No se arregla en la
-  biblioteca: exige otro release con audio Latino. Sonarr no tiene hoy preferencia de
-  idioma. Propuesta, **si Antonio la quiere**: un formato personalizado "Latino" en
-  Radarr/Sonarr (homelab) para que las mejoras futuras prefieran releases duales, y una
-  búsqueda dirigida solo de los títulos que él elija (no 229 a la vez: cada uno son
-  decenas de GB por el mismo disco).
+- **Doblaje latino ausente: 229 películas y 264 episodios.** No se persigue: Antonio
+  decidió el 2026-10-02 **no** crear formato personalizado ni perfil de audio Latino en
+  Radarr/Sonarr; solo los subtítulos Latino (Bazarr). Si un release trae Latino, bien.
 
 ## 6. Hardware
 
@@ -169,16 +179,17 @@ ligero y se hace ya.
 - Subtítulos de toda la biblioteca en el mismo orden y con es-419/inglés etiquetados.
 - Un import nuevo de prueba que salga conforme sin intervención.
 
-## 8. Decisiones que necesito de Antonio
+## 8. Decisiones
 
-1. **The Office (US)**: 193 episodios llevan Latino por defecto aunque el original es
-   inglés y no es animación. La convención dice "original primero". ¿Lo dejo como está
-   (intencional) o lo paso a inglés?
-2. **Dragon Ball Z**: 74 episodios conservan el castellano (Montaje Selecta). La
-   convención lo elimina salvo original español; en el episodio 199 es el único doblaje
-   disponible además del japonés. ¿Se quita, se conserva, o solo se deja de marcar?
-3. **Subtítulos externos de Bazarr**: ¿se incrustan en F6 (estándar del plan) o se
-   mantienen como sidecar de Bazarr (decisión del 2026-09-16)? Recomiendo incrustar en
-   la pasada, no antes.
-4. ~~Bazarr post-procesado~~: hecho (F3).
-5. **Búsqueda de doblaje latino** (§5): ¿sí o no, y para qué títulos?
+**Resueltas (Antonio, 2026-10-02):**
+1. The Office: el default de audio pasa al original, inglés (hecho, 193 episodios).
+2. DBZ: se quita el castellano y el Latino queda como default (en marcha,
+   `dbz_castellano.py`); el episodio 199 no tiene Latino y no se toca.
+3. Subtítulos externos de Bazarr: se incrustan en F6.
+4. Bazarr post-procesado: activo (F3).
+5. Sin formato personalizado ni perfil de audio Latino en Radarr/Sonarr.
+6. Default de audio: TrueHD/Atmos solo si es la única pista del idioma; si no, el mejor
+   codec con mayor compatibilidad.
+
+**Abiertas:** ninguna por ahora. Siguiente decisión probable: cuándo lanzar la pasada de
+variante de subtítulos (horas de disco) y la señal del cable SATA para F6.

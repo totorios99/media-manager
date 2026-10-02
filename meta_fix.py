@@ -7,55 +7,21 @@ Fixes (what the audit flags and the app's propedit job cannot do, because that j
 refuses any title whose plan drops a track):
   video   language 'und' -> the title's original language
   title   empty container title -> the app's title_display ("Title (Year)" / "Show - S01E01")
-  audio   exactly one default: the original language, or the Latino dub for animation;
-          the lighter track when the same language also has TrueHD/Atmos.
-          Titles in SKIP_DEFAULT are left alone until Antonio decides (PLAN-CONVENCION.md §8).
+  audio   exactly one default, chosen by audio_default.py (original language or Latino dub
+          for animation; TrueHD/Atmos only when it is the sole track of that language;
+          otherwise the most compatible codec).
 Old values go to meta_fix.jsonl first, so every edit can be reverted by hand.
 """
 import concurrent.futures as cf, json, os, re, sqlite3, subprocess, sys
 
+import audio_default
 import library_audit as la
 import scan
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOG = os.path.join(HERE, "meta_fix.jsonl")
 CACHE = "/var/tmp/mm_probe_cache.json"          # keyed by path+mtime+size, safe to delete
-SKIP_DEFAULT = {"The Office (US)"}          # 193 eps default to Latino; pending decision
-
-
-def heavy(t):
-    return bool(re.search(r"truehd|atmos", f"{t['codec']} {t['properties'].get('track_name', '')}", re.I))
-
-
-SIDE = re.compile(r"commentar|comentari|descript|audio desc|karaoke", re.I)
-
-
-def side(t):
-    p = t["properties"]
-    return bool(p.get("flag_commentary") or p.get("flag_visual_impaired")
-                or SIDE.search(p.get("track_name") or ""))
-
-
-def pick_default(audio, orig, animation, current=None):
-    """The track that should be default, or None to leave the file alone.
-    A default that is already an acceptable candidate stays: two identical 'Español (FLAC)'
-    tracks (DBS) cannot be told apart by tags, and flipping between them could swap Latino
-    and castellano. Heavy (TrueHD/Atmos) only gives way to a lighter track of ITS language."""
-    v = lambda t: la.variant(t, "audio")
-    main = [t for t in audio if not side(t)]
-    cands = [t for t in main if v(t) in ("spa-mx", "spa")] if animation else []
-    if not cands:
-        want = scan.LANG_ISO1_TO_3.get(orig or "", "eng")
-        cands = [t for t in main if v(t) == want or (orig == "es" and v(t) in ("spa", "spa-mx", "spa-es"))]
-    if not cands:
-        return None
-    light = [t for t in cands if not heavy(t)]
-    if current is not None and current in cands:
-        same_lang_light = [t for t in light if v(t) == v(current)]
-        if not heavy(current) or not same_lang_light:
-            return current
-        return same_lang_light[0]
-    return (light or cands)[0]
+SKIP_DEFAULT = {"Dragon Ball Z (1989) [tvdbid-81472]"}   # until its castellano track is removed: both Spanish tracks look alike
 
 
 def plan(info, orig, animation, title_display, skip_default):
@@ -74,7 +40,7 @@ def plan(info, orig, animation, title_display, skip_default):
     audio = [t for t in info["tracks"] if t["type"] == "audio"]
     if audio and not skip_default:
         cur = [t for t in audio if t["properties"].get("default_track")]
-        target = pick_default(audio, orig, animation, cur[0] if len(cur) == 1 else None)
+        target = audio_default.pick(audio, orig, animation, cur[0] if len(cur) == 1 else None)
         if target is not None and cur != [target]:
             for i, t in enumerate(audio, 1):
                 want = 1 if t is target else 0

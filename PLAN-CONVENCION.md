@@ -145,7 +145,7 @@ empezar ya, porque beneficia a todo lo que se descargue a partir de hoy.
   episodios que solo existen en 720p siguen faltando (~22); The Office S04E14 y S07E22
   ("Goodbye, Michael", Extended Cut) y Yellowstone S01E08 (fichero doble E08-E09) grabados;
   **sin release**: The Sopranos S05E01 "Two Tonys" y DBZ 251/253 (0–2 seeders).
-- Radarr: *The Good Girls* **cancelada** por Antonio (quitada de Radarr y Seerr);
+- Radarr: ~~The Good Girls~~ cancelada y borrada por Antonio (2026-10-02);
   *Never Back Down* (casi sin seeders) y *The Hobbit: An Unexpected Journey* en curso.
 - **Doblaje latino ausente: 229 películas y 264 episodios.** No se arregla en la
   biblioteca: exige otro release con audio Latino. Sonarr no tiene hoy preferencia de

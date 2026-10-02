@@ -3,8 +3,6 @@
 Nota de continuidad para una sesión en frío. Lo que no se puede deducir leyendo
 el código o el historial de git.
 
-Última actualización: 2026-09-16.
-
 ## Reparto
 
 - **media-manager (yo)**: `/srv/storage/Movies`, `/srv/storage/Shows`, `.recycle`,
@@ -26,7 +24,10 @@ puerto cerrado y nada se normalizó, sin que ningún servicio se quejara.
   `TMDB_API_KEY` y `HANDBRAKE_CLI`.
 - **Logs: `~/Documents/code/apps/media-manager/server.log`**, no journalctl. El journal de usuario no
   se persiste en esta máquina ("No journal files were found"); hay un drop-in en
-  `media-manager.service.d/log.conf` que redirige stdout allí.
+  `media-manager.service.d/log.conf` que redirige stdout allí y fija `PATH`
+  (`/usr/local/bin:/usr/bin:~/.local/bin`): tras el reinicio del 2026-09-28 el manager de usuario
+  arrancó sin `/usr/bin`, tmux, mkvmerge y curl dejaron de encontrarse y los imports quedaron
+  en silencio hasta el 2026-10-02.
 - `docker-compose.yml` está **obsoleto** y marcado como tal en su cabecera: monta
   solo Movies y apunta a otra base. No levantarlo.
 
@@ -34,15 +35,24 @@ puerto cerrado y nada se normalizó, sin que ningún servicio se quejara.
 
 Leídas del código, no de memoria: `suggest_tracks` en `scan.py`.
 
-- Audio: idioma original primero y por defecto, luego español. TrueHD/Atmos se
-  conserva pero **nunca es la pista por defecto** (los clientes transcodifican).
+- Audio: idioma original primero y por defecto, luego español. **Default** (regla de
+  Antonio, 2026-10-02, en `audio_default.py`): TrueHD/Atmos solo si es la única pista de
+  ese idioma; si no, el mejor codec con mayor compatibilidad (E-AC-3 > AC-3 > AAC > FLAC >
+  DTS-HD > DTS, luego más canales); nunca un comentario. Es solo el flag: qué pista se
+  **conserva** al remuxear lo decide `scan.PREMIUM_AUDIO_ORDER` (DTS-HD primero) y no cambia.
+- Subtítulos: SRT de texto **dentro del mkv** (se incrustan en la pasada F6 del
+  `PLAN-CONVENCION.md`); Latino completo, inglés completo, Latino forzado, en ese orden.
+- Radarr/Sonarr: sin formato personalizado ni perfil para audio Latino (decisión de
+  Antonio, 2026-10-02); el latino se persigue solo en subtítulos, con Bazarr.
 - **Animación: el doblaje español arranca por defecto**, conservando el audio
   original y sus subtítulos. Decisión de Antonio, 2026-09-11. La columna
   `animation` sale del género 16 de TMDB, no de una lista escrita a mano: Rick
   and Morty cuenta como animación y se habría quedado fuera.
 - Castellano (`spa-es`) solo sobrevive si es el idioma original.
 - Techo de bitrate: 4K 32 Mbps, 1080p 15, SD 8.
-- Nombres: `Título (Año).mkv` en `Título (Año)/`; series con `Season NN`.
+- Nombres: `Título (Año).mkv` en `Título (Año)/`; series con `Season N` (formato de Sonarr)
+  o `Season NN` en las reconstruidas a mano (DBZ, DBS, FMAB). Jellyfin acepta las dos; no
+  mezclarlas dentro de una serie.
 
 ## Trampas medidas, no supuestas
 
@@ -56,7 +66,8 @@ Leídas del código, no de memoria: `suggest_tracks` en `scan.py`.
 - Los `.json` de tareas de Jellyfin en disco están obsoletos; manda la API.
 - Jellyfin excluye de "Añadido recientemente" lo ya visto. Sinners estaba, pero
   marcada como vista.
-- Jellyfin 12 rechaza `X-Emby-Token`; usa `Authorization: MediaBrowser Token="..."`.
+- Jellyfin rechaza `X-Emby-Token` desde la 12; usa `Authorization: MediaBrowser Token="..."`
+  (el servidor corre 13.0.0 y la app usa este formato).
 - Un mensaje de error no es una medición: FlareSolverr decía "probablemente tu
   IP" y la IP estaba bien; era solo el dominio `1337x.to`. El control que
   faltaba era alcanzar otro host con reto desde la misma IP.
@@ -70,6 +81,14 @@ Leídas del código, no de memoria: `suggest_tracks` en `scan.py`.
 - Contar "dos subtítulos en español" sin agrupar por clase **no mide nada**: un
   PGS y un SRT del mismo idioma conviven a propósito, igual que un forzado y un
   completo. De 37 películas "duplicadas" quedaron 15 reales.
+- **`delete-original` borra el original, no lo recicla**, y renombra el episodio a
+  `Serie (Año) - SxxEyy.mkv` (pierde el título del episodio y el del contenedor). Verificar
+  antes con hash por stream (`ffmpeg -map 0:N -c copy -f streamhash`); los
+  `tag_number_of_bytes` de `mkvmerge -J` son etiquetas heredadas, no una medición.
+- **`ffsubsync` por ventanas de 10 minutos no es fiable** (un fichero bueno dio +1,1 /
+  +1,1 / +3,0 s). Solo cuenta la re-medición global `--gss` con factor 1,000 y desfase ~0.
+- **Un título es su id de TMDB, no su nombre**: una película listada con el título
+  original y con el internacional se contó dos veces y nadie las unió.
 
 ## El patrón que más costó: trabajo hecho, resultado no registrado
 
@@ -105,8 +124,9 @@ el remux y avisa**. La copia caduca a los 7 días.
 
 ## Descartes con evidencia (no reabrir sin datos nuevos)
 
-- **Reordenar pistas por remux**: 383 episodios, 394 GB movidos, 0 GB
-  recuperados. `mkvpropedit` estampa por posición física y basta.
+- **Reordenar pistas de AUDIO por remux**: 383 episodios, 394 GB movidos, 0 GB
+  recuperados; `mkvpropedit` basta para flags y nombres. El orden de **subtítulos**
+  (Latino, Inglés, Latino forzado) sí exige remux: ver `SUBTITLES-PLAN.md`.
 - **Remuxar series para ahorrar espacio**: 2.6 GB de 831. Los subtítulos no
   pesan. El motivo real es la corrección, no el espacio.
 - **YTS como indexador**: solo versiones muy comprimidas, las rechazaría el techo
@@ -114,36 +134,20 @@ el remux y avisa**. La copia caduca a los 7 días.
 
 ## Pendiente
 
-1. **Cable SATA**: esperando la señal de Antonio. Detrás van los remuxes
-   pesados: 188 episodios que descartan pistas, 9 pares de The Office a unir
-   (TVDB no los parte), y el reordenamiento.
-2. **Lat-Team** (`lat-team.com`, solo API key): el tracker de doblaje latino.
-   Necesita cuenta de Antonio. Lista de espera completa en la nota de Prowlarr
-   de homelab.
-3. **One-Punch Man en latino**: no existe hoy en ningún indexador. T2 lo tiene
-   porque Antonio lo puso a mano.
-4. **The Good Girls**: 0 releases en los indexadores.
-5. **BoJack**: faltan 31 episodios de T2, T3 y T5; llegarán por RSS.
-6. **4 peticiones rechazadas** en seerr, estrenos de 2026.
-7. **Dragon Ball Super**: 131 episodios con numeración absoluta en un solo
-   `Season 01`. No monitorizar esas temporadas hasta renombrar: leerían como 131
-   episodios faltantes.
-9. **e2fsck de hdd1**: pendiente desde el corte del 2026-09-18 (ver «Incidente»). Guion,
-   comprobación previa (`fsck_preflight.py`) y comparador antes/después en `~/fsck-prep/`.
-10. **One-Punch Man Season 1 sin subtítulos en español** (12 episodios, solo inglés). Es
-    trabajo para Bazarr: falta asignarle perfil a la serie. Season 3 está cerrada; en E01,
-    E02 y E06 el español es el subtítulo por defecto pero va segundo en la lista.
-8. **5 películas con dos subtítulos PGS en español**, resuelto por OCR el 2026-09-24.
-   El remux ya había dejado solo uno; tesseract sobre ~1 fotograma/s dice cuál quedó:
-   2 Fast 2 Furious, Avengers: Age of Ultron y The Last Jedi, **latino** (*ustedes*, sin
-   ninguna forma de vosotros). Joker, sin marcadores claros (solo *vale*, que también
-   es mexicano; cero vosotros en 18.000 palabras): probablemente latino. **Man of Steel
-   se quedó con el castellano** (34 formas de vosotros) y además no tiene audio español:
-   el subtítulo latino se descartó en el remux y solo vuelve con un SRT de Bazarr. **Hecho el 2026-09-24:**
-   `Man of Steel (2013).es-MX.srt` junto al vídeo, bajado de subx y comprobado: 1.347
-   diálogos, latino (*ustedes* ×4, ninguna forma de vosotros) y sincronizado (1.332
-   diálogos emparejados con el PGS del fichero, mediana −16 ms). El primer SRT que bajó
-   Bazarr eran solo los forzados (13 diálogos) sin marcar; quedó en su lista negra.
+1. **Cable SATA** (el disco de la biblioteca sigue por USB 2.0): esperando la señal de
+   Antonio. Detrás va la pasada de remux; cifras y orden en `PLAN-CONVENCION.md`.
+2. **Lat-Team** (`lat-team.com`, solo API key): el tracker de doblaje latino. Necesita
+   cuenta de Antonio. Lista de espera completa en la nota de Prowlarr de homelab.
+3. **One-Punch Man en latino**: no existe hoy en ningún indexador. T2 lo tiene porque
+   Antonio lo puso a mano.
+4. **BoJack**: ~22 episodios sin release en 1080p; Antonio mantiene 1080p como mínimo
+   (2026-10-02), así que los que solo existen en 720p no llegan.
+5. **4 peticiones rechazadas** en seerr, estrenos de 2026.
+6. **Dragon Ball Super**: 131 episodios con numeración absoluta en un solo `Season 01`. No
+   monitorizar esas temporadas hasta renombrar: leerían como 131 episodios faltantes.
+7. **One-Punch Man Season 1 sin subtítulos en español** (12 episodios, solo inglés). Es
+   trabajo para Bazarr: falta asignarle perfil a la serie. Season 3 está cerrada; en E01,
+   E02 y E06 el español es el subtítulo por defecto pero va segundo en la lista.
 
 ## Incidente del 2026-09-18: corte de luz
 
@@ -153,10 +157,9 @@ medidas:
 - **hdd1 (`/dev/sdb2`, ext4 tras el puente USB JMicron) registró un error**:
   `ext4_validate_block_bitmap: bg 55193: bad block bitmap checksum`.
   `/sys/fs/ext4/sdb2/errors_count` = 1 y vive en el superblock, así que antes del
-  corte era 0. Sigue montado rw con `errors=continue`; el kernel deja de asignar
-  bloques a ese grupo, pero el checksum malo sigue en disco. **Pendiente: e2fsck
-  offline.** Guion y comparador antes/después en `~/fsck-prep/` (`RUNBOOK.md`,
-  `fsck_snapshot.py`). Tarda minutos: solo hay 35.463 inodos usados de 244 M.
+  corte era 0. **Se corrigió con e2fsck offline el 2026-09-19, sin pérdida de datos**:
+  `errors_count` vuelve a 0. Guion y comparador antes/después en `~/fsck-prep/`
+  (`RUNBOOK.md`, `fsck_snapshot.py`, `snap-after.tsv`).
 - **Alcance**: `filefrag` sobre 4.385 ficheros (sin `nextcloud_data`, que son datos
   personales) da solo 4 con bloques en ese grupo: tres descargas pendientes de
   importar y una copia de `.recycle`. Ningún fichero procesado de la biblioteca.

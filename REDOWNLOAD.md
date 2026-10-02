@@ -29,7 +29,7 @@ antes de reemplazarlas.
 Ballerina y Thunderbolts se sustituyeron por descargas 4K verificadas. Los
 otros tres se borraron el 2026-09-06 tras confirmar por segunda vez que
 decodifican cero fotogramas pasado el corte —135.9 GB entre los cuatro rotos,
-contando The Good Girls—. Se conservaron las carpetas y su artwork: así Radarr
+contando uno que se canceló después—. Se conservaron las carpetas y su artwork: así Radarr
 y Jellyfin mantienen la entrada, y Radarr pasa a `hasFile=false`, que convierte
 un archivo aparentemente satisfactorio en una ausencia real.
 
@@ -42,20 +42,6 @@ quinta monitorizada, alguien amplió la excepción sin decidirlo.
 | Captain America: Brave New World | 822119 | borrado, monitorizado, seerr #24 |
 | Sinners | 1233413 | borrado, monitorizado, seerr #26 |
 | Superman | 1061474 | borrado, monitorizado, seerr #27 |
-| The Good Girls | 541339 | borrado; **cancelada por Antonio el 2026-10-02**: quitada de Radarr (id 241) y de Seerr (#25) |
-
-## Anterior
-
-| Título | Tamaño | Problema |
-|---|---|---|
-| The Good Girls (2019) | 1.77 GB | `moov atom not found`; descarga truncada de mayo 2025, ni mkvmerge ni ffprobe pueden abrirla |
-
-Este es el mismo archivo que antes figuraba aquí como «Las Niñas Bien (2018)».
-TMDB 541339: título internacional *The Good Girls*, original *Las niñas bien*,
-estreno 2019-03-22. Estuvo listado dos veces bajo dos nombres —en este documento
-con el título original y en la biblioteca con el internacional— y la duplicación
-sobrevivió a una verificación que lo marcó «sin paquetes de video» sin que nadie
-uniera los dos. Un título es su id de TMDB, no su nombre.
 
 ## Cómo se detectan estos
 

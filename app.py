@@ -2787,7 +2787,8 @@ def _announce_ready(conn, kind, owner_id):
         notes.append(why)
     detail = _friendly_detail(conn, kind, owner_id, owner)
     if pending:
-        _notify(f"Casi lista: {name}", f"falta {', '.join(pending)} · {detail}",
+        # Antonio wants two states only: available, or not available with the reason.
+        _notify(f"No disponible: {name}", f"{', '.join(pending)} · {detail}",
                 tags="warning", priority=4)
         return
     # A title that replaced a previous copy is an upgrade, not a premiere: the

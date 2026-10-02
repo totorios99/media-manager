@@ -71,6 +71,26 @@ def _canonical_name(t, siblings=()):
     return label
 
 
+IETF_OF = {"spa-mx": "es-419", "spa-es": "es-ES"}
+
+
+def lang_tag(t):
+    """What to write as a track's language. The row keeps the Spanish variant in `lang`
+    (spa-mx / spa-es) while out_lang is the bare ISO code. mkvmerge and mkvpropedit store a
+    BCP 47 tag next to the legacy code, and writing only `language=spa` resets a stored
+    es-419 to "es" (measured with mkvpropedit v101): every job that stamped Spanish tracks
+    that way erased the one hard piece of evidence about Latino versus castellano."""
+    if (t.get("out_lang") or "") == "spa":
+        return IETF_OF.get(t.get("lang")) or "spa"
+    return t.get("out_lang") or "und"
+
+
+def ietf_args(t):
+    """mkvpropedit --set pair for the BCP 47 tag, only where there is a variant to keep."""
+    tag = IETF_OF.get(t.get("lang")) if (t.get("out_lang") or "") == "spa" else None
+    return ["--set", f"language-ietf={tag}"] if tag else []
+
+
 def _flag_args(tid, t):
     """The five mkv flags build_mkvmerge_remux used to leave untouched, so
     whatever the source set survived the remux uncontrolled. SDH/commentary
@@ -114,7 +134,7 @@ def build_mkvmerge_remux(tracks, title, in_path, out_path):
     main_file_tracks = video + audio + subs_internal
     for t in main_file_tracks:
         tid = t["mkv_id"]
-        argv += ["--language", f"{tid}:{t['out_lang'] or 'und'}"]
+        argv += ["--language", f"{tid}:{lang_tag(t)}"]
         argv += ["--default-track-flag", f"{tid}:{'yes' if t['out_default'] else 'no'}"]
         if t["type"] != "video":
             argv += ["--forced-display-flag", f"{tid}:{'yes' if t['out_forced'] else 'no'}"]
@@ -126,7 +146,7 @@ def build_mkvmerge_remux(tracks, title, in_path, out_path):
     # external subtitle files: each is its own input file with a single track (id 0)
     ext_file_index = {}
     for i, t in enumerate(subs_external, start=1):
-        argv += ["--language", f"0:{t['out_lang'] or 'und'}"]
+        argv += ["--language", f"0:{lang_tag(t)}"]
         argv += ["--default-track-flag", f"0:{'yes' if t['out_default'] else 'no'}"]
         argv += ["--forced-display-flag", f"0:{'yes' if t['out_forced'] else 'no'}"]
         argv += _flag_args(0, t)
@@ -240,6 +260,7 @@ def build_mkvpropedit_chain(out_path, title, audio_output_order, sub_output_orde
         argv += [
             "--edit", f"track:a{i}",
             "--set", f"language={t['out_lang'] or 'und'}",
+            *ietf_args(t),
             "--set", f"flag-default={1 if t['out_default'] else 0}",
             "--set", f"flag-forced={1 if t['out_forced'] else 0}",
             "--set", f"name={_canonical_name(t, audio_output_order)}",
@@ -250,6 +271,7 @@ def build_mkvpropedit_chain(out_path, title, audio_output_order, sub_output_orde
         argv += [
             "--edit", f"track:s{i}",
             "--set", f"language={t['out_lang'] or 'und'}",
+            *ietf_args(t),
             "--set", f"flag-default={1 if t['out_default'] else 0}",
             "--set", f"flag-forced={1 if t['out_forced'] else 0}",
             "--set", f"name={_canonical_name(t, sub_output_order)}",

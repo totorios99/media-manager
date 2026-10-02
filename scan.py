@@ -369,57 +369,45 @@ def suggest_tracks(conn, owner_id, table="movies", multi_audio=False):
                 if t["id"] in plan:
                     plan[t["id"]]["out_default"] = 1 if t is spa else 0
 
-    # subs: forced first, then one text sub per language, and an image sub only
-    # where that language has no text at all.
-    #
-    # Text wins because Bazarr can replace or re-sync an .srt and cannot touch a
-    # bitmap, and because the client scales text to the screen -- a PGS is an
-    # image mastered for a cinema and looks tiny on a phone. Burn-in is NOT the
-    # reason: measured on Jellyfin's own logs, every session direct-played or
-    # remuxed and nothing was ever burned, because libmpv, media3 and
-    # AetherEngine all decode PGS themselves.
-    #
-    # The image sub survives when it is the only one in its language: 70 films
-    # carry Spanish exclusively as PGS, and dropping those outright would leave
-    # them with no Spanish subtitle until Bazarr found one -- at 20 downloads a
-    # day, and only where one exists.
-    # Subtitles run Spanish first, unlike audio, which leads with the original
-    # language. Antonio's convention is forced Spanish, then full Spanish, then
-    # English -- so the ordering the audio uses would put English ahead of the
-    # track he actually reads.
-    sub_langs = ([l for l in wanted if l.startswith("spa")]
-                 + [l for l in wanted if not l.startswith("spa")])
-    first_forced = True
-    for lang in sub_langs:
-        f = next((t for t in subs if t["forced_flag"]
-                  and (t["lang"] == lang or (t["lang"] == "und" and lang == (orig3 or "eng")))), None)
-        if f:
-            mark(f, lang, default=first_forced, forced=True)
-            first_forced = False
-    for lang in sub_langs:
-        cands = [t for t in subs if t["lang"] == lang and not t["forced_flag"] and t["id"] not in plan]
-        srt = next((t for t in cands if _sub_class(t) == "text"), None)
-        if srt:
-            mark(srt, lang, default=False, forced=False)
-        else:
-            img = next((t for t in cands if _sub_class(t) == "pgs"), None) \
-                or next((t for t in cands if _sub_class(t) == "vob"), None)
-            if img:
-                mark(img, lang, default=False, forced=False)
+    # subs: SUBTITLES-PLAN.md "El estándar" (2026-09-24), in this fixed order:
+    #   1 Spanish full (Latino; castellano only when Spanish is the original language)
+    #   2 English full (a normal dialogue track; SDH only when there is no other)
+    #   3 Spanish forced
+    # No forced English, and no subtitle in any other language: the plan lists three
+    # positions and "sin extras" is the rule. Text wins over bitmap (Bazarr can replace or
+    # re-sync an .srt and cannot touch a PGS; the client scales text). An image sub survives
+    # only where its language has no text at all -- no PGS leaves without a verified text
+    # replacement (70+ films carry Spanish only as PGS until the OCR step exists).
+    spa_langs = [l for l in wanted if l.startswith("spa")]
 
-    # The default subtitle follows the audio that will actually play, not the
-    # film's original language. Antonio reads Spanish and English, so with
-    # either of those on the speakers a forced track (signs, foreign lines) is
-    # enough -- but 18 films play only in Japanese, Korean, French, Swedish and
-    # the like, and those need the full Spanish subtitle from the start.
+    def pick_full(lang):
+        cands = sorted((t for t in subs if t["lang"] == lang and not t["forced_flag"]
+                        and t["id"] not in plan), key=lambda t: t.get("sdh_flag") or 0)
+        text = next((t for t in cands if _sub_class(t) == "text"), None)
+        if text:
+            return text
+        return next((t for t in cands if _sub_class(t) == "pgs"), None) \
+            or next((t for t in cands if _sub_class(t) == "vob"), None)
+
+    for lang in spa_langs + ["eng"]:
+        t = pick_full(lang)
+        if t:
+            mark(t, lang, default=False, forced=False)
+    for lang in spa_langs:
+        f = next((t for t in subs if t["forced_flag"] and t["lang"] == lang and t["id"] not in plan), None)
+        if f:
+            mark(f, lang, default=False, forced=True)
+
+    # Default subtitle: the full Spanish one whenever the audio that will play is not
+    # Spanish (Neptune/Apple TV does not turn on a forced track by its flag, so the full
+    # Spanish track has to be the default). With a Spanish track playing -- the original, or
+    # the dub that animation starts on -- no subtitle is default.
     played = next((t for t in audio if t["id"] in plan and plan[t["id"]]["out_default"]), None)
-    if played and _spanish_base(played["lang"]) not in ("spa", "eng"):
+    if played and _spanish_base(played["lang"]) != "spa":
         full_spa = next((t for t in subs if t["id"] in plan
                          and _spanish_base(t["lang"]) == "spa" and not plan[t["id"]]["out_forced"]), None)
         if full_spa:
-            for t in subs:
-                if t["id"] in plan:
-                    plan[t["id"]]["out_default"] = 1 if t is full_spa else 0
+            plan[full_spa["id"]]["out_default"] = 1
 
     now = _now()
     for t in tracks:

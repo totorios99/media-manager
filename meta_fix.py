@@ -6,6 +6,8 @@
 Fixes (what the audit flags and the app's propedit job cannot do, because that job
 refuses any title whose plan drops a track):
   video   language 'und' -> the title's original language
+  ietf    Spanish track whose NAME says Latino/Castellano but whose BCP 47 tag is a generic 'es':
+          write es-419 / es-ES (no content analysis: only evidence already in the file)
   title   empty container title -> the app's title_display ("Title (Year)" / "Show - S01E01")
   audio   exactly one default, chosen by audio_default.py (original language or Latino dub
           for animation; TrueHD/Atmos only when it is the sole track of that language;
@@ -22,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LOG = os.path.join(HERE, "meta_fix.jsonl")
 CACHE = "/var/tmp/mm_probe_cache.json"          # keyed by path+mtime+size, safe to delete
 SKIP_DEFAULT = {"Dragon Ball Z (1989) [tvdbid-81472]"}   # until its castellano track is removed: both Spanish tracks look alike
+SKIP_ALL = {"Dragon Ball Z (1989) [tvdbid-81472]"}       # dbz_castellano.py is rewriting those files right now
 
 
 def plan(info, orig, animation, title_display, skip_default):
@@ -48,6 +51,16 @@ def plan(info, orig, animation, title_display, skip_default):
                     argv += ["--edit", f"track:a{i}", "--set", f"flag-default={want}"]
                     before[f"a{i}.default"] = bool(t["properties"].get("default_track"))
             fixes.append("audio-default")
+    # Spanish variant already evidenced by the track name but stored as a generic 'es': write the BCP 47 tag
+    for ttype, sel in (("audio", "a"), ("subtitles", "s")):
+        for i, t in enumerate([x for x in info["tracks"] if x["type"] == ttype], 1):
+            v = audio_default.variant(t) if ttype == "audio" else la.variant(t, "subtitle")
+            tag = {"spa-mx": "es-419", "spa-es": "es-ES"}.get(v)
+            cur = (t["properties"].get("language_ietf") or "").lower()
+            if tag and cur in ("", "es", "spa"):
+                argv += ["--edit", f"track:{sel}{i}", "--set", f"language-ietf={tag}"]
+                before[f"{sel}{i}.ietf"] = cur
+                fixes.append("ietf")
     return argv, before, fixes
 
 
@@ -82,7 +95,7 @@ def main(run, limit):
 
     def one(row):
         kind, id_, path, orig, anim, td, show = row
-        if not os.path.exists(path):
+        if not os.path.exists(path) or show in SKIP_ALL:
             return None
         st = os.stat(path)
         key = f"{path}|{st.st_mtime_ns}|{st.st_size}"

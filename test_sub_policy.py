@@ -22,8 +22,8 @@ def build(tracks, original_language="en"):
     for i, t in enumerate(tracks):
         conn.execute(
             "INSERT INTO tracks (id, movie_id, mkv_id, type, codec, lang, name, "
-            "default_flag, forced_flag, keep) VALUES (?,1,?,?,?,?,'',0,?,1)",
-            (i + 1, i, t["type"], t["codec"], t["lang"], t.get("forced", 0)))
+            "default_flag, forced_flag, keep, sdh_flag) VALUES (?,1,?,?,?,?,'',0,?,1,?)",
+            (i + 1, i, t["type"], t["codec"], t["lang"], t.get("forced", 0), t.get("sdh", 0)))
     conn.commit()
     return conn
 
@@ -62,30 +62,64 @@ def test_vobsub_loses_to_srt():
     assert kept(conn)[3]["keep"] == 0
 
 
-def test_default_follows_audio_foreign():
-    """Japanese audio, no dub: the full Spanish subtitle starts, not the forced."""
-    conn = build([A("jpn"), SRT("spa", forced=1), SRT("spa"), SRT("eng")],
-                 original_language="ja")
+def order(conn):
+    """Kept subtitle tracks in output order: [(lang, forced, default)]."""
+    rows = conn.execute("SELECT lang, out_forced, out_default, out_order FROM tracks "
+                        "WHERE type='subtitle' AND keep=1 ORDER BY out_order").fetchall()
+    return [(r["lang"], r["out_forced"], r["out_default"]) for r in rows]
+
+
+def test_standard_order_latino_english_latino_forced():
+    """SUBTITLES-PLAN: Latino full, English full, Latino forced -- whatever the source order."""
+    conn = build([A("eng"), SRT("eng"), SRT("spa", forced=1), SRT("spa")])
     scan.suggest_tracks(conn, 1)
-    r = kept(conn)
-    full = r[3]
-    assert full["out_default"] == 1, "el espanol completo arranca con audio japones"
-    assert r[2]["out_default"] == 0, "el forzado deja de ser el de por defecto"
+    assert order(conn) == [("spa", 0, 1), ("eng", 0, 0), ("spa", 1, 0)], order(conn)
 
 
-def test_default_stays_forced_for_english():
-    """English audio: forced Spanish is enough, he reads English."""
-    conn = build([A("eng"), SRT("spa", forced=1), SRT("spa")])
+def test_no_english_forced_and_no_other_languages():
+    conn = build([A("fra"), SRT("eng", forced=1), SRT("eng"), SRT("fra"), SRT("spa")], original_language="fr")
     scan.suggest_tracks(conn, 1)
-    r = kept(conn)
-    assert r[2]["out_default"] == 1 and r[2]["out_forced"] == 1
-    assert r[3]["out_default"] == 0
+    assert [(l, f) for l, f, _ in order(conn)] == [("spa", 0), ("eng", 0)], order(conn)
 
 
-def test_default_stays_forced_for_spanish_audio():
-    conn = build([A("spa"), SRT("spa", forced=1), SRT("spa")], original_language="es")
+def test_normal_english_beats_sdh():
+    conn = build([A("eng"), SRT("eng", sdh=1), SRT("eng"), SRT("spa")])
     scan.suggest_tracks(conn, 1)
-    assert kept(conn)[2]["out_default"] == 1
+    kept_eng = [r for r in conn.execute("SELECT id FROM tracks WHERE lang='eng' AND type='subtitle' AND keep=1")]
+    assert [r["id"] for r in kept_eng] == [3], "la pista de dialogo normal, no la SDH"
+
+
+def test_sdh_is_used_when_it_is_the_only_english():
+    conn = build([A("eng"), SRT("eng", sdh=1), SRT("spa")])
+    scan.suggest_tracks(conn, 1)
+    assert ("eng", 0, 0) in order(conn)
+
+
+def test_latino_full_is_default_with_english_audio():
+    conn = build([A("eng"), SRT("spa", forced=1), SRT("spa"), SRT("eng")])
+    scan.suggest_tracks(conn, 1)
+    assert order(conn)[0] == ("spa", 0, 1), "el espanol completo arranca aunque el audio sea ingles"
+    assert all(d == 0 for _, _, d in order(conn)[1:])
+
+
+def test_default_is_latino_full_with_foreign_audio():
+    conn = build([A("jpn"), SRT("spa", forced=1), SRT("spa"), SRT("eng")], original_language="ja")
+    scan.suggest_tracks(conn, 1)
+    assert order(conn)[0] == ("spa", 0, 1)
+
+
+def test_no_default_subtitle_when_spanish_audio_plays():
+    conn = build([A("spa"), SRT("spa", forced=1), SRT("spa"), SRT("eng")], original_language="es")
+    scan.suggest_tracks(conn, 1)
+    assert all(d == 0 for _, _, d in order(conn)), order(conn)
+
+
+def test_no_default_subtitle_when_animation_starts_on_the_spanish_dub():
+    conn = build([A("jpn"), A("spa"), SRT("spa"), SRT("eng")], original_language="ja")
+    conn.execute("UPDATE movies SET animation=1")
+    conn.commit()
+    scan.suggest_tracks(conn, 1)
+    assert all(d == 0 for _, _, d in order(conn)), order(conn)
 
 
 if __name__ == "__main__":

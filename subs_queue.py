@@ -38,19 +38,6 @@ def post(path, auth):
     return urllib.request.urlopen(req, timeout=60).status
 
 
-if __name__ == "__main__":
-    todo = unfiltered()
-    print(len(todo), "sidecars never filtered;", f"{sum(s for s, _ in todo) / 1e12:.2f} TB of video to read")
-    if "--paced" in sys.argv:
-        paced(lambda: os.path.ismount("/srv/storage"))
-    elif "--run" in sys.argv:
-        import app
-        u, p = app._hook_credentials()
-        auth = "Basic " + base64.b64encode(f"{u}:{p}".encode()).decode()
-        ok = sum(post(path, auth) == 202 for _, path in todo)
-        print(ok, "queued; results arrive as [subs] lines in server.log")
-
-
 TRIED = "/var/tmp/subs_queue_tried.json"
 
 
@@ -82,3 +69,16 @@ def paced(is_ok=lambda: True):
             if re.search(r"^\[subs\] '?(?:[^\n]*/)?" + re.escape(name), new, re.M):
                 break                                     # a result line (ok or error); unfiltered() drops the ok ones
     print("paced queue ended", "(stopped)" if stop else "", flush=True)
+
+
+if __name__ == "__main__":
+    todo = unfiltered()
+    print(len(todo), "sidecars never filtered;", f"{sum(s for s, _ in todo) / 1e12:.2f} TB of video to read")
+    if "--paced" in sys.argv:
+        paced(lambda: os.path.ismount("/srv/storage"))
+    elif "--run" in sys.argv:
+        import app
+        u, p = app._hook_credentials()
+        auth = "Basic " + base64.b64encode(f"{u}:{p}".encode()).decode()
+        ok = sum(post(path, auth) == 202 for _, path in todo)
+        print(ok, "queued; results arrive as [subs] lines in server.log")

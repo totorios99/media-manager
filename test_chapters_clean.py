@@ -22,8 +22,8 @@ def test_normal_episode():
         atom("00:21:20.000", "00:22:20.000", 'ED 10 - "70cm" por ROTTENGRAFFTY') + \
         atom("00:22:20.000", "00:22:50.000", "Adelanto") + "</EditionEntry></Chapters>"
     new, ch = cc.clean(xml)
-    assert names(new) == ["OP", "Parte A", "ED", "Preview"], names(new)
-    assert len(ch) == 4
+    assert names(new) == ["OP", "ED", "Preview"], names(new)
+    assert len(ch) == 5
     print("test_normal_episode OK")
 
 
@@ -40,11 +40,18 @@ def test_mid_episode_op_is_not_an_intro():
     print("test_mid_episode_op_is_not_an_intro OK")
 
 
+def test_parte_chapters_are_dropped_in_any_position():
+    xml = "<Chapters>" + atom("00:00:00.000", "00:10:00.000", "Parte A") + atom("00:10:00.000", "00:18:30.000", "Parte C") + \
+        atom("00:18:30.000", "00:20:00.000", "Parte AB") + "</Chapters>"
+    assert names(cc.clean(xml)[0]) == ["Parte AB"]          # only 'Parte <letter>' is the bare split marker
+    print("test_parte_chapters_are_dropped_in_any_position OK")
+
+
 def test_nothing_to_do():
-    xml = "<Chapters>" + atom("00:00:00.000", "00:10:00.000", "Parte A") + "</Chapters>"
+    xml = "<Chapters>" + atom("00:00:00.000", "00:10:00.000", "Epílogo") + "</Chapters>"
     assert cc.clean(xml) == (xml, [])
     print("test_nothing_to_do OK")
 
 
 if __name__ == "__main__":
-    test_normal_episode(); test_one_frame_intro_is_dropped(); test_mid_episode_op_is_not_an_intro(); test_nothing_to_do()
+    test_normal_episode(); test_one_frame_intro_is_dropped(); test_mid_episode_op_is_not_an_intro(); test_parte_chapters_are_dropped_in_any_position(); test_nothing_to_do()

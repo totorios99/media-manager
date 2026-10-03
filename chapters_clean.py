@@ -11,7 +11,8 @@ matches none of them, so Jellyfin falls back to Intro Skipper's audio guess.
 Rules (Dragon Ball Super, 131 episodes, measured):
   * chapter shorter than 1 s: dropped. 'Intro' at 0:00 (0 s, or one frame in eps 109-130)
     became an empty Intro segment on top of the real OP.
-  * 'OP ...' -> 'OP', 'ED ...' -> 'ED', 'Adelanto' -> 'Preview'; 'Parte A/B/C' untouched.
+  * 'OP ...' -> 'OP', 'ED ...' -> 'ED', 'Adelanto' -> 'Preview'.
+  * 'Parte A/B/C': dropped (2026-10-03, Antonio). They match no skip pattern and only clutter the chapter menu.
   * an 'OP' that starts after 5 minutes is an insert song, not an opening (ep 131 plays
     it at 18:30): renamed 'Tema', or its skip button would jump into the climax.
 """
@@ -39,6 +40,9 @@ def clean(xml):
         name = name_m.group(1).strip() if name_m else ""
         if end_m and secs(end_m.group(1)) - start < 1.0:
             changes.append(f"drop sub-second {name!r}")
+            return ""
+        if re.fullmatch(r"Parte [A-Z]", name):
+            changes.append(f"drop {name!r}")
             return ""
         new = name
         if re.match(r"OP\b", name):

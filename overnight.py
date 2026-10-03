@@ -1,26 +1,40 @@
-"""Unattended supervisor for the long jobs. Detached; every 5 minutes it checks, repairs what is safe to repair,
-alerts (ntfy) on what is not, and rewrites /var/tmp/overnight_report.md.
+"""Night supervisor for the long, disk-heavy jobs. Detached; checks every 5 minutes and rewrites
+/var/tmp/overnight_report.md.
 
     setsid nohup uv run python -u overnight.py > /var/tmp/overnight.log 2>&1 < /dev/null &
 
-Phase 1  dbz_castellano.py --run  (resumable). Dead and not finished -> relaunch (max 3). 3 new FAILED lines -> kill
-         and alert: never keep rewriting files after verification starts failing. No progress for 90 min -> alert.
-Phase 2  once DBZ has nothing left to drop: meta_fix --run (DBZ default + es-419), then subs_queue.py --run (sidecars
-         never filtered) and subs_variant_pass.py (Latino or castellano by content), both resumable.
-Always   media-manager.service down -> restart (max once per 15 min). A restart empties the in-process subtitle
-         queue, so subs_queue.py --run is repeated afterwards (idempotent). Stale .castfix.mkv left by a dead run
-         -> removed. Disk under 100 GB free -> alert.
-It never touches Radarr, Sonarr, Jellyfin, Bazarr or any file outside what those scripts already own.
+Why it exists in this shape: on 2026-10-03 the library disk (JMicron USB 2.0 bridge) reset under sustained mixed load
+and ext4 shut down. Until there is SATA/UASP, long jobs run
+
+  * only inside a night window (MM_NIGHT=0-7, local hours, start inclusive),
+  * one at a time, in this order: the sidecar subtitle queue (subs_queue.py --paced), then the Latino/castellano
+    variant pass (subs_variant_pass.py); both resumable, both at idle I/O priority for the heavy reads,
+  * never while /srv/storage is not a mounted filesystem: everything is stopped and one alert is sent.
+
+Outside the window a running job gets SIGTERM (the service may finish the one file it already has, up to ~25 min).
+A job that dies inside the window with work left is relaunched at most twice per night. media-manager.service down ->
+restarted (once per 15 min). It never touches Radarr, Sonarr, Jellyfin, Bazarr, Transmission or the disk's contents.
 """
-import json, os, re, shutil, subprocess, sys, time, urllib.request
+import base64, json, os, re, shutil, signal, subprocess, sys, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = "/var/tmp"
-STATE = f"{OUT}/overnight_state.json"
-REPORT = f"{OUT}/overnight_report.md"
-DBZ_DIR = "/srv/storage/Shows/Dragon Ball Z (1989) [tvdbid-81472]"
+STATE, REPORT = f"{OUT}/overnight_state.json", f"{OUT}/overnight_report.md"
+MOUNT = "/srv/storage"
+WINDOW = os.environ.get("MM_NIGHT", "0-7")
 NTFY = os.environ.get("NTFY_URL", "http://172.17.0.1:8095/media")
 EVERY = 300
+JOBS = [("queue", ["subs_queue.py", "--paced"]), ("variant", ["subs_variant_pass.py"])]
+
+
+def in_window(hour=None, window=WINDOW):
+    h = time.localtime().tm_hour if hour is None else hour
+    a, b = (int(x) for x in window.split("-"))
+    return a <= h < b if a < b else (h >= a or h < b)
+
+
+def mounted():
+    return os.path.ismount(MOUNT) and os.path.isdir(f"{MOUNT}/Movies")
 
 
 def env():
@@ -32,8 +46,8 @@ def env():
     return e
 
 
-def sh(cmd, **kw):
-    return subprocess.run(cmd, capture_output=True, text=True, **kw)
+def log(msg):
+    print(time.strftime("%F %T"), msg, flush=True)
 
 
 def alive(pid):
@@ -44,23 +58,49 @@ def alive(pid):
         return False
 
 
-def log(msg):
-    print(time.strftime("%F %T"), msg, flush=True)
+def pid_of(name):
+    try:
+        return int(open(f"{OUT}/night_{name}.pid").read().split()[-1])
+    except (OSError, ValueError):
+        return None
+
+
+def start(name, args):
+    f = open(f"{OUT}/night_{name}.out", "a")
+    p = subprocess.Popen(["uv", "run", "python", "-u", *args], cwd=HERE, env=env(), stdout=f, stderr=f,
+                         stdin=subprocess.DEVNULL, start_new_session=True)
+    open(f"{OUT}/night_{name}.pid", "w").write(f"pid {p.pid}\n")
+    log(f"started {name} (pid {p.pid})")
+
+
+def stop(name):
+    pid = pid_of(name)
+    if alive(pid):
+        try:
+            os.killpg(pid, signal.SIGTERM)       # uv + its python child
+        except OSError:
+            pass
+        log(f"stopped {name} (pid {pid})")
+        return True
+    return False
 
 
 def load():
     try:
         return json.load(open(STATE))
     except (OSError, ValueError):
-        return {"alerts": {}, "dbz_restarts": 0, "phase": 1, "failed_seen": 0, "svc_restart_at": 0}
+        return {"alerts": {}, "svc_restart_at": 0, "restarts": {}, "done": {}}
 
 
 def alert(st, key, title, body, prio=4):
-    """ntfy, at most once per key per 2 hours."""
+    """ntfy, at most once per key per 2 hours. The title goes out as an RFC 2047 encoded-word: a raw "í" in an
+    HTTP header reaches ntfy as mojibake."""
     if time.time() - st["alerts"].get(key, 0) < 7200:
         return
     st["alerts"][key] = time.time()
     log(f"ALERT {title}: {body}")
+    if not title.isascii():
+        title = "=?UTF-8?B?" + base64.b64encode(title.encode()).decode() + "?="
     try:
         urllib.request.urlopen(urllib.request.Request(NTFY, data=body.encode(), headers={
             "Title": title, "Priority": str(prio), "Tags": "warning"}), timeout=10).read()
@@ -68,149 +108,83 @@ def alert(st, key, title, body, prio=4):
         log(f"ntfy failed: {e}")
 
 
-def spawn(args, out, pidfile=None):
-    f = open(out, "a")
-    p = subprocess.Popen(["setsid", "uv", "run", "python", "-u", *args], cwd=HERE, env=env(), stdout=f, stderr=f,
-                         stdin=subprocess.DEVNULL)
-    if pidfile:
-        open(pidfile, "w").write(f"pid {p.pid}\n")
-    return p.pid
+def queue_pending():
+    sys.path.insert(0, HERE)
+    import subs_queue
+    tried = json.load(open(subs_queue.TRIED)) if os.path.exists(subs_queue.TRIED) else {}
+    return [p for _, p in subs_queue.unfiltered() if tried.get(p, 0) < 2]
 
 
-def dbz_status():
-    lines = [json.loads(l) for l in open(f"{HERE}/dbz_castellano.jsonl")] if os.path.exists(f"{HERE}/dbz_castellano.jsonl") else []
-    ok = {l["id"] for l in lines if l["status"] == "ok"}
-    failed = sum(l["status"] == "FAILED" for l in lines)
-    last = os.path.getmtime(f"{HERE}/dbz_castellano.jsonl") if lines else 0
-    return len(ok), failed, last
-
-
-def dbz_left():
-    """Episodes that still have a second Spanish track (a re-plan; ~5-10 min of probing, so only when idle)."""
-    r = sh(["uv", "run", "python", "dbz_castellano.py"], cwd=HERE, env=env())
-    m = re.search(r"\{'name': (\d+), 'order': (\d+)", r.stdout)
-    return int(m.group(1)) + int(m.group(2)) if m else None
-
-
-def pid_of(name):
-    try:
-        return open(f"{OUT}/{name}.pid").read().split()[-1]
-    except OSError:
-        return None
+def job_done(name, st):
+    if name == "queue":
+        return bool(st["done"].get("queue")) or not queue_pending()
+    out = f"{OUT}/night_variant.out"
+    return bool(st["done"].get("variant")) or (os.path.exists(out) and "== verdicts" in open(out).read()[-600:])
 
 
 def cycle(st):
-    now = time.time()
-    notes = []
-    # ---- service
-    active = sh(["systemctl", "--user", "is-active", "media-manager"], timeout=30).stdout.strip()
-    main = sh(["systemctl", "--user", "show", "media-manager", "-p", "ActiveEnterTimestampMonotonic", "--value"],
-              timeout=30).stdout.strip()
-    if active != "active":
-        if now - st["svc_restart_at"] > 900:
-            st["svc_restart_at"] = now
-            sh(["systemctl", "--user", "restart", "media-manager"], timeout=60)
-            alert(st, "svc", "media-manager caído", "El servicio no estaba activo; lo reinicié.")
-            notes.append("service was down: restarted")
-        else:
-            alert(st, "svc2", "media-manager sigue caído", "Reinicié hace poco y no levanta; mira server.log.", 5)
-    elif st.get("svc_start") not in (None, main) and st["phase"] >= 2:
-        # restarted by someone: the in-process subtitle queue is gone, re-post what is left (idempotent)
-        spawn(["subs_queue.py", "--run"], f"{OUT}/subs_queue.out")
-        notes.append("service restarted: subs_queue re-posted")
-    st["svc_start"] = main
-
-    # ---- phase 1: DBZ
-    ok, failed, last = dbz_status()
-    pid = pid_of("dbz_run")
-    if st["phase"] == 1:
-        if failed - st["failed_seen"] >= 3:
-            if alive(pid):
-                sh(["pkill", "-TERM", "-P", str(pid)])
-                os.kill(int(pid), 15)
-            alert(st, "dbzfail", "DBZ detenido", f"{failed - st['failed_seen']} fallos de verificación seguidos: paré el remux. Nada se borró sin verificar.", 5)
-            st["phase"] = 0
-        elif alive(pid):
-            if last and now - last > 5400:
-                alert(st, "dbzstall", "DBZ sin avance", "No hay episodios nuevos desde hace más de 90 min.")
-            notes.append(f"DBZ running: {ok} episodes done")
-        else:
-            left = dbz_left()
-            if left == 0:
-                st["phase"] = 2
-                alert(st, "dbzdone", "DBZ terminado", f"{ok} episodios sin castellano. Sigo con metadata, sidecars y variante.", 3)
-            elif st["dbz_restarts"] < 3:
-                st["dbz_restarts"] += 1
-                spawn(["dbz_castellano.py", "--run"], f"{OUT}/dbz_run.out", f"{OUT}/dbz_run.pid")
-                alert(st, f"dbzrestart{st['dbz_restarts']}", "DBZ relanzado", f"El proceso había muerto con {left} pendientes; reintento {st['dbz_restarts']}/3.")
-                notes.append("DBZ died: relaunched")
-            else:
-                alert(st, "dbzgiveup", "DBZ no avanza", f"Murió 3 veces con {left} pendientes. Lo dejo parado.", 5)
-                st["phase"] = 0
-        # stale temp files from a dead run
-        if not alive(pid_of("dbz_run")):
-            for d, _, fs in os.walk(DBZ_DIR):
-                for f in fs:
-                    p = os.path.join(d, f)
-                    if f.endswith(".castfix.mkv") and now - os.path.getmtime(p) > 7200:
-                        os.remove(p)
-                        notes.append(f"removed stale {f[:40]}")
-
-    # ---- phase 2
-    if st["phase"] == 2:
-        if not st.get("metafix_done"):
-            r = sh(["uv", "run", "python", "-u", "meta_fix.py", "--run"], cwd=HERE, env=env())
-            open(f"{OUT}/metafix_dbz.out", "w").write(r.stdout + r.stderr)
-            st["metafix_done"] = True
-            alert(st, "metafix", "Metadata de DBZ lista", (re.findall(r"\d+ edited.*", r.stdout) or ["sin resumen"])[-1], 3)
-        if not st.get("queue_started"):
-            spawn(["subs_queue.py", "--run"], f"{OUT}/subs_queue.out")
-            spawn(["subs_variant_pass.py"], f"{OUT}/variant_pass.out", f"{OUT}/variant_pass.pid")
-            st["queue_started"] = st["variant_started"] = True
-            alert(st, "phase2", "Cola nocturna en marcha", "Filtro de sidecars y pasada latino/castellano arrancados.", 3)
-        elif not alive(pid_of("variant_pass")) and not st.get("variant_done"):
-            tail = open(f"{OUT}/variant_pass.out").read()[-400:] if os.path.exists(f"{OUT}/variant_pass.out") else ""
-            if "== verdicts" in tail:
-                st["variant_done"] = True
-                alert(st, "variantdone", "Pasada latino/castellano terminada", tail.strip().splitlines()[-1][:180], 3)
-            elif st.get("variant_restarts", 0) < 2:
-                st["variant_restarts"] = st.get("variant_restarts", 0) + 1
-                spawn(["subs_variant_pass.py"], f"{OUT}/variant_pass.out", f"{OUT}/variant_pass.pid")
-                notes.append("variant pass died: relaunched")
-
-    # ---- disk
-    free = shutil.disk_usage("/srv/storage").free / 1e9
+    now, notes = time.time(), []
+    if not mounted():
+        for n, _ in JOBS:
+            stop(n)
+        alert(st, "mount", "Disco de la biblioteca no montado",
+              "/srv/storage no está montado: paré las colas nocturnas y no lanzo nada hasta que vuelva.", 5)
+        return {"mounted": False, "notes": ["DISK NOT MOUNTED: all jobs stopped"]}
+    st["alerts"].pop("mount", None)
+    active = subprocess.run(["systemctl", "--user", "is-active", "media-manager"], capture_output=True, text=True,
+                            timeout=30).stdout.strip()
+    if active != "active" and now - st["svc_restart_at"] > 900:
+        st["svc_restart_at"] = now
+        subprocess.run(["systemctl", "--user", "restart", "media-manager"], timeout=60)
+        alert(st, "svc", "media-manager caído", "El servicio no estaba activo; lo reinicié.")
+        notes.append("service was down: restarted")
+    window, today = in_window(), time.strftime("%F")
+    want = next((n for n, _ in JOBS if not job_done(n, st)), None)
+    for name, args in JOBS:
+        running = alive(pid_of(name))
+        if name == want and window:
+            if not running:
+                n = st["restarts"].get(f"{name}:{today}", 0)
+                if n < 3:                                    # first start + at most two relaunches per night
+                    st["restarts"][f"{name}:{today}"] = n + 1
+                    start(name, args)
+                    notes.append(f"{name} started" if n == 0 else f"{name} relaunched ({n}/2)")
+                else:
+                    alert(st, f"giveup:{name}", f"Cola nocturna {name} no avanza",
+                          "Murió 3 veces esta noche; la dejo parada hasta mañana.")
+        elif running:
+            stop(name)
+            notes.append(f"{name} stopped ({'window closed' if not window else 'another job has priority'})")
+    if want is None:
+        alert(st, "alldone", "Colas nocturnas terminadas", "Sidecars y pasada latino/castellano completos.", 3)
+    free = shutil.disk_usage(MOUNT).free / 1e9
     if free < 100:
-        alert(st, "disk", "Poco disco libre", f"Quedan {free:.0f} GB en /srv/storage.", 5)
-    return ok, failed, active, free, notes
+        alert(st, "disk", "Poco disco libre", f"Quedan {free:.0f} GB en {MOUNT}.", 5)
+    return {"mounted": True, "service": active, "window": window, "want": want, "free": free, "notes": notes}
 
 
-def report(st, ok, failed, active, free, notes):
-    subs = sh(["sh", "-c", f"grep -c '^\\[subs\\]' {HERE}/server.log"]).stdout.strip()
+def report(st, r):
+    pend = len(queue_pending()) if r.get("mounted") else "?"
     vp = ""
-    if os.path.exists(f"{OUT}/variant_pass.out"):
-        vp = open(f"{OUT}/variant_pass.out").read().strip().splitlines()[-1:] or [""]
-        vp = vp[0][:120]
+    if os.path.exists(f"{OUT}/night_variant.out"):
+        vp = (open(f"{OUT}/night_variant.out").read().strip().splitlines() or [""])[-1][:110]
     open(REPORT, "w").write(
         f"# Informe nocturno ({time.strftime('%F %T')})\n\n"
-        f"- fase: {st['phase']} (1 = DBZ, 2 = cola, 0 = parado por seguridad)\n"
-        f"- DBZ: {ok} episodios hechos, {failed} fallos de verificación, {st['dbz_restarts']} relanzamientos\n"
-        f"- servicio media-manager: {active}\n- disco libre: {free:.0f} GB\n"
-        f"- líneas [subs] en server.log: {subs}\n- última línea de la pasada de variante: {vp}\n"
-        f"- avisos enviados: {sorted(st['alerts'])}\n- este ciclo: {notes or 'sin novedades'}\n")
+        f"- disco montado: {r.get('mounted')} | servicio: {r.get('service')} | libre: {r.get('free', 0):.0f} GB\n"
+        f"- ventana {WINDOW} abierta ahora: {r.get('window')} | trabajo en turno: {r.get('want')}\n"
+        f"- sidecars pendientes: {pend}\n- última línea de la pasada de variante: {vp}\n"
+        f"- avisos enviados: {sorted(k for k in st['alerts'])}\n- este ciclo: {r.get('notes') or 'sin novedades'}\n")
 
 
 if __name__ == "__main__":
-    st = load()
-    st["failed_seen"] = st.get("failed_seen", dbz_status()[1]) if os.path.exists(STATE) else dbz_status()[1]
-    once = "--once" in sys.argv
+    st, once = load(), "--once" in sys.argv
     if not once:
-        alert(st, "start", "Supervisor nocturno activo", "Vigilo DBZ, el servicio y la cola. Informe en /var/tmp/overnight_report.md", 2)
+        alert(st, "start", "Supervisor nocturno activo", f"Ventana {WINDOW}, un trabajo cada vez, comprueba el montaje.", 2)
     while True:
         try:
-            res = cycle(st)
-            report(st, *res)
-        except Exception as e:                          # a supervisor that dies is worse than a noisy one
+            r = cycle(st)
+            report(st, r)
+        except Exception as e:                              # a supervisor that dies is worse than a noisy one
             log(f"cycle error: {e!r}")
         json.dump(st, open(STATE, "w"))
         if once:

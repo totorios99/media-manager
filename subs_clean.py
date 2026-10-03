@@ -100,7 +100,7 @@ def measure(media, srt):
     tool, and its output file is discarded. Detecting speech by audio energy by hand
     does not work (The Hunt: four windows at the search limit, flipping sign)."""
     out = subprocess.run(["nice", "-n", "10", "uvx", "ffsubsync", media, "-i", srt, "-o", os.devnull, "--gss"],
-                         capture_output=True, text=True, timeout=900)
+                         capture_output=True, text=True, timeout=4 * 3600)  # a 30 GB film is ~14 min of USB 2.0 per pass, and there are up to three passes
     log = out.stdout + out.stderr
     off = re.findall(r"offset seconds: (-?[\d.]+)", log)
     fac = re.findall(r"scale factor: (-?[\d.]+)", log)

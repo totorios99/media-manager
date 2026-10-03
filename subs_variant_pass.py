@@ -84,10 +84,14 @@ def candidates(conn):
     for (kind, id_), tr in out.items():
         if kind == "movie":
             m = conn.execute("SELECT folder, file, size_bytes FROM movies WHERE id=?", (id_,)).fetchone()
+            if not m or not m["file"]:                 # orphan track rows from a replaced or deleted title
+                continue
             path, group, size = os.path.join(la.MOVIES, m["folder"], m["file"]), ("movie", id_), m["size_bytes"]
         else:
             e = conn.execute("SELECT s.id sid, s.folder sf, e.folder ef, e.file, e.season, e.size_bytes FROM episodes e "
                              "JOIN shows s ON s.id=e.show_id WHERE e.id=?", (id_,)).fetchone()
+            if not e or not e["file"]:
+                continue
             path = os.path.join(la.SHOWS, e["sf"], e["ef"], e["file"])
             sig = tuple((n, c) for _, n, c, _ in sorted(tr))
             group, size = ("ep", e["sid"], e["season"], sig), e["size_bytes"]

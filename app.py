@@ -1991,6 +1991,10 @@ def _notify(title, body, tags="", priority=3):
     """Fire-and-forget ntfy publish. Never raises: a notification failing must
     not fail the job it is reporting on."""
     try:
+        # HTTP headers are latin-1 on the wire and ntfy reads them as UTF-8, so "Subtítulo" arrived as
+        # mojibake; ntfy accepts RFC 2047 encoded-words, which are pure ASCII
+        if not title.isascii():
+            title = "=?UTF-8?B?" + base64.b64encode(title.encode("utf-8")).decode() + "?="
         req = urllib.request.Request(
             NTFY_URL, data=body.encode("utf-8"),
             headers={"Title": title, "Tags": tags, "Priority": str(priority)})
@@ -2125,6 +2129,20 @@ def _host_subtitle_path(p):
     return p
 
 
+_SUBFIX_NOTES = {"last": 0.0, "held": 0}
+
+
+def _notify_subs_burst(title, body):
+    """The subtitle filter can fail on hundreds of files at once (a missing disk made ~100 in minutes and
+    ntfy answered 429). At most one notification per 10 minutes, carrying how many were held back."""
+    now = time.time()
+    if now - _SUBFIX_NOTES["last"] < 600:
+        _SUBFIX_NOTES["held"] += 1
+        return
+    held, _SUBFIX_NOTES["held"], _SUBFIX_NOTES["last"] = _SUBFIX_NOTES["held"], 0, now
+    _notify(title, body + (f" (+{held} más desde el último aviso)" if held else ""), tags="warning", priority=3)
+
+
 _SUBFIX_LOCK = threading.Lock()      # ffsubsync decodes a whole episode: one at a time
 _SUBFIX_BUSY = set()
 
@@ -2178,10 +2196,10 @@ def _fix_subtitle_job(srt):
             print(f"[subs] {name}: {r['status']} ads={r['ads']} {r['action']} "
                   f"final={r['offset']:+.2f}s/{r['factor']:.4f} written={r['written']}", flush=True)
             if r["status"] != "ok":
-                _notify("Subtítulo rechazado", f"{name}: {r['action']}", tags="warning", priority=3)
+                _notify_subs_burst("Subtítulo rechazado", f"{name}: {r['action']}")
         except Exception as e:
             print(f"[subs] {srt!r}: {e}", flush=True)
-            _notify("Subtítulo sin procesar", f"{os.path.basename(srt)}: {e}", tags="warning", priority=3)
+            _notify_subs_burst("Subtítulo sin procesar", f"{os.path.basename(srt)}: {e}")
         finally:
             _SUBFIX_BUSY.discard(srt)
 

@@ -53,7 +53,7 @@ def decide(info):
 
 
 def hashes(path, ids):
-    cmd = ["ffmpeg", "-v", "error", "-nostdin", "-i", path]
+    cmd = ["ionice", "-c2", "-n7", "ffmpeg", "-v", "error", "-nostdin", "-i", path]
     for i in ids:
         cmd += ["-map", f"0:{i}"]
     out = subprocess.run(cmd + ["-c", "copy", "-f", "streamhash", "-hash", "md5", "-"],
@@ -71,7 +71,7 @@ def process(path, ep_id, conn):
     tracks = info["tracks"]
     kept_ids = [t["id"] for t in tracks if t["type"] != "audio" or t["id"] in keep_audio]
     tmp = os.path.join(os.path.dirname(path), "." + os.path.basename(path) + ".castfix.mkv")
-    cmd = ["nice", "-n", "10", "mkvmerge", "-o", tmp]
+    cmd = ["ionice", "-c2", "-n7", "nice", "-n", "10", "mkvmerge", "-o", tmp]
     if props.get("title"):
         cmd += ["--title", props["title"]]
     cmd += ["--audio-tracks", ",".join(map(str, keep_audio))]

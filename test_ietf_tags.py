@@ -47,5 +47,23 @@ def test_real_files_keep_es_419():
     print("test_real_files_keep_es_419 OK")
 
 
+def test_remux_with_es_419_still_verifies():
+    """Regression: writing es-419 made inspect_file report 'spa-mx' and verify_output (expecting 'spa') failed
+    the Hobbit's remux at 100%, leaving the film in 'error'."""
+    import jobs
+    d = tempfile.mkdtemp()
+    base = os.path.join(d, "b.mkv")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=duration=1", "-f", "lavfi", "-i",
+                    "color=c=black:s=64x64:d=1", "-shortest", "-c:a", "aac", "-c:v", "libx264", base], check=True)
+    rows = [row("video", 0, "eng", "eng"), row("audio", 1, "spa-mx", "spa", "Latino")]
+    rows[0]["out_default"], rows[1]["out_default"] = 1, 1
+    out = os.path.join(d, "o.mkv")
+    subprocess.run(commands.build_mkvmerge_remux(rows, "T (2000)", base, out), check=True, capture_output=True)
+    ok, msg = jobs.verify_output(out, rows, source_path=base)
+    assert ok, msg
+    shutil.rmtree(d)
+    print("test_remux_with_es_419_still_verifies OK")
+
+
 if __name__ == "__main__":
-    test_lang_tag_only_for_spanish_variants(); test_builders_carry_the_tag(); test_real_files_keep_es_419()
+    test_lang_tag_only_for_spanish_variants(); test_builders_carry_the_tag(); test_real_files_keep_es_419(); test_remux_with_es_419_still_verifies()

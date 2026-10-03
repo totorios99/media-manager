@@ -251,7 +251,9 @@ def verify_output(out_path, kept_tracks, source_duration=None, source_path=None,
     for e, g in zip(exp_sorted, got_sorted):
         if e["type"] != g["type"]:
             return False, f"type mismatch: expected {e['type']} got {g['type']}"
-        if e["out_lang"] and g["lang"] != e["out_lang"]:
+        # inspect_file reports Spanish variants as spa-mx / spa-es (it reads the BCP 47 tag); the config
+        # holds the bare ISO code the track is written with, so compare the base codes
+        if e["out_lang"] and g["lang"].split("-")[0] != e["out_lang"]:
             return False, f"lang mismatch on {e['type']}: expected {e['out_lang']} got {g['lang']}"
         if bool(e["out_default"]) != bool(g["default_flag"]):
             return False, f"default flag mismatch on {e['type']}"

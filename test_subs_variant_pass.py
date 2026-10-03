@@ -24,13 +24,18 @@ def test_short_text_is_unknown_even_without_markers():
     assert sv.verdict("Hola. ¿Cómo estás? Ustedes están bien.")["verdict"] == "unknown"
 
 
-def test_one_or_two_markers_alone_do_not_decide():
-    r = sv.verdict(FILLER + " Coge eso, por favor.")
+def test_one_or_two_strong_markers_alone_do_not_decide():
+    r = sv.verdict(FILLER + " Estáis aquí.")
     assert r["verdict"] == "unknown", r
 
 
+def test_coger_alone_never_makes_castellano():           # Mexican crime/comedy dialogue is full of it
+    r = sv.verdict(FILLER + " Coge eso. Cogió el carro. Lo cogieron. Cogeré las llaves. Coger es feo.")
+    assert r["verdict"] == "latino" and r["struct"] == 0 and r["weak"] >= 4, r
+
+
 def test_markers_plus_castellano_vocabulary_decide():
-    r = sv.verdict(FILLER + " Coge el coche, tío. Vale, joder, qué guay.")
+    r = sv.verdict(FILLER + " Estáis en el coche, tío. Vale, joder, qué guay.")
     assert r["verdict"] == "castellano", r
 
 

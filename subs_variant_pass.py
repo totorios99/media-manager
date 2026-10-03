@@ -12,7 +12,8 @@ choice -- vosotros forms (habéis, sois, mirad), the pronoun `os` (os he dicho),
 Spanish translator cannot avoid them even when writing neutral; a Latin American one never produces them.
 Vocabulary only corroborates (a 'papa' also matches "el Papa"; `piso`/`pasta` exist on both sides).
 
-  castellano  >= 3 structural markers, or 1-2 plus >= 3 castellano-only words
+  castellano  >= 3 STRONG markers, or 1-2 strong plus >= 3 castellano-only words or >= 3 weak markers
+              (weak = coger, leísmo: they never decide alone)
   latino      0 structural markers over >= 3000 words (American Psycho: 0 of 4 in 1325 lines settled it)
   unknown     anything else (too little text, or a handful of markers that could be a quotation)
 
@@ -28,12 +29,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "subs_variant_pass.json")
 TEXT_CODEC = re.compile(r"srt|subrip|substation|ass|text", re.I)
 
-CAST_STRUCT = re.compile(
+CAST_STRUCT = re.compile(          # strong: grammar a Latin American translator does not produce
     r"\b(?:vosotros|vosotras|vuestr[oa]s?|sois)\b"
     r"|\b(?:ten|hab|quer|pod|sab|ver|ser|est|dec|hac|tra|sal|vol|dej|ven|segu)(?:éis|áis)\b"
     r"|\b(?:mirad|escuchad|venid|esperad|callaos|sentaos|dejad|volved|salid|tomad|dadme|decidme|pasad|entrad|seguid|vamonos)\b"
-    r"|\bos (?:he|ha|han|hemos|voy|vais|lo|la|los|las|dije|digo|quiero|pido|ruego|aviso|prometo|juro)\b"
-    r"|\bcog(?:er|e|í|ió|eré|emos|en|ido|ía)\b"
+    r"|\bos (?:he|ha|han|hemos|voy|vais|lo|la|los|las|dije|digo|quiero|pido|ruego|aviso|prometo|juro)\b", re.I)
+CAST_WEAK = re.compile(            # weak: `coger` is vulgar in Mexico and constant in crime/comedy dialogue (Club de
+    r"\bcog(?:er|e|í|ió|eré|emos|en|ido|ía)\b"       # Cuervos, The Sopranos gave 15 and 8 false castellano tracks)
     r"|\ble (?:vi|vimos|conocí|conozco|veo|vio|llamé)\b", re.I)
 CAST_LEX = re.compile(r"\b(?:ordenador(?:es)?|coches?|piso|alquil(?:ar|o|a)|joder|coño|gilipollas|hostia|chaval(?:es)?|"
                       r"currar|guay|tronco|tío|tía|mola|vale)\b", re.I)
@@ -60,13 +62,14 @@ def plain_text(path):
 def verdict(txt):
     words = len(re.findall(r"\w+", txt))
     cs, cl, ll = len(CAST_STRUCT.findall(txt)), len(CAST_LEX.findall(txt)), len(LAT_LEX.findall(txt))
-    if cs >= 3 or (cs >= 1 and cl >= 3):
+    cw = len(CAST_WEAK.findall(txt))
+    if cs >= 3 or (cs >= 1 and (cl >= 3 or cw >= 3)):
         v = "castellano"
     elif cs == 0 and words >= 3000:
         v = "latino"
     else:
         v = "unknown"
-    return {"verdict": v, "words": words, "struct": cs, "cast_lex": cl, "lat_lex": ll,
+    return {"verdict": v, "words": words, "struct": cs, "weak": cw, "cast_lex": cl, "lat_lex": ll,
             "examples": [m.group(0).lower() for m in CAST_STRUCT.finditer(txt)][:4]}
 
 
@@ -128,8 +131,8 @@ def main():
             todo += [(1, r[4], r) for r in members]
         else:
             n = len(members)
-            sample = {members[0], members[n // 2], members[-1]} if n > 3 else set(members)
-            todo += [(0, r[4], r) for r in members if r in sample]
+            pick = {0, n // 2, n - 1}                    # first, middle, last (all of them when n <= 3)
+            todo += [(0, r[4], r) for i, r in enumerate(members) if i in pick]
     todo.sort(key=lambda x: (x[0], x[1]))
     print(len(rows), "files,", len(todo), "to measure first (episodes sampled 3 per group; movies one by one)", flush=True)
     for _, size, (kind, id_, group, path, sz, tracks) in todo:
@@ -161,11 +164,20 @@ def main():
     summary(done)
 
 
+def effective(t):
+    """The verdict to trust. Results measured before the strong/weak split carry no `weak` field: a castellano
+    verdict whose sampled evidence is only the coger family cannot be told from a Mexican translation."""
+    if t.get("verdict") == "castellano" and "weak" not in t:
+        if t["examples"] and all(re.match(r"cog", e) for e in t["examples"]):
+            return "review"
+    return t.get("verdict", "error")
+
+
 def summary(done):
     c = collections.Counter()
     for v in done.values():
         for t in v["tracks"].values():
-            c[(v["kind"], t.get("verdict", "error"))] += 1
+            c[(v["kind"], effective(t))] += 1
     print("== verdicts:", dict(c))
 
 

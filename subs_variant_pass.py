@@ -173,6 +173,37 @@ def effective(t):
     return t.get("verdict", "error")
 
 
+def report(conn, done):
+    """Verdict per (group, Spanish text track position). A group inherits a verdict when every measured member that
+    decides (latino/castellano) agrees; `review` counts as undecided. -> list of rows, also printed."""
+    by_path = {v["path"]: v for v in done.values()}
+    groups = collections.defaultdict(list)
+    for r in candidates(conn):
+        groups[r[2]].append(r)
+    out = []
+    for g, members in groups.items():
+        npos = len(members[0][5])
+        for pos in range(npos):
+            vs, ex, words = collections.Counter(), [], 0
+            for kind, id_, _, path, sz, tracks in members:
+                v = by_path.get(path)
+                if not v or pos >= len(tracks):
+                    continue
+                t = v["tracks"].get(str(tracks[pos][0])) or v["tracks"].get(tracks[pos][0]) or {}
+                e = effective(t) if t else "error"
+                vs[e] += 1
+                words += t.get("words", 0)
+                ex += t.get("examples", [])
+            deciding = {k for k in vs if k in ("latino", "castellano")}
+            verdict = deciding.pop() if len(deciding) == 1 else ("conflict" if deciding else "unknown")
+            m0 = members[0]
+            label = os.path.basename(m0[3]) if g[0] == "movie" else f"{m0[3].split('/')[4]} S{g[2]:02d}"
+            out.append({"kind": g[0], "label": label, "track": m0[5][pos][1] or m0[5][pos][2], "pos": pos,
+                        "verdict": verdict, "files": len(members), "measured": sum(vs.values()),
+                        "votes": dict(vs), "words": words, "examples": sorted(set(ex))[:5]})
+    return out
+
+
 def summary(done):
     c = collections.Counter()
     for v in done.values():
@@ -182,6 +213,15 @@ def summary(done):
 
 
 if __name__ == "__main__":
+    if "--report" in sys.argv:
+        c = sqlite3.connect(os.path.join(HERE, "media.db"))
+        c.row_factory = sqlite3.Row
+        rows = report(c, json.load(open(OUT)))
+        json.dump(rows, open(os.path.join(HERE, "subs_variant_report.json"), "w"), ensure_ascii=False, indent=1)
+        for r in sorted(rows, key=lambda r: (r["kind"], r["label"], r["pos"])):
+            print(f"{r['verdict']:10} {r['kind']:7} {r['label'][:45]:45} {r['track'][:22]:22} files={r['files']:<3} "
+                  f"measured={r['measured']:<3} {r['votes']} {r['examples'][:3]}")
+        sys.exit()
     if "--apply" in sys.argv:
         sys.exit("apply is a separate, reviewed step: see the report first")
     main()

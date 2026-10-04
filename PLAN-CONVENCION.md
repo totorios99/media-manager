@@ -50,8 +50,9 @@ como ya estimaba el plan de subtítulos. Bloqueado por hardware (§6).
 - Filtro de subtítulos: `subs_clean.py` + `POST /api/subs/fix` (quita publicidad,
   corrige desfase fijo o velocidad estándar, rechaza el resto, guarda `.srt.orig`).
   Backlog: 28 de 30 `.srt` corregidos; 2 rechazados con motivo.
-- Capítulos de Dragon Ball Super (`chapters_clean.py`): 131 episodios con `OP/ED/Preview`;
-  Jellyfin genera ya Intro/Outro/Preview correctos en 130 (el 131 no tiene intro ni avance).
+- Capítulos de Dragon Ball Super (`chapters_clean.py`): 131 episodios con `OP/Episodio/ED/Preview`
+  (2026-10-04). El capítulo tras el OP no puede quitarse: Jellyfin guarda los capítulos sin fin y el
+  Intro dura hasta el siguiente; sin él el salto llegaba al ED. 131/131 con segmentos, ningún Intro > 150 s.
 - Importaciones: escaneo de Jellyfin al importar y avisos "Ya disponible / No disponible".
 - Faltantes: búsquedas en curso con homelab (§5).
 
@@ -78,14 +79,17 @@ Dos herramientas, porque la primera no alcanza:
   (propedit) y `--language id:es-419` (remux), con test sobre un mkv real.
   `meta_fix.py` etiqueta es-419/es-ES donde el **nombre** de la pista ya lo dice (sin leer el
   contenido).
-- **Pendiente:** `subs_variant.py embedded` de noche, para el español de texto sin
-  evidencia en el nombre. Lee cada fichero entero (mkvextract recorre todos los clusters):
-  horas de disco USB, así que va después de DBZ y no junto a otras cargas.
+- **En marcha (2026-10-04):** `subs_variant_pass.py` (supervisor `overnight.py`), para el español
+  de texto sin evidencia en el nombre. Mide y escribe `subs_variant_pass.json`; no etiqueta nada.
+  Plan de cierre en §9, P1.
 
 ### F3. Filtro de entrada en producción (depende de una decisión)
 - **Activo desde 2026-10-02**: Bazarr llama a `/config/mm-subs-fix.sh {{subtitles}}` →
   `POST 172.17.0.1:8500/api/subs/fix` (mapa `/data`→`/srv/storage`; el script sale siempre
-  con 0 en 10 s). Sin comprobar aún: la primera línea `[subs]` que venga de Bazarr y no de mí.
+  con 0 en 10 s). Comprobado: `server.log` tiene POST desde 172.17.0.2 (el contenedor de Bazarr).
+  El backlog de sidecars sin filtrar (91) terminó el 2026-10-04; 4 rechazados por velocidad no
+  estándar (otro corte): Indiana Jones and the Last Crusade 1,078, The Devil's Advocate 1,100,
+  Underworld 0,977, The Lord of the Rings: The Return of the King 1,099.
 - El perfil 1 de Bazarr ahora pide también **inglés** completo (el estándar lo exige):
   faltan 43 películas y 141 episodios. Bazarr los busca cada 6 h y cada uno pasa por el
   filtro de uno en uno. Coste: los episodios son rápidos, pero cada película obliga a
@@ -183,13 +187,84 @@ ligero y se hace ya.
 
 **Resueltas (Antonio, 2026-10-02):**
 1. The Office: el default de audio pasa al original, inglés (hecho, 193 episodios).
-2. DBZ: se quita el castellano y el Latino queda como default (en marcha,
-   `dbz_castellano.py`); el episodio 199 no tiene Latino y no se toca.
+2. DBZ: se quita el castellano y el Latino queda como default (hecho, 288/288 con hash
+   por stream, `dbz_castellano.py`); el episodio 199 no tiene Latino y no se toca.
 3. Subtítulos externos de Bazarr: se incrustan en F6.
 4. Bazarr post-procesado: activo (F3).
 5. Sin formato personalizado ni perfil de audio Latino en Radarr/Sonarr.
 6. Default de audio: TrueHD/Atmos solo si es la única pista del idioma; si no, el mejor
    codec con mayor compatibilidad.
 
-**Abiertas:** ninguna por ahora. Siguiente decisión probable: cuándo lanzar la pasada de
-variante de subtítulos (horas de disco) y la señal del cable SATA para F6.
+**Resueltas (Antonio, 2026-10-03):**
+7. F6 empieza sin esperar al cable SATA, pero solo cuando acaben la cola de sidecars y la pasada de
+   variante **y** Transmission esté en reposo.
+
+**Abiertas** (ver §9): D1 reordenar o no los episodios que solo cambian de orden; D2 qué pasa con
+el sidecar después de incrustarlo; D3 revisión de los veredictos latino/castellano; D4 herramienta de OCR.
+
+## 9. Plan de implementación de lo pendiente (2026-10-04)
+
+Orden: P1 → P2 (en paralelo P4) → P3 → F6 películas. Cada paso deja su comprobación medida.
+
+### P1. Cerrar F2: etiquetas es-419 / es-ES (propedit, sin remux)
+Depende de: que termine `subs_variant_pass.py` (268 de 280 muestras medidas el 2026-10-04 10:15).
+1. `subs_variant_pass.py --report`: veredicto por grupo. Un grupo (serie, temporada, firma de
+   pistas) hereda el veredicto de sus muestras si todas las que deciden coinciden; los grupos solo
+   `unknown` y las películas `unknown` van a una lista aparte, sin etiqueta. Re-medir los veredictos
+   `review` (los de antes de la regla débil de `coger`).
+2. **D3:** Antonio revisa la tabla (serie/película, veredicto, nº de marcadores, ejemplos).
+3. `--apply` (hoy se niega a propósito): `mkvpropedit --edit track:<mkv_id+1> --set
+   language-ietf=es-419|es-ES`, el mismo selector que `meta_fix.py`; solo pistas con `spa` sin
+   variante; salta ficheros con job activo; valores anteriores en `subs_variant_apply.jsonl`;
+   `app._reinspect_in_place` para que la base vea la etiqueta.
+4. Después de cualquier tanda de propedit: esperar a que Jellyfin relea los ficheros y lanzar
+   "Media Segment Scan" (lección del 2026-10-03: editar un fichero le borra los segmentos).
+5. Comprobar: releer las etiquetas con `mkvmerge -J` y repetir `library_audit.py`; la fila "español
+   sin etiqueta de variante" debe bajar en lo etiquetado. Coste: segundos por fichero.
+Los subtítulos castellano que aparezcan no se quitan aquí: quitar pistas exige remux (P2).
+
+### P2. F6 en series (`f6_series.py`)
+Depende de: P1 (sin él no se sabe cuál de dos subtítulos españoles completos es el latino: DBZ
+tiene dos `spa` sin variante y `suggest_tracks` elegiría a ciegas), D1, D2 y Transmission en reposo.
+`f6_plan.py` (solo lee una copia de la base) da hoy: 1239 episodios; 698 con pistas que quitar
+(698 GB), 382 que solo cambian de orden o de default (325 GB), 159 conformes.
+1. **D1** (propuesta: no reescribir por orden). Para esos 382 basta `mkvpropedit` para el default;
+   el orden es cosmético en Jellyfin y cuesta 325 GB de escritura por un USB que se ha caído dos
+   veces. Con D1 = no, F6 series son ~700 GB, unas 11 h a 36 MB/s (estimación).
+2. Molde `dbz_castellano.py`, no `delete-original` (que renombra y pierde el título del episodio):
+   plan de `suggest_tracks` sobre la base → `commands.build_mkvmerge_remux` a un temporal oculto en
+   la misma carpeta → verificación: pistas y orden según el plan, duración ±0,1 s, flags de default,
+   etiquetas de idioma, **hash por stream** de todo lo conservado, capítulos idénticos → `fsync` →
+   `os.replace` con el mismo nombre → `_reinspect_in_place` → línea en `f6_series.jsonl`.
+3. Sidecars de series: solo hay 20 `.srt` (8 es-MX, 8 en, 4 hi); se incrustan los que pasaron el
+   filtro. **D2**: qué hacer con el sidecar después (Jellyfin mostraría la pista dos veces).
+   Propuesta: moverlo a `.recycle` (reversible); Bazarr lo volvería a bajar si falta, y el
+   barrido periódico (F4) lo incrustaría.
+4. Arranque: 1 episodio → revisión en Jellyfin (pistas, default, salto de intro) → una serie
+   pequeña (Club de Cuervos, 45) → el resto como trabajo 3 del supervisor, de uno en uno, con la
+   guardia de montaje y una guardia nueva: no arranca un episodio si algún `.part` de
+   `Downloads/incomplete` creció en los últimos 10 min.
+5. Tras cada serie: Jellyfin relee + "Media Segment Scan"; muestra de segmentos (Intro < 150 s).
+
+### P3. OCR de PGS → SRT (F4 y F6.3)
+Herramientas comprobadas: `tesseract` con `spa` y `eng`; no hay `pgsrip` ni `subtile-ocr`.
+1. **D4** (propuesta): probar `uvx pgsrip` (sin instalarlo en el proyecto, como `ffsubsync`);
+   si no da la calidad, decodificador propio del `.sup` (segmentos PCS/WDS/PDS/ODS) + tesseract.
+2. Prototipo con 3 películas (F&F6 ya probado a mano): extraer el PGS (lee el fichero entero,
+   de noche), OCR, limpieza (`l`/`I`, `¿¡`, cursivas), filtro `subs_clean` y medición `--gss`.
+3. Puerta de calidad: confianza media de tesseract y % de palabras en diccionario por encima de un
+   umbral que se fija con el prototipo; lo que no pase va a la lista nombrada de PGS que se quedan.
+4. Salida: SRT junto al vídeo, que F6 incrusta en lugar del PGS. Alcance: 157 películas y 211 episodios.
+
+### P4. F7 mantenimiento (código, sin disco pesado)
+- `library_audit.py --diff` contra la última auditoría y timer semanal de `systemd --user` (como
+  `bazarr-profile-batch.timer`); ntfy solo si sube el número de incumplimientos.
+- Comprobar si el import ya avisa "No disponible: <motivo>" cuando un título sale no conforme
+  (sin verificar hoy); si no, añadirlo al final del job.
+
+### Fuera de este repo (homelab / Antonio)
+- Los 4 sidecars rechazados: homelab los pone en la lista negra de Bazarr y busca otro; el filtro
+  verifica el nuevo.
+- Radarr "extra files" con `.srt` en espera; SubDL sin resultados (SUBTITLES-PLAN.md).
+- LIBRARY_STATE "Pendiente": cable SATA, Lat-Team, One-Punch Man S1 sin perfil de Bazarr, Dragon Ball
+  Super en un solo `Season 01`, peticiones rechazadas en Seerr.

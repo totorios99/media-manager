@@ -199,8 +199,14 @@ ligero y se hace ya.
 7. F6 empieza sin esperar al cable SATA, pero solo cuando acaben la cola de sidecars y la pasada de
    variante **y** Transmission esté en reposo.
 
-**Abiertas** (ver §9): D1 reordenar o no los episodios que solo cambian de orden; D2 qué pasa con
-el sidecar después de incrustarlo; D3 revisión de los veredictos latino/castellano; D4 herramienta de OCR.
+**Resueltas (Antonio, 2026-10-04):**
+8. D1: un episodio que solo difiere en orden o default **no se reescribe**; `mkvpropedit` corrige el default.
+9. D2: el sidecar incrustado se mueve a `/srv/storage/.recycle` (misma ruta relativa).
+10. D4: OCR con `uvx pgsrip`. Prueba con Death Note S01E05 (PGS español): 382 subtítulos en 9 s,
+    `¿?` 50/50 y `¡!` 5/5, un error visible (`cológueselo`); 4,7 % de palabras fuera de un vocabulario
+    hecho con los 144 `.es-MX.srt` de la biblioteca, frente a 3,9–7,3 % de cinco SRT buenos.
+
+**Abierta:** D3, revisión de los veredictos latino/castellano (P1).
 
 ## 9. Plan de implementación de lo pendiente (2026-10-04)
 
@@ -223,7 +229,9 @@ Depende de: que termine `subs_variant_pass.py` (268 de 280 muestras medidas el 2
    sin etiqueta de variante" debe bajar en lo etiquetado. Coste: segundos por fichero.
 Los subtítulos castellano que aparezcan no se quitan aquí: quitar pistas exige remux (P2).
 
-### P2. F6 en series (`f6_series.py`)
+### P2. F6 en series (`f6_series.py`, escrito el 2026-10-04 con tests; sin ejecutar sobre la biblioteca)
+Plan con la base de hoy (`f6_series.py` sin argumentos): 489 remux, 278 solo propedit, 254 conformes,
+**218 bloqueados** hasta P1 (DBZ 178, Club de Cuervos 25, Rick and Morty 8, BoJack 7); 18 sidecars a incrustar.
 Depende de: P1 (sin él no se sabe cuál de dos subtítulos españoles completos es el latino: DBZ
 tiene dos `spa` sin variante y `suggest_tracks` elegiría a ciegas), D1, D2 y Transmission en reposo.
 `f6_plan.py` (solo lee una copia de la base) da hoy: 1239 episodios; 698 con pistas que quitar

@@ -204,6 +204,47 @@ def report(conn, done):
     return out
 
 
+IETF = {"latino": "es-419", "castellano": "es-ES"}
+
+
+def tags(conn, done, spanish_original="es-419"):
+    """{path: {mkv_id: 'es-419'|'es-ES'}} from the reviewed rules (D3):
+    a group's agreed verdict covers every member; in a conflicting group only a file's own decisive verdict counts;
+    unknown gets no tag. A title whose ORIGINAL language is Spanish is not judged by its text: its subtitles transcribe
+    the dialogue, so a Spanish character's vosotros says nothing about the translator. They take `spanish_original`
+    (all such titles in this library are Mexican productions) or nothing when it is None."""
+    by_path = {v["path"]: v for v in done.values()}
+    orig = {}
+    for r in conn.execute("SELECT e.id, s.original_language ol FROM episodes e JOIN shows s ON s.id=e.show_id"):
+        orig[("episode", r["id"])] = r["ol"]
+    for r in conn.execute("SELECT id, original_language ol FROM movies"):
+        orig[("movie", r["id"])] = r["ol"]
+    groups = collections.defaultdict(list)
+    for r in candidates(conn):
+        groups[r[2]].append(r)
+    out = {}
+    for g, members in groups.items():
+        for pos in range(len(members[0][5])):
+            verdicts = []
+            for kind, id_, _, path, sz, tracks in members:
+                t = (by_path.get(path) or {}).get("tracks", {})
+                t = t.get(str(tracks[pos][0])) if pos < len(tracks) else None
+                verdicts.append(effective(t) if t else None)
+            decisive = {v for v in verdicts if v in IETF}
+            for (kind, id_, _, path, sz, tracks), own in zip(members, verdicts):
+                if pos >= len(tracks):
+                    continue
+                if orig.get((kind, id_)) == "es":
+                    tag = spanish_original
+                elif len(decisive) == 1:
+                    tag = IETF[next(iter(decisive))]
+                else:
+                    tag = IETF.get(own)
+                if tag:
+                    out.setdefault(path, {})[tracks[pos][0]] = tag
+    return out
+
+
 def summary(done):
     c = collections.Counter()
     for v in done.values():

@@ -22,7 +22,7 @@ def test_normal_episode():
         atom("00:21:20.000", "00:22:20.000", 'ED 10 - "70cm" por ROTTENGRAFFTY') + \
         atom("00:22:20.000", "00:22:50.000", "Adelanto") + "</EditionEntry></Chapters>"
     new, ch = cc.clean(xml)
-    assert names(new) == ["OP", "ED", "Preview"], names(new)
+    assert names(new) == ["OP", "Episodio", "ED", "Preview"], names(new)
     assert len(ch) == 5
     print("test_normal_episode OK")
 
@@ -47,6 +47,15 @@ def test_parte_chapters_are_dropped_in_any_position():
     print("test_parte_chapters_are_dropped_in_any_position OK")
 
 
+def test_the_part_after_the_op_stays_as_its_end_marker():
+    xml = "<Chapters>" + atom("00:00:00.000", "00:01:25.000", "OP 02 - x") + atom("00:01:25.000", "00:12:00.000", "Parte A") + \
+        atom("00:12:00.000", "00:21:00.000", "Parte B") + atom("00:21:00.000", "00:22:00.000", "ED 1 - y") + "</Chapters>"
+    new = cc.clean(xml)[0]
+    assert names(new) == ["OP", "Episodio", "ED"], names(new)
+    assert re.findall(r"<ChapterTimeStart>([\d:.]+)", new)[1] == "00:01:25.000"      # the OP ends where the old Parte A began
+    print("test_the_part_after_the_op_stays_as_its_end_marker OK")
+
+
 def test_nothing_to_do():
     xml = "<Chapters>" + atom("00:00:00.000", "00:10:00.000", "Epílogo") + "</Chapters>"
     assert cc.clean(xml) == (xml, [])
@@ -54,4 +63,4 @@ def test_nothing_to_do():
 
 
 if __name__ == "__main__":
-    test_normal_episode(); test_one_frame_intro_is_dropped(); test_mid_episode_op_is_not_an_intro(); test_parte_chapters_are_dropped_in_any_position(); test_nothing_to_do()
+    test_normal_episode(); test_one_frame_intro_is_dropped(); test_mid_episode_op_is_not_an_intro(); test_parte_chapters_are_dropped_in_any_position(); test_the_part_after_the_op_stays_as_its_end_marker(); test_nothing_to_do()

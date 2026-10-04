@@ -12,7 +12,9 @@ Rules (Dragon Ball Super, 131 episodes, measured):
   * chapter shorter than 1 s: dropped. 'Intro' at 0:00 (0 s, or one frame in eps 109-130)
     became an empty Intro segment on top of the real OP.
   * 'OP ...' -> 'OP', 'ED ...' -> 'ED', 'Adelanto' -> 'Preview'.
-  * 'Parte A/B/C': dropped (2026-10-03, Antonio). They match no skip pattern and only clutter the chapter menu.
+  * 'Parte A/B/C' are dropped (2026-10-03, Antonio), EXCEPT the one right after an OP/Tema, renamed 'Episodio':
+    Jellyfin keeps chapters as start times only, and the Intro segment ends where the next chapter starts. With
+    nothing after the OP the skip button jumped to the ED (seen on S01E40, segment 0-1295 s).
   * an 'OP' that starts after 5 minutes is an insert song, not an opening (ep 131 plays
     it at 18:30): renamed 'Tema', or its skip button would jump into the climax.
 """
@@ -31,6 +33,7 @@ def secs(t):
 def clean(xml):
     """-> (new_xml, [change descriptions])"""
     changes = []
+    prev = [""]                      # name of the last chapter kept, in file order
 
     def one(m):
         atom = m.group(0)
@@ -42,8 +45,13 @@ def clean(xml):
             changes.append(f"drop sub-second {name!r}")
             return ""
         if re.fullmatch(r"Parte [A-Z]", name):
-            changes.append(f"drop {name!r}")
-            return ""
+            if prev[0] not in ("OP", "Tema"):
+                changes.append(f"drop {name!r}")
+                return ""
+            name_new = "Episodio"    # Jellyfin chapters carry a start and no end: the segment of an OP lasts until
+            changes.append(f"{name!r} -> {name_new!r}")   # the NEXT chapter starts, so something must follow it
+            prev[0] = name_new
+            return atom.replace(name_m.group(0), f"<ChapterString>{name_new}</ChapterString>")
         new = name
         if re.match(r"OP\b", name):
             new = "Tema" if start > 300 else "OP"
@@ -54,6 +62,7 @@ def clean(xml):
         if new != name:
             changes.append(f"{name[:30]!r} -> {new!r}")
             atom = atom.replace(name_m.group(0), f"<ChapterString>{new}</ChapterString>")
+        prev[0] = new
         return atom
 
     out = ATOM.sub(one, xml)
@@ -68,15 +77,17 @@ def main(show, apply):
     files = sorted(glob.glob(os.path.join(show, "Season */*.mkv")))
     todo = bad = 0
     for f in files:
-        old = chapters_of(f)
+        cur = chapters_of(f)
+        rel = os.path.relpath(f, os.path.dirname(show))
+        dst = os.path.join(BACKUP, os.path.splitext(rel)[0] + ".xml")
+        old = open(dst, encoding="utf-8").read() if os.path.exists(dst) else cur   # always clean from the true original
         new, changes = clean(old)
-        if not changes:
+        sig = lambda x: (re.findall(r"<ChapterTimeStart>([\d:.]+)", x), re.findall(r"<ChapterString>(.*?)</ChapterString>", x, re.S))
+        if not changes or sig(new) == sig(cur):
             continue
         todo += 1
         if not apply:
             continue
-        rel = os.path.relpath(f, os.path.dirname(show))
-        dst = os.path.join(BACKUP, os.path.splitext(rel)[0] + ".xml")
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         if not os.path.exists(dst):               # never overwrite the first, true original
             open(dst, "w", encoding="utf-8").write(old)

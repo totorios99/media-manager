@@ -86,6 +86,14 @@ def plan(conn, eid, sidecars):
 HEADER_NALS = {"hevc": "32|33|34|39", "h264": "6|7|8"}
 
 
+def secs(tag):
+    """'00:24:39.895000000' -> seconds, None when the track carries no statistics tag."""
+    if not tag:
+        return None
+    h, m, x = tag.split(":")
+    return int(h) * 3600 + int(m) * 60 + float(x)
+
+
 def stream_md5(path, ids, normalize=False):
     cmd = NICE + ["ffmpeg", "-v", "error", "-nostdin", "-i", path]
     for i in ids:
@@ -128,7 +136,17 @@ def remux_verified(path, rows):
         kinds = {"video": "video", "audio": "audio", "subtitle": "subtitles"}
         if [t["type"] for t in nt] != [kinds[t["type"]] for t in order]:
             return "track layout differs from the plan"
-        if abs((new["container"]["properties"].get("duration") or 0) - (props.get("duration") or 0)) > 1e8:
+        # per kept track, not the container: the container lasts as long as its LONGEST track, and dropping a
+        # subtitle that ran past the video legitimately shortens it (DBZ S09E15: container 1481.8 s, video 1479.9 s)
+        old_tr = {t["id"]: t for t in info["tracks"]}
+        for t, n in zip(order, nt):
+            if t["mkv_id"] is None:
+                continue
+            a, b = secs(old_tr[t["mkv_id"]]["properties"].get("tag_duration")), secs(n["properties"].get("tag_duration"))
+            if a is not None and b is not None and abs(a - b) > 0.1:
+                return f"duration of track {t['mkv_id']} differs: {a:.3f} vs {b:.3f} s"
+        if not any(not t["keep"] for t in rows) and abs(
+                (new["container"]["properties"].get("duration") or 0) - (props.get("duration") or 0)) > 1e8:
             return "duration differs by more than 0.1 s"
         for t, n in zip(order, nt):
             if t["type"] != "video" and bool(n["properties"].get("default_track")) != bool(t["out_default"]):

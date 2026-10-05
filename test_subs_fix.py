@@ -58,6 +58,19 @@ def main():
     except ValueError:
         pass
 
+    # Bazarr calls the hook in the same second it writes: a file that appears a moment later is still taken
+    import threading
+    late = os.path.join(season, "Show - S01E02.en.srt")
+    threading.Timer(1.5, lambda: open(late, "w", encoding="utf-8").write(SRT)).start()
+    r4 = app._fix_subtitle(late, fake(6.93))
+    assert r4["status"] == "ok", r4
+    app.SUBS_APPEAR_WAIT = 0
+    try:                                          # and one that never appears is still refused
+        app._fix_subtitle(os.path.join(season, "Show - S01E02.fr.srt"), fake(0))
+        raise AssertionError("missing file accepted")
+    except ValueError:
+        pass
+
     # a rejected result is never written
     bad = os.path.join(season, "Show - S01E02.es-MX.srt")
     open(bad, "w", encoding="utf-8").write(SRT)

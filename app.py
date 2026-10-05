@@ -2143,6 +2143,7 @@ def _notify_subs_burst(title, body):
     _notify(title, body + (f" (+{held} más desde el último aviso)" if held else ""), tags="warning", priority=3)
 
 
+SUBS_APPEAR_WAIT = int(os.environ.get("MM_SUBS_APPEAR_WAIT", "60"))   # seconds
 _SUBFIX_LOCK = threading.Lock()      # ffsubsync decodes a whole episode: one at a time
 _SUBFIX_BUSY = set()
 
@@ -2166,6 +2167,13 @@ def _fix_subtitle(srt, measure_fn=None):
     <name>.srt.orig (Jellyfin and Bazarr both ignore that extension). A result that
     does not re-measure at factor 1.000 / offset ~0 is never written."""
     import subs_clean
+    # Bazarr's post-processing hook fires in the same second it writes the file, and the file is
+    # sometimes not there yet: Rocky II, Gladiator, Man of Steel and others were dropped as "not a
+    # subtitle" that way (server.log, 2026-10-04) and only got filtered by the backlog queue.
+    for _ in range(SUBS_APPEAR_WAIT):
+        if os.path.isfile(srt):
+            break
+        time.sleep(1)
     real = os.path.realpath(srt)
     roots = [os.path.realpath(r) + os.sep for r in {MEDIA_ROOT, SHOWS_ROOT}]
     if not real.lower().endswith(".srt") or not real.startswith(tuple(roots)) or not os.path.isfile(real):

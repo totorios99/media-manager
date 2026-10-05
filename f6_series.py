@@ -94,19 +94,43 @@ def secs(tag):
     return int(h) * 3600 + int(m) * 60 + float(x)
 
 
+# A text subtitle is compared as the subtitle FILE it makes, not packet by packet: mkvmerge rewrites every ASS
+# block one byte shorter (Dragon Ball Super S01E28: 12816 packets, 170 -> 169 bytes) while the extracted .ass is
+# identical byte for byte. Same single read of the file: the text goes to temp files beside the hash output.
+TEXT_SUBS = {"ass": "ass", "ssa": "ass", "subrip": "srt"}
+
+
 def stream_md5(path, ids, normalize=False):
-    cmd = NICE + ["ffmpeg", "-v", "error", "-nostdin", "-i", path]
-    for i in ids:
-        cmd += ["-map", f"0:{i}"]
-    if normalize:
-        codecs = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=index,codec_name", "-of", "csv=p=0",
-                                 path], capture_output=True, text=True).stdout.split()
-        codec = dict(c.split(",")[:2] for c in codecs if "," in c)
-        for n, i in enumerate(ids):
-            if codec.get(str(i)) in HEADER_NALS:
-                cmd += [f"-bsf:{n}", f"filter_units=remove_types={HEADER_NALS[codec[str(i)]]}"]
-    out = subprocess.run(cmd + ["-c", "copy", "-f", "streamhash", "-hash", "md5", "-"], capture_output=True, text=True)
-    return [ln.split("=", 1)[1] for ln in out.stdout.split() if "MD5=" in ln]
+    """One md5 per id, in order: packets for video/audio/bitmap subs, the rendered file for text subs."""
+    import hashlib, shutil, tempfile
+    probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=index,codec_name", "-of", "csv=p=0",
+                            path], capture_output=True, text=True).stdout.split()
+    codec = dict(c.split(",")[:2] for c in probe if "," in c)
+    packets = [i for i in ids if codec.get(str(i)) not in TEXT_SUBS]
+    texts = [i for i in ids if codec.get(str(i)) in TEXT_SUBS]
+    d = tempfile.mkdtemp(dir="/var/tmp")
+    try:
+        cmd = NICE + ["ffmpeg", "-v", "error", "-nostdin", "-i", path]
+        if packets:
+            for n, i in enumerate(packets):
+                cmd += ["-map", f"0:{i}"]
+                if normalize and codec.get(str(i)) in HEADER_NALS:
+                    cmd += [f"-bsf:{n}", f"filter_units=remove_types={HEADER_NALS[codec[str(i)]]}"]
+            cmd += ["-c", "copy", "-f", "streamhash", "-hash", "md5", os.path.join(d, "packets.txt")]
+        for i in texts:
+            cmd += ["-map", f"0:{i}", "-c", "copy", "-f", TEXT_SUBS[codec[str(i)]], os.path.join(d, f"{i}.sub")]
+        subprocess.run(cmd, capture_output=True, text=True)
+        res = {}
+        if packets and os.path.exists(os.path.join(d, "packets.txt")):
+            got = [ln.split("=", 1)[1] for ln in open(os.path.join(d, "packets.txt")).read().split() if "MD5=" in ln]
+            res.update(zip(packets, got))
+        for i in texts:
+            f = os.path.join(d, f"{i}.sub")
+            if os.path.exists(f):
+                res[i] = hashlib.md5(open(f, "rb").read()).hexdigest()
+        return [res[i] for i in ids] if len(res) == len(ids) else []
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def chapters(path):
@@ -140,7 +164,7 @@ def remux_verified(path, rows):
         # subtitle that ran past the video legitimately shortens it (DBZ S09E15: container 1481.8 s, video 1479.9 s)
         old_tr = {t["id"]: t for t in info["tracks"]}
         for t, n in zip(order, nt):
-            if t["mkv_id"] is None:
+            if t["mkv_id"] is None or t["type"] == "subtitle":    # subtitle statistics are recomputed; the text is compared below
                 continue
             a, b = secs(old_tr[t["mkv_id"]]["properties"].get("tag_duration")), secs(n["properties"].get("tag_duration"))
             if a is not None and b is not None and abs(a - b) > 0.1:

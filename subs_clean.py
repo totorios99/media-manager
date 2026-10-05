@@ -109,6 +109,26 @@ def measure(media, srt):
     return float(off[-1]), float(fac[-1])
 
 
+def center_channel(media):
+    """Path of a temporary 16 kHz mono WAV of the first audio track's centre channel, or None when there is no
+    centre. On 5.1/7.1 mixes ffsubsync's speech detection over the whole mix can lock onto music and effects:
+    Indiana Jones and the Last Crusade measured factor 1.078 on the mix (implausible: the last cue would land after
+    the film ends) and 1.000 / +0.010 s on the centre channel, where the dialogue lives. The caller deletes it."""
+    layout = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
+                             "stream=channel_layout", "-of", "csv=p=0", media], capture_output=True, text=True).stdout
+    if "FC" not in layout.upper() and not re.match(r"\s*(5\.1|6\.1|7\.1|3\.0|4\.0|quad)", layout):
+        return None
+    import tempfile
+    fd, wav = tempfile.mkstemp(suffix=".wav", dir="/var/tmp")
+    os.close(fd)
+    r = subprocess.run(["ionice", "-c3", "nice", "-n", "10", "ffmpeg", "-v", "error", "-nostdin", "-y", "-i", media,
+                        "-map", "0:a:0", "-af", "pan=mono|c0=FC", "-ar", "16000", wav], capture_output=True, timeout=4 * 3600)
+    if r.returncode != 0:
+        os.unlink(wav)
+        return None
+    return wav
+
+
 # Framerate pairs that explain a pure speed mismatch (The Hunt: PAL 25/24). Anything
 # else is another cut of the film, and rescaling it would only hide that.
 STANDARD = [24 / 23.976, 25 / 24, 25 / 23.976]
@@ -120,7 +140,25 @@ def _settled(off, fac):
     return abs(off) <= OFF_OK and abs(fac - 1) <= FAC_OK
 
 
-def fix(media, srt, measure_fn=None):
+def fix(media, srt, measure_fn=None, center_fn=center_channel):
+    """fix_once on the full mix; when that finds a speed no framerate explains, once more against the centre
+    channel (center_channel) before calling it another cut."""
+    r = fix_once(media, srt, measure_fn)
+    if r["status"] == "rejected" and r["action"].startswith("non-standard") and center_fn:
+        wav = center_fn(media)
+        if wav:
+            try:
+                r2 = fix_once(wav, srt, measure_fn)
+            finally:
+                if os.path.exists(wav):
+                    os.unlink(wav)
+            r2["action"] = (r2["action"] + " (centre channel)") if r2["status"] == "ok" else r2["action"]
+            if r2["status"] == "ok" or r2["action"] != r["action"]:
+                return r2
+    return r
+
+
+def fix_once(media, srt, measure_fn=None):
     """Clean ads, then bring the timing right. Never writes.
 
     -> {"status": "ok"|"rejected", "text": str|None, "ads": n, "action": str,

@@ -109,7 +109,27 @@ def test_fix_rejects_nonstandard_speed():
     print("test_fix_rejects_nonstandard_speed OK")
 
 
+
+def test_nonstandard_on_the_mix_is_remeasured_on_the_centre_channel():
+    """Indiana Jones: 1.078 on the 5.1 mix, 1.000 on the centre channel. The centre WAV is always deleted."""
+    p = _write("mm-test-centre.srt", sc.parse(SRT))
+    made = []
+
+    def centre(media):
+        w = _write("mm-test-centre.wav", [])
+        made.append(w)
+        return w
+    r = sc.fix("movie.mkv", p, lambda m, s: (0.0, 1.0) if m.endswith(".wav") else (0.0, 1.078), centre)
+    assert r["status"] == "ok" and "centre channel" in r["action"], r
+    assert made and not os.path.exists(made[0]), "temporary WAV left behind"
+    r = sc.fix("movie.mkv", p, lambda m, s: (0.0, 1.078), centre)     # still off on the centre: still rejected
+    assert r["status"] == "rejected", r
+    os.unlink(p)
+    print("test_nonstandard_on_the_mix_is_remeasured_on_the_centre_channel OK")
+
+
 if __name__ == "__main__":
+    test_nonstandard_on_the_mix_is_remeasured_on_the_centre_channel()
     test_fix_constant_offset_is_corrected_and_remeasured()
     test_fix_rejects_nonstandard_speed()
     test_mid_file_ad_removed_dialogue_kept()

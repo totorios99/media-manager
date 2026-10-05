@@ -155,8 +155,9 @@ def cycle(st):
         elif running:
             stop(name)
             notes.append(f"{name} stopped ({'window closed' if not window else 'another job has priority'})")
-    if want is None:
+    if want is None and not st["done"].get("alldone_sent"):      # once: alert() alone re-sent it every 2 h
         alert(st, "alldone", "Colas nocturnas terminadas", "Sidecars y pasada latino/castellano completos.", 3)
+        st["done"]["alldone_sent"] = True
     free = shutil.disk_usage(MOUNT).free / 1e9
     if free < 100:
         alert(st, "disk", "Poco disco libre", f"Quedan {free:.0f} GB en {MOUNT}.", 5)

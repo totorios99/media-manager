@@ -1,7 +1,7 @@
 """F6 for series: bring every episode to the standard in ONE rewrite, or none.
 
     f6_series.py                                  # plan: what each episode would get (reads nothing but media.db)
-    f6_series.py --run [--limit N] [--show "<folder>"]
+    f6_series.py --run [--limit N] [--show "<folder>"] [--ignore-downloads]
 
 Decisions (Antonio): D1 2026-10-04, an episode whose only difference is order or default flags is NOT
 rewritten; mkvpropedit fixes the flags and the order stays. D2 2026-10-04, a sidecar that was embedded moves
@@ -155,7 +155,7 @@ def recycle(path):
     return dst
 
 
-def main(run, limit, show):
+def main(run, limit, show, ignore_downloads=False):
     src = sqlite3.connect(os.path.join(HERE, "media.db"))
     mem = sqlite3.connect(":memory:")
     src.backup(mem)
@@ -182,7 +182,7 @@ def main(run, limit, show):
             continue
         if stop or (limit and done >= limit) or not os.path.ismount("/srv/storage"):
             break
-        while downloads_busy():
+        while not ignore_downloads and downloads_busy():
             if stop:
                 break
             print("downloads active, waiting", flush=True)
@@ -220,4 +220,5 @@ def main(run, limit, show):
 if __name__ == "__main__":
     a = sys.argv[1:]
     main("--run" in a, int(a[a.index("--limit") + 1]) if "--limit" in a else 0,
-         a[a.index("--show") + 1] if "--show" in a else None)
+         a[a.index("--show") + 1] if "--show" in a else None,
+         "--ignore-downloads" in a)                  # Antonio 2026-10-04: the stalled downloads do not compete

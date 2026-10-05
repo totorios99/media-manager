@@ -245,6 +245,50 @@ def tags(conn, done, spanish_original="es-419"):
     return out
 
 
+def apply(conn, done, log_path=os.path.join(HERE, "subs_variant_apply.jsonl")):
+    """Write the tags from tags(): mkvpropedit language-ietf only, addressed by track UID (an index can shift).
+    Skips files with an active job; logs the old value; re-reads each file into the database."""
+    import app
+    busy = {r[0] for r in conn.execute("SELECT movie_id FROM jobs WHERE status IN ('running','queued')")} | \
+           {r[0] for r in conn.execute("SELECT episode_id FROM jobs WHERE status IN ('running','queued')")}
+    owner = {r[3]: (r[0], r[1]) for r in candidates(conn)}
+    log, ok, failed = open(log_path, "a"), 0, 0
+    for path, by_id in tags(conn, done).items():
+        kind, id_ = owner[path]
+        if id_ in busy or not os.path.exists(path):
+            continue
+        info = la.probe(path)
+        tr = {t["id"]: t for t in info["tracks"]}
+        argv, old = ["mkvpropedit", path], {}
+        for mid, tag in by_id.items():
+            t = tr.get(mid)
+            if not t or t["type"] != "subtitles" or t["properties"].get("language") != "spa":
+                continue
+            cur = t["properties"].get("language_ietf")
+            if cur == tag:
+                continue
+            argv += ["--edit", f"track:={t['properties']['uid']}", "--set", f"language-ietf={tag}"]
+            old[mid] = cur
+        if not old:
+            continue
+        r = subprocess.run(argv, capture_output=True, text=True)
+        after = {t["id"]: t["properties"].get("language_ietf") for t in la.probe(path)["tracks"]}
+        good = r.returncode == 0 and all(after.get(m) == by_id[m] for m in old)
+        if good:
+            c = app.get_db()
+            try:
+                app._reinspect_in_place(c, kind, id_, path)
+                c.commit()
+            finally:
+                c.close()
+        ok += good
+        failed += not good
+        log.write(json.dumps({"path": path, "old": old, "new": {m: by_id[m] for m in old}, "ok": good,
+                              "err": None if good else (r.stdout[-200:] or "tag not read back")}, ensure_ascii=False) + "\n")
+        log.flush()
+    print(f"{ok} files tagged, {failed} failed")
+
+
 def summary(done):
     c = collections.Counter()
     for v in done.values():
@@ -263,6 +307,9 @@ if __name__ == "__main__":
             print(f"{r['verdict']:10} {r['kind']:7} {r['label'][:45]:45} {r['track'][:22]:22} files={r['files']:<3} "
                   f"measured={r['measured']:<3} {r['votes']} {r['examples'][:3]}")
         sys.exit()
-    if "--apply" in sys.argv:
-        sys.exit("apply is a separate, reviewed step: see the report first")
+    if "--apply" in sys.argv:                       # reviewed by Antonio 2026-10-04 (D3, D6)
+        c = sqlite3.connect(os.path.join(HERE, "media.db"))
+        c.row_factory = sqlite3.Row
+        apply(c, json.load(open(OUT)))
+        sys.exit()
     main()

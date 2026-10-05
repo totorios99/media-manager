@@ -62,7 +62,7 @@ def test_refused_plan_leaves_the_original_alone():
             row("subtitle", 4, "fre", keep=0), row("subtitle", 5, "eng", order=1)]
     real = f6.stream_md5
     calls = []
-    f6.stream_md5 = lambda p, ids: calls.append(p) or (["a"] * len(ids) if len(calls) == 1 else ["b"] * len(ids))
+    f6.stream_md5 = lambda p, ids, normalize=False: calls.append(p) or (["a"] * len(ids) if len(calls) % 2 else ["b"] * len(ids))
     try:                                                         # a stream that changed in the copy must stop it
         err = f6.remux_verified(ep, rows)
     finally:

@@ -80,10 +80,23 @@ def plan(conn, eid, sidecars):
     return "skip", rows, "conform"
 
 
-def stream_md5(path, ids):
+# mkvmerge repeats the HEVC/AVC parameter sets and the codec-private SEI inside every keyframe when the source
+# kept them only in CodecPrivate (The Seven Deadly Sins S04E04: 343 of 34813 video packets grew, same count and
+# timestamps). With those NAL types removed on BOTH sides the slice data must still match bit for bit.
+HEADER_NALS = {"hevc": "32|33|34|39", "h264": "6|7|8"}
+
+
+def stream_md5(path, ids, normalize=False):
     cmd = NICE + ["ffmpeg", "-v", "error", "-nostdin", "-i", path]
     for i in ids:
         cmd += ["-map", f"0:{i}"]
+    if normalize:
+        codecs = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=index,codec_name", "-of", "csv=p=0",
+                                 path], capture_output=True, text=True).stdout.split()
+        codec = dict(c.split(",")[:2] for c in codecs if "," in c)
+        for n, i in enumerate(ids):
+            if codec.get(str(i)) in HEADER_NALS:
+                cmd += [f"-bsf:{n}", f"filter_units=remove_types={HEADER_NALS[codec[str(i)]]}"]
     out = subprocess.run(cmd + ["-c", "copy", "-f", "streamhash", "-hash", "md5", "-"], capture_output=True, text=True)
     return [ln.split("=", 1)[1] for ln in out.stdout.split() if "MD5=" in ln]
 
@@ -126,6 +139,8 @@ def remux_verified(path, rows):
             return "chapters differ"
         pairs = [(t["mkv_id"], i) for i, t in enumerate(order) if t["mkv_id"] is not None]
         a, b = stream_md5(path, [p for p, _ in pairs]), stream_md5(tmp, [q for _, q in pairs])
+        if a and a != b:
+            a, b = stream_md5(path, [p for p, _ in pairs], True), stream_md5(tmp, [q for _, q in pairs], True)
         if not a or a != b:
             return "stream hashes differ"
         fd = os.open(tmp, os.O_RDONLY)

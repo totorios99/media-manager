@@ -48,7 +48,9 @@ def _canonical_name(t, siblings=()):
     if t.get("out_name"):
         return t["out_name"]
     lang = t.get("out_lang") or "und"
-    label = _LANG_LABEL.get(lang, lang.upper())
+    # the Spanish variant lives in `lang` (out_lang is bare spa); Bazarr counts an embedded spa track as Latino
+    # only when its name says so, and "Español (SDH)" made it re-download the sidecar F6 had just embedded
+    label = _LANG_LABEL.get(t.get("lang") if lang == "spa" and t.get("lang") in _LANG_LABEL else lang, lang.upper())
     if t.get("out_forced"):
         return f"{label} (forzados)" if lang.startswith("spa") else f"{label} (Forced)"
     if t.get("sdh_flag"):

@@ -62,6 +62,8 @@ def test_sdh_naming_is_type_aware():
         {"out_lang": "spa", "sdh_flag": 1, "type": "audio"}) == "Español (HI)"
     assert commands._canonical_name(
         {"out_lang": "spa", "type": "audio"}) == "Español"
+    assert commands._canonical_name(       # Southpaw: the embedded Latino sidecar shipped as "Español (SDH)"
+        {"out_lang": "spa", "lang": "spa-mx", "sdh_flag": 1, "type": "subtitle"}) == "Español (Latino) (SDH)"
     print("test_sdh_naming_is_type_aware OK")
 
 

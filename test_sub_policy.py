@@ -122,6 +122,14 @@ def test_no_default_subtitle_when_animation_starts_on_the_spanish_dub():
     assert all(d == 0 for _, _, d in order(conn)), order(conn)
 
 
+def test_lone_audio_in_an_unwanted_language_survives():
+    """The Worst Person in the World: original_language 'no', its only audio 'nob' -- never ship it silent."""
+    conn = build([A("nob"), PGS("eng")], original_language="no")
+    scan.suggest_tracks(conn, 1)
+    r = kept(conn)
+    assert r[1]["keep"] == 1 and r[1]["out_default"] == 1, dict(r[1])
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

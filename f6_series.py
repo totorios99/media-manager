@@ -207,9 +207,12 @@ def propedit_flags(path, rows):
 
 
 def recycle(path):
-    dst = os.path.join(RECYCLE, os.path.relpath(path, "/srv/storage"))
+    dst = os.path.join(RECYCLE, os.path.relpath(path, os.path.dirname(RECYCLE)))
     os.makedirs(os.path.dirname(dst), exist_ok=True)
-    os.replace(path, dst)
+    base, n = dst, 1
+    while os.path.exists(dst):            # Bazarr re-downloads under the same name; never overwrite what is there
+        dst, n = f"{base}.{n}", n + 1
+    os.rename(path, dst)
     return dst
 
 
@@ -275,8 +278,8 @@ def main(run, limit, show, ignore_downloads=False):
     print(counts if not run else f"{done} processed; plan counts so far {counts}", flush=True)
 
 
-def run_movie(folder):
-    """F6 for one movie folder (same checks as the episodes): `f6_series.py --movie "<folder>"`."""
+def run_movie(folder, run=False):
+    """F6 for one movie folder (same checks as the episodes): `f6_series.py --movie "<folder>" [--run]`."""
     src = sqlite3.connect(os.path.join(HERE, "media.db"))
     mem = sqlite3.connect(":memory:")
     src.backup(mem)
@@ -288,8 +291,8 @@ def run_movie(folder):
     action, rows, why = plan(mem, m["id"], sidecars, kind="movie")
     print(action, why, [(r["mkv_id"], r["type"], r["lang"], r["codec"][:10], r["keep"], r["out_order"], r["out_default"])
                         for r in rows], flush=True)
-    if action not in ("remux", "propedit") or "--run" not in sys.argv:
-        return
+    if action not in ("remux", "propedit") or not run:
+        return None
     t0 = time.time()
     err = remux_verified(path, rows) if action == "remux" else propedit_flags(path, rows)
     moved = [recycle(r["ext_path"]) for r in rows if not err and action == "remux" and r["ext_path"] and r["keep"]
@@ -307,12 +310,39 @@ def run_movie(folder):
            "error": err, "recycled": moved, "secs": round(time.time() - t0)}
     open(os.path.join(HERE, "f6_movies.jsonl"), "a").write(json.dumps(rec, ensure_ascii=False) + "\n")
     print(rec, flush=True)
+    return rec
+
+
+def run_movies(run, ignore_downloads=False):
+    """Every movie, smallest file first; one already logged ok is not planned again. Stops on SIGTERM or a lost mount."""
+    stop = []
+    signal.signal(signal.SIGTERM, lambda *_: stop.append(1))
+    log = os.path.join(HERE, "f6_movies.jsonl")
+    done = {json.loads(l)["file"] for l in open(log) if '"ok"' in l} if os.path.exists(log) else set()
+    con = sqlite3.connect(os.path.join(HERE, "media.db"))
+    todo = [(f, fi) for f, fi in con.execute("SELECT folder, file FROM movies WHERE file IS NOT NULL") if fi not in done]
+    con.close()
+    todo.sort(key=lambda m: os.path.getsize(p) if os.path.exists(p := os.path.join(la.MOVIES, *m)) else 0)
+    for folder, _ in todo:
+        if stop or not os.path.ismount("/srv/storage"):
+            break
+        while not ignore_downloads and downloads_busy() and not stop:
+            print("downloads active, waiting", flush=True)
+            time.sleep(QUIET)
+        try:
+            run_movie(folder, run)
+        except Exception as ex:                  # one odd folder must not end a 50-hour run
+            print("ERROR", folder, repr(ex), flush=True)
+    print("movies done", flush=True)
 
 
 if __name__ == "__main__":
     a = sys.argv[1:]
     if "--movie" in a:
-        run_movie(a[a.index("--movie") + 1])
+        run_movie(a[a.index("--movie") + 1], "--run" in a)
+        sys.exit()
+    if "--movies" in a:
+        run_movies("--run" in a, "--ignore-downloads" in a)
         sys.exit()
     main("--run" in a, int(a[a.index("--limit") + 1]) if "--limit" in a else 0,
          a[a.index("--show") + 1] if "--show" in a else None,

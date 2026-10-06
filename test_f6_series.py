@@ -83,5 +83,22 @@ def test_downloads_busy():
     print("test_downloads_busy OK")
 
 
+def test_recycle_never_overwrites():
+    d = tempfile.mkdtemp()
+    real, f6.RECYCLE = f6.RECYCLE, os.path.join(d, ".recycle")
+    try:                                         # Mr. Robot: Bazarr re-downloaded a sidecar under the recycled name
+        for txt in ("first", "second"):
+            os.makedirs(os.path.join(d, "Show"), exist_ok=True)
+            p = os.path.join(d, "Show", "a.es-MX.srt")
+            open(p, "w").write(txt)
+            out = f6.recycle(p)
+        assert open(os.path.join(d, ".recycle", "Show", "a.es-MX.srt")).read() == "first"
+        assert out.endswith("a.es-MX.srt.1") and open(out).read() == "second"
+    finally:
+        f6.RECYCLE = real
+    print("test_recycle_never_overwrites OK")
+
+
 if __name__ == "__main__":
     test_remux_in_place_drops_french_and_keeps_the_rest(); test_refused_plan_leaves_the_original_alone(); test_downloads_busy()
+    test_recycle_never_overwrites()

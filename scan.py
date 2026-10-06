@@ -356,6 +356,11 @@ def suggest_tracks(conn, owner_id, table="movies", multi_audio=False):
                       and t["id"] not in plan), None)
             if t:
                 mark(t, lang, default=False, forced=False)
+    # a film never ships silent: when no track matched a wanted language (The Worst Person in the World is
+    # original_language "no", its only track "nob"), the best one stays and plays
+    if audio and not any(t["id"] in plan for t in audio):
+        best = min(audio, key=lambda t: (t.get("commentary_flag") or 0, _audio_avoided(t["codec"]), _audio_rank(t["codec"])))
+        mark(best, best["lang"], default=True, forced=False)
 
     # Animation is the exception to "original language plays by default":
     # Antonio watches anime and animated films dubbed in Spanish. The Japanese

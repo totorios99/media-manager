@@ -59,16 +59,17 @@ def filtered_sidecars(folder, stem, log_text):
     return out
 
 
-def plan(conn, eid, sidecars):
-    """-> (action, rows, why). Works on `conn`, which must be a throwaway copy."""
+def plan(conn, eid, sidecars, kind="episode"):
+    """-> (action, rows, why). Works on `conn`, which must be a throwaway copy. kind: episode | movie."""
+    col, table = ("episode_id", "episodes") if kind == "episode" else ("movie_id", "movies")
     for s in sidecars:
-        conn.execute("INSERT INTO tracks (episode_id, mkv_id, type, codec, lang, name, ext_path, sdh_flag, keep) "
+        conn.execute(f"INSERT INTO tracks ({col}, mkv_id, type, codec, lang, name, ext_path, sdh_flag, keep) "
                      "VALUES (?, NULL, 'subtitle', 'SubRip/SRT', ?, ?, ?, ?, 1)",
                      (eid, s["lang"], os.path.basename(s["ext_path"]), s["ext_path"], s["sdh"]))
-    full_spa = [r for r in map(dict, conn.execute("SELECT * FROM tracks WHERE episode_id=? AND type='subtitle'", (eid,)))
+    full_spa = [r for r in map(dict, conn.execute(f"SELECT * FROM tracks WHERE {col}=? AND type='subtitle'", (eid,)))
                 if r["lang"] == "spa" and not r["forced_flag"] and scan._sub_class(r) == "text"]
-    scan.suggest_tracks(conn, eid, table="episodes", multi_audio=True)
-    rows = [dict(r) for r in conn.execute("SELECT * FROM tracks WHERE episode_id=?", (eid,))]
+    scan.suggest_tracks(conn, eid, table=table, multi_audio=(kind == "episode"))
+    rows = [dict(r) for r in conn.execute(f"SELECT * FROM tracks WHERE {col}=?", (eid,))]
     if len(full_spa) > 1:
         return "blocked", rows, f"{len(full_spa)} Spanish full text subtitles without variant (P1 first)"
     dropped = [r for r in rows if r["mkv_id"] is not None and not r["keep"]]
@@ -274,8 +275,45 @@ def main(run, limit, show, ignore_downloads=False):
     print(counts if not run else f"{done} processed; plan counts so far {counts}", flush=True)
 
 
+def run_movie(folder):
+    """F6 for one movie folder (same checks as the episodes): `f6_series.py --movie "<folder>"`."""
+    src = sqlite3.connect(os.path.join(HERE, "media.db"))
+    mem = sqlite3.connect(":memory:")
+    src.backup(mem)
+    mem.row_factory = sqlite3.Row
+    m = mem.execute("SELECT id, folder, file FROM movies WHERE folder=?", (folder,)).fetchone()
+    path = os.path.join(la.MOVIES, m["folder"], m["file"])
+    log_text = open(os.path.join(HERE, "server.log"), encoding="utf-8", errors="replace").read()
+    sidecars = filtered_sidecars(os.path.dirname(path), os.path.splitext(m["file"])[0], log_text)
+    action, rows, why = plan(mem, m["id"], sidecars, kind="movie")
+    print(action, why, [(r["mkv_id"], r["type"], r["lang"], r["codec"][:10], r["keep"], r["out_order"], r["out_default"])
+                        for r in rows], flush=True)
+    if action not in ("remux", "propedit") or "--run" not in sys.argv:
+        return
+    t0 = time.time()
+    err = remux_verified(path, rows) if action == "remux" else propedit_flags(path, rows)
+    moved = [recycle(r["ext_path"]) for r in rows if not err and action == "remux" and r["ext_path"] and r["keep"]
+             and os.path.exists(r["ext_path"])]
+    if not err:
+        import app
+        c = app.get_db()
+        try:
+            c.execute("UPDATE movies SET status='clean', updated_at=? WHERE id=?", (app._now(), m["id"]))
+            app._reinspect_in_place(c, "movie", m["id"], path)
+            c.commit()
+        finally:
+            c.close()
+    rec = {"movie": m["id"], "file": m["file"], "action": action, "why": why, "status": "FAILED" if err else "ok",
+           "error": err, "recycled": moved, "secs": round(time.time() - t0)}
+    open(os.path.join(HERE, "f6_movies.jsonl"), "a").write(json.dumps(rec, ensure_ascii=False) + "\n")
+    print(rec, flush=True)
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
+    if "--movie" in a:
+        run_movie(a[a.index("--movie") + 1])
+        sys.exit()
     main("--run" in a, int(a[a.index("--limit") + 1]) if "--limit" in a else 0,
          a[a.index("--show") + 1] if "--show" in a else None,
          "--ignore-downloads" in a)                  # Antonio 2026-10-04: the stalled downloads do not compete

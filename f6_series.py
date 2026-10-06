@@ -329,6 +329,8 @@ def run_movies(run, ignore_downloads=False):
         while not ignore_downloads and downloads_busy() and not stop:
             print("downloads active, waiting", flush=True)
             time.sleep(QUIET)
+        if stop:
+            break
         try:
             run_movie(folder, run)
         except Exception as ex:                  # one odd folder must not end a 50-hour run

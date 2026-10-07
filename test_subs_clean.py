@@ -55,6 +55,10 @@ def test_credit_block_loses_the_name_too():
         "2\n01:30:00,000 --> 01:30:02,000\nAdiós\n\n"
         "3\n01:30:56,000 --> 01:30:58,000\nSubtitulada por\nBrielga / Alexcrist.\n"))
     assert [t for _, _, t in kept] == ["Hola", "Adiós"], kept
+    kept, _ = sc.strip_ads(sc.parse(          # Roman Holiday: an hour past the film, F6 refused the remux
+        "1\n00:00:05,000 --> 00:00:06,000\nHola\n\n"
+        "2\n02:57:57,400 --> 02:58:09,841\nSubtítulos por Mötis Crüe\n"))
+    assert [t for _, _, t in kept] == ["Hola"], kept
     print("test_credit_block_loses_the_name_too OK")
 
 

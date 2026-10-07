@@ -21,7 +21,7 @@ TS = re.compile(r"(\d+):(\d\d):(\d\d)[,.](\d{3}) --> (\d+):(\d\d):(\d\d)[,.](\d{
 STRONG = re.compile(r"subtitulos\.es|difunde la palabra|opensubtitles|subdivx|argenteam|"
                     r"addic7ed|tusubtitulo|subscene|podnapisi", re.I)
 # Credits lines that could be real dialogue: only at the very start or end of the file.
-WEAK = re.compile(r"traducid[oa] por|sincronizad[oa] por|subtitulad[oa] por|"
+WEAK = re.compile(r"traducid[oa] por|sincronizad[oa] por|subtitulad[oa] por|subt[ií]tulos por|"   # Roman Holiday
                   r"sync(?:hronized)? (?:and corrected )?by|\bresync\b", re.I)
 EDGE_S = 90
 

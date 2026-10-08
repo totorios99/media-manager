@@ -113,6 +113,24 @@ def test_fix_rejects_nonstandard_speed():
     print("test_fix_rejects_nonstandard_speed OK")
 
 
+def test_linear_override_scales_a_constant_drift_and_still_remeasures():
+    """Prison Break S01: a constant 1.006 drift. Rejected by default; with linear=True it is scaled, and the result
+    is kept only because the re-measure settles at 1.0000."""
+    cues = [(10.0 + 100 * i, 12.0 + 100 * i, f"línea {i}") for i in range(25)]
+    p = _write("mm-test-linear.srt", cues)
+    tf, tl = 10.0 * 1.006, (10.0 + 100 * 24) * 1.006           # where the film really says them
+
+    def m(media, path):                                          # linear fit of the file onto the truth
+        c = sc.parse(sc.decode(open(path, "rb").read()))
+        fac = (tl - tf) / (c[-1][0] - c[0][0])
+        return tf - c[0][0] * fac, round(fac, 4)
+    assert sc.fix("media", p, m, center_fn=None)["status"] == "rejected"
+    r = sc.fix("media", p, m, center_fn=None, linear=True)
+    assert r["status"] == "ok" and r["factor"] == 1.0 and abs(r["offset"]) <= sc.OFF_OK, r
+    os.unlink(p)
+    print("test_linear_override_scales_a_constant_drift_and_still_remeasures OK")
+
+
 
 def test_nonstandard_on_the_mix_is_remeasured_on_the_centre_channel():
     """Indiana Jones: 1.078 on the 5.1 mix, 1.000 on the centre channel. The centre WAV is always deleted."""
@@ -136,6 +154,7 @@ if __name__ == "__main__":
     test_nonstandard_on_the_mix_is_remeasured_on_the_centre_channel()
     test_fix_constant_offset_is_corrected_and_remeasured()
     test_fix_rejects_nonstandard_speed()
+    test_linear_override_scales_a_constant_drift_and_still_remeasures()
     test_mid_file_ad_removed_dialogue_kept()
     test_credit_block_loses_the_name_too()
     test_cue_with_dialogue_keeps_dialogue()

@@ -140,15 +140,15 @@ def _settled(off, fac):
     return abs(off) <= OFF_OK and abs(fac - 1) <= FAC_OK
 
 
-def fix(media, srt, measure_fn=None, center_fn=center_channel):
+def fix(media, srt, measure_fn=None, center_fn=center_channel, linear=False):
     """fix_once on the full mix; when that finds a speed no framerate explains, once more against the centre
     channel (center_channel) before calling it another cut."""
-    r = fix_once(media, srt, measure_fn)
+    r = fix_once(media, srt, measure_fn, linear)
     if r["status"] == "rejected" and r["action"].startswith("non-standard") and center_fn:
         wav = center_fn(media)
         if wav:
             try:
-                r2 = fix_once(wav, srt, measure_fn)
+                r2 = fix_once(wav, srt, measure_fn, linear)
             finally:
                 if os.path.exists(wav):
                     os.unlink(wav)
@@ -158,7 +158,7 @@ def fix(media, srt, measure_fn=None, center_fn=center_channel):
     return r
 
 
-def fix_once(media, srt, measure_fn=None):
+def fix_once(media, srt, measure_fn=None, linear=False):
     """Clean ads, then bring the timing right. Never writes.
 
     -> {"status": "ok"|"rejected", "text": str|None, "ads": n, "action": str,
@@ -185,7 +185,9 @@ def fix_once(media, srt, measure_fn=None):
         return res("ok", kept, "none", off, fac)
     if abs(fac - 1) <= FAC_OK:                       # constant offset: the same in every window
         action, fixed = f"shift {off:+.3f}s", shift(kept, off)
-    elif any(abs(fac - s) <= 0.0005 for s in STANDARD):
+    # linear=True is the manual override for a constant drift no framerate explains (Prison Break S01: 1.004-1.008
+    # in 19 of 21 episodes, offsets small). Only Antonio's request opens it; the re-measure gate below still decides.
+    elif linear or any(abs(fac - s) <= 0.0005 for s in STANDARD):
         action, fixed = f"scale {fac:.4f} + shift", scale(kept, fac)
         o2, f2 = trial(fixed)
         fixed = shift(fixed, o2)

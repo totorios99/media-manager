@@ -2199,7 +2199,7 @@ def _adopt_orphan_subtitle(srt):
     return target
 
 
-def _fix_subtitle(srt, measure_fn=None):
+def _fix_subtitle(srt, measure_fn=None, linear=False):
     """subs_clean.fix on a Bazarr sidecar, in place. The original is kept once as
     <name>.srt.orig (Jellyfin and Bazarr both ignore that extension). A result that
     does not re-measure at factor 1.000 / offset ~0 is never written."""
@@ -2227,7 +2227,7 @@ def _fix_subtitle(srt, measure_fn=None):
     media = _media_for_subtitle(real)
     if not media:
         raise ValueError(f"no video next to {real!r}")
-    r = subs_clean.fix(media, real, measure_fn)
+    r = subs_clean.fix(media, real, measure_fn, linear=linear)
     if r["status"] != "ok":
         return {**r, "written": False, "media": media}
     if r["action"] == "none" and r["ads"] == 0:

@@ -48,7 +48,7 @@ def test_remux_in_place_drops_french_and_keeps_the_rest():
     tr = la.probe(ep)["tracks"]
     assert [t["properties"]["language"] for t in tr] == ["eng", "eng", "spa", "spa", "eng"], tr
     assert f6.chapters(ep) == before and before[1] == ["OP", "Episodio"]
-    assert not [f for f in os.listdir(d) if f.endswith(".f6.mkv")], "temp file left behind"
+    assert not [f for f in os.listdir(d) if f.endswith(".f6-tmp")], "temp file left behind"
     assert os.path.basename(ep) in os.listdir(d)                 # same name: the episode title survives
     print("test_remux_in_place_drops_french_and_keeps_the_rest OK")
 
@@ -69,7 +69,7 @@ def test_refused_plan_leaves_the_original_alone():
         f6.stream_md5 = real
     assert err == "stream hashes differ", err
     assert (os.path.getsize(ep), os.path.getmtime(ep)) == (size, mtime)
-    assert not [f for f in os.listdir(d) if f.endswith(".f6.mkv")]
+    assert not [f for f in os.listdir(d) if f.endswith(".f6-tmp")]
     print("test_refused_plan_leaves_the_original_alone OK")
 
 

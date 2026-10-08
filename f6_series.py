@@ -153,7 +153,7 @@ def remux_verified(path, rows):
     The original is untouched unless every check passes."""
     info = la.probe(path)
     props = info["container"]["properties"]
-    tmp = os.path.join(os.path.dirname(path), "." + os.path.basename(path) + ".f6.mkv")
+    tmp = os.path.join(os.path.dirname(path), "." + os.path.basename(path) + ".f6-tmp")   # not .mkv: Sonarr took E20's temp for the episode
     argv = commands.build_mkvmerge_remux(rows, props.get("title") or "", path, tmp)
     r = subprocess.run(NICE + argv, capture_output=True, text=True)
     if r.returncode not in (0, 1) or not os.path.exists(tmp):

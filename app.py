@@ -2259,7 +2259,10 @@ def _fix_subtitle_job(srt):
                 _notify_subs_burst("Subtítulo rechazado", f"{name}: {r['action']}")
         except Exception as e:
             print(f"[subs] {srt!r}: {e}", flush=True)
-            _notify_subs_burst("Subtítulo sin procesar", f"{os.path.basename(srt)}: {e}")
+            # gone while waiting for the lock, with its .orig left behind: it was filtered and then embedded by F6
+            # (Prison Break E05, 2026-10-08) -- nothing for Antonio to do, so no alert
+            if not (not os.path.exists(srt) and os.path.exists(srt + ".orig")):
+                _notify_subs_burst("Subtítulo sin procesar", f"{os.path.basename(srt)}: {e}")
         finally:
             _SUBFIX_BUSY.discard(srt)
 

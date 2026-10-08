@@ -87,6 +87,15 @@ def plan(conn, eid, sidecars, kind="episode"):
 HEADER_NALS = {"hevc": "32|33|34|39", "h264": "6|7|8"}
 
 
+def last_pts(path, stream, near):
+    """pts of the last packet of `stream`, reading only the final minute (near = expected end, seconds)."""
+    out = subprocess.run(NICE + ["ffprobe", "-v", "error", "-select_streams", str(stream), "-read_intervals",
+                                 f"{max(near - 60, 0)}%", "-show_entries", "packet=pts_time", "-of", "csv=p=0", path],
+                         capture_output=True, text=True).stdout.split()
+    vals = [float(x.strip(",")) for x in out if x.strip(",") not in ("", "N/A")]
+    return max(vals) if vals else None
+
+
 def secs(tag):
     """'00:24:39.895000000' -> seconds, None when the track carries no statistics tag."""
     if not tag:
@@ -169,7 +178,11 @@ def remux_verified(path, rows):
                 continue
             a, b = secs(old_tr[t["mkv_id"]]["properties"].get("tag_duration")), secs(n["properties"].get("tag_duration"))
             if a is not None and b is not None and abs(a - b) > 0.1:
-                return f"duration of track {t['mkv_id']} differs: {a:.3f} vs {b:.3f} s"
+                # the tag is a statistic mkvmerge recomputes; Heat (1995): 10224.256 -> 10218.303 s with the same last
+                # packet at 10224.245. Only the packets decide.
+                la_, lb = last_pts(path, t["mkv_id"], a), last_pts(tmp, n["id"], a)
+                if la_ is None or lb is None or abs(la_ - lb) > 0.1:
+                    return f"duration of track {t['mkv_id']} differs: {a:.3f} vs {b:.3f} s"
         if not any(not t["keep"] for t in rows) and abs(
                 (new["container"]["properties"].get("duration") or 0) - (props.get("duration") or 0)) > 1e8:
             return "duration differs by more than 0.1 s"

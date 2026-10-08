@@ -2162,6 +2162,43 @@ def _media_for_subtitle(srt):
     return os.path.join(d, best[1]) if best else None
 
 
+_EP = re.compile(r"[Ss](\d{1,2})[Ee](\d{1,3})")
+_SUB_SUFFIX = re.compile(r"\.([a-z]{2,3}(?:-[A-Za-z0-9]{2,3})?(?:\.(?:hi|sdh|cc|forced))?\.srt)$")
+
+
+def _adopt_orphan_subtitle(srt):
+    """A sidecar named after the release ("www.UIndex.org - Prison Break S01E21 Go ….es-MX.srt") whose episode
+    media-manager already renamed: Bazarr wrote it under the old name, before or after the rename. -> the path to
+    filter under the episode's name, or None when it is a duplicate (moved to .recycle) or matches nothing.
+    Prison Break S01, 2026-10-07: E21 vanished mid-filter when the rename moved it; E12/E14/E17 were left orphaned."""
+    d, name = os.path.split(srt)
+    ep, suf = _EP.search(name), _SUB_SUFFIX.search(name)
+    if not ep or not suf:
+        return srt
+    key = (int(ep.group(1)), int(ep.group(2)))
+    videos = [f for f in os.listdir(d) if os.path.splitext(f)[1].lower() in scan.VIDEO_EXT and not f.startswith(".")
+              and (m := _EP.search(f)) and (int(m.group(1)), int(m.group(2))) == key]
+    if len(videos) != 1:
+        return srt
+    stem = os.path.splitext(videos[0])[0]
+    target = os.path.join(d, stem + "." + suf.group(1))
+    if target == srt:
+        return srt
+    if not os.path.exists(srt):                  # moved by the rename while the hook was waiting or measuring
+        return target if os.path.isfile(target) else None
+    # same language with or without the hearing-impaired tag counts as taken: E12 had .es-MX.sdh.srt already
+    lang = re.sub(r"\.(?:hi|sdh|cc)(?=\.srt$)", "", suf.group(1))
+    taken = [stem + "." + lang.replace(".srt", x + ".srt") for x in ("", ".hi", ".sdh", ".cc")]
+    if any(os.path.exists(os.path.join(d, t)) for t in taken):   # the renamed copy is there: this one is the duplicate
+        base = os.path.dirname(SHOWS_ROOT if srt.startswith(SHOWS_ROOT) else MEDIA_ROOT)     # /srv/storage
+        dst = os.path.join(base, ".recycle", os.path.relpath(srt, base))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        os.rename(srt, dst if not os.path.exists(dst) else dst + f".{int(time.time())}")
+        return None
+    os.rename(srt, target)
+    return target
+
+
 def _fix_subtitle(srt, measure_fn=None):
     """subs_clean.fix on a Bazarr sidecar, in place. The original is kept once as
     <name>.srt.orig (Jellyfin and Bazarr both ignore that extension). A result that
@@ -2174,6 +2211,15 @@ def _fix_subtitle(srt, measure_fn=None):
         if os.path.isfile(srt):
             break
         time.sleep(1)
+    roots = [os.path.realpath(r) + os.sep for r in {MEDIA_ROOT, SHOWS_ROOT}]
+    inside = os.path.realpath(os.path.dirname(srt)) + os.sep
+    if srt.lower().endswith(".srt") and inside.startswith(tuple(roots)) and (
+            not os.path.isfile(srt) or not _media_for_subtitle(srt)):
+        adopted = _adopt_orphan_subtitle(srt)
+        if adopted is None:
+            return {"status": "ok", "ads": 0, "action": "duplicate of the renamed episode's sidecar: recycled",
+                    "offset": 0.0, "factor": 1.0, "text": None, "written": False, "media": None}
+        srt = adopted
     real = os.path.realpath(srt)
     roots = [os.path.realpath(r) + os.sep for r in {MEDIA_ROOT, SHOWS_ROOT}]
     if not real.lower().endswith(".srt") or not real.startswith(tuple(roots)) or not os.path.isfile(real):
@@ -2199,7 +2245,13 @@ def _fix_subtitle(srt, measure_fn=None):
 def _fix_subtitle_job(srt):
     with _SUBFIX_LOCK:
         try:
-            r = _fix_subtitle(srt)
+            try:
+                r = _fix_subtitle(srt)
+            except FileNotFoundError:               # renamed with its episode mid-filter (Prison Break S01E21)
+                moved = _adopt_orphan_subtitle(srt)
+                if not moved or moved == srt:
+                    raise
+                srt, r = moved, _fix_subtitle(moved)
             name = os.path.basename(srt)
             print(f"[subs] {name}: {r['status']} ads={r['ads']} {r['action']} "
                   f"final={r['offset']:+.2f}s/{r['factor']:.4f} written={r['written']}", flush=True)

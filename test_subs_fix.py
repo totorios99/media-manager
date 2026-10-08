@@ -71,6 +71,20 @@ def main():
     except ValueError:
         pass
 
+    # Prison Break S01: Bazarr names the sidecar after the release; media-manager renames the episode
+    rel = os.path.join(season, "www.UIndex.org    -    Show S01E01 Pilot 1080p BluRay x264-OFT.es-MX.srt")
+    open(rel, "w", encoding="utf-8").write(SRT)            # orphan whose language the episode already has (.hi)
+    r5 = app._fix_subtitle(rel, fake(6.93))
+    assert r5["action"].startswith("duplicate") and not os.path.exists(rel), r5
+    recycled = os.path.join(os.path.dirname(root), ".recycle", os.path.relpath(rel, os.path.dirname(root)))
+    assert os.path.exists(recycled), "duplicate moved to .recycle, not deleted"
+    rel2 = os.path.join(season, "www.UIndex.org - Show S01E02 Two 1080p BluRay x264-OFT.fr.srt")
+    open(rel2, "w", encoding="utf-8").write(SRT)           # orphan in a new language: adopted under the episode
+    r6 = app._fix_subtitle(rel2, fake(6.93))
+    assert r6["status"] == "ok" and os.path.exists(os.path.join(season, "Show - S01E02.fr.srt")), r6
+    gone = os.path.join(season, "www.UIndex.org - Show S01E02 Two.en.srt")    # moved by the rename already
+    assert app._adopt_orphan_subtitle(gone).endswith("Show - S01E02.en.srt")
+
     # a rejected result is never written
     bad = os.path.join(season, "Show - S01E02.es-MX.srt")
     open(bad, "w", encoding="utf-8").write(SRT)

@@ -194,6 +194,9 @@ def fix_once(media, srt, measure_fn=None, linear=False):
     else:
         return res("rejected", kept, f"non-standard speed {fac:.4f}: another cut?", off, fac)
     o3, f3 = trial(fixed)
+    if abs(f3 - 1) <= FAC_OK and not _settled(o3, f3):     # speed right, a residual offset left: one more shift
+        fixed = shift(fixed, o3)                            # (Prison Break E15/E19: +0.22 s / +0.17 s after scaling)
+        o3, f3 = trial(fixed)
     return res("ok" if _settled(o3, f3) else "rejected", fixed, action, o3, f3)
 
 

@@ -144,10 +144,17 @@ def cycle(st):
         running = alive(pid_of(name))
         if name == want and window:
             if not running:
+                # a run that left fewer pending than it started with did its job: new sidecars arrived after it,
+                # it did not die (2026-10-07: Prison Break arriving all day used up the 3 starts by 19:36)
+                pend = queue_pending() if name == "queue" else None
+                last = st.setdefault("pending_at_start", {}).get(name)
+                if pend is not None and last and set(last) - set(pend):   # some of what it started with got done
+                    st["restarts"][f"{name}:{today}"] = 0
                 n = st["restarts"].get(f"{name}:{today}", 0)
                 if n < 3:                                    # first start + at most two relaunches per night
                     st["restarts"][f"{name}:{today}"] = n + 1
                     start(name, args)
+                    st["pending_at_start"][name] = pend
                     notes.append(f"{name} started" if n == 0 else f"{name} relaunched ({n}/2)")
                 else:
                     alert(st, f"giveup:{name}", f"Cola nocturna {name} no avanza",

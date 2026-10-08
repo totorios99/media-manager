@@ -49,8 +49,31 @@ def test_inside_window_starts_the_first_pending_job_only():
     ov.job_done = lambda name, st: name == "never"        # nothing done
     ov.shutil.disk_usage = lambda p: type("U", (), {"free": 2e12})()
     ov.subprocess.run = lambda *a, **k: type("R", (), {"stdout": "active\n"})()
+    ov.queue_pending = lambda: ["a.srt"]
     ov.cycle({"alerts": {}, "svc_restart_at": 0, "restarts": {}, "done": {}})
     assert started == ["queue"], started
+
+
+def test_a_queue_that_made_progress_is_not_counted_as_dead():
+    """Prison Break arrived all day under the 0-24 window: three normal exits used up the night's three starts."""
+    started, sent = [], []
+    ov.start = lambda name, args: started.append(name)
+    ov.alert = lambda st, key, *a, **k: sent.append(key)
+    ov.mounted, ov.in_window, ov.alive = (lambda: True), (lambda *a, **k: True), (lambda pid: False)
+    ov.stop = lambda name: None
+    ov.job_done = lambda name, st: name != "queue"
+    ov.shutil.disk_usage = lambda p: type("U", (), {"free": 2e12})()
+    ov.subprocess.run = lambda *a, **k: type("R", (), {"stdout": "active\n"})()
+    today = ov.time.strftime("%F")
+    st = {"alerts": {}, "svc_restart_at": 0, "restarts": {f"queue:{today}": 3}, "done": {},
+          "pending_at_start": {"queue": ["old1.srt", "old2.srt"]}}
+    ov.queue_pending = lambda: ["old2.srt", "new1.srt", "new2.srt"]      # more pending, but old1 got done
+    ov.cycle(st)
+    assert started == ["queue"] and "giveup:queue" not in sent, (started, sent)
+    started.clear()
+    st["restarts"][f"queue:{today}"] = 3                                 # nothing it started with got done: dead
+    ov.cycle(st)
+    assert started == [] and "giveup:queue" in sent, (started, sent)
 
 
 if __name__ == "__main__":

@@ -112,7 +112,7 @@ def measure(media, srt):
 WINDOW_S, WINDOW_OFF_OK, REFIT_MAX = 480, 0.3, 3.0   # REFIT_MAX: Prison Break E12/E21/E22 went to tens of seconds after refitting
 
 
-def window_offsets(media, srt, measure_fn=None, n=3):
+def window_offsets(media, srt, measure_fn=None, n=3, starts=None, length=WINDOW_S):
     """Offset measured separately at the start, middle and end of the film (WINDOW_S each). A single global fit can
     average a wrong cold open into a right body: Prison Break E06 was 'factor 1.0000 / +0.00 s' overall and off before
     the intro. -> [(window_start_s, offset_s or None)]. Each window: its audio cut to a temp WAV, its cues re-based."""
@@ -122,10 +122,10 @@ def window_offsets(media, srt, measure_fn=None, n=3):
     if not cues:
         return []
     end = cues[-1][1]
-    starts = [max(cues[0][0] - 30, 0), max(end / 2 - WINDOW_S / 2, 0), max(end - WINDOW_S, 0)][:n]
+    starts = starts or [max(cues[0][0] - 30, 0), max(end / 2 - WINDOW_S / 2, 0), max(end - WINDOW_S, 0)][:n]
     out = []
     for a in starts:
-        sub = [(x - a, y - a, t) for x, y, t in cues if a <= x < a + WINDOW_S]
+        sub = [(x - a, y - a, t) for x, y, t in cues if a <= x < a + length]
         if len(sub) < 8:                      # too little dialogue to say anything
             out.append((a, None))
             continue
@@ -135,7 +135,7 @@ def window_offsets(media, srt, measure_fn=None, n=3):
         os.close(fd2)
         try:
             subprocess.run(["ionice", "-c3", "nice", "-n", "10", "ffmpeg", "-v", "error", "-nostdin", "-y", "-ss", str(a),
-                            "-t", str(WINDOW_S), "-i", media, "-map", "0:a:0", "-ac", "1", "-ar", "16000", wav],
+                            "-t", str(length), "-i", media, "-map", "0:a:0", "-ac", "1", "-ar", "16000", wav],
                            check=True, capture_output=True, timeout=3600)
             open(s, "w", encoding="utf-8").write(render(sub))
             off, _ = measure_fn(wav, s)

@@ -23,6 +23,7 @@ Editing a file makes Jellyfin drop its media segments: after a show, wait for Je
 import json, os, re, signal, sqlite3, subprocess, sys, time
 
 import commands
+import overnight
 import library_audit as la
 import scan
 
@@ -351,7 +352,10 @@ def run_movies(run, ignore_downloads=False):
         while not ignore_downloads and downloads_busy() and not stop:
             print("downloads active, waiting", flush=True)
             time.sleep(QUIET)
-        if stop:
+        # night window (MM_NIGHT, default 0-7): the USB 2.0 bridge dropped twice under all-day load (10-03, 10-09)
+        while run and not stop and not overnight.in_window():
+            time.sleep(300)
+        if stop or not os.path.ismount("/srv/storage"):
             break
         try:
             run_movie(folder, run)

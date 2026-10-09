@@ -109,7 +109,7 @@ def measure(media, srt):
     return float(off[-1]), float(fac[-1])
 
 
-WINDOW_S, WINDOW_OFF_OK = 480, 0.3
+WINDOW_S, WINDOW_OFF_OK, REFIT_MAX = 480, 0.3, 3.0   # REFIT_MAX: Prison Break E12/E21/E22 went to tens of seconds after refitting
 
 
 def window_offsets(media, srt, measure_fn=None, n=3):
@@ -154,8 +154,8 @@ def refit_from_windows(srt, offsets):
     For a drift too small for the global measure to see: Prison Break E08 scaled 1.045 still went -0.57 s / +0.89 s /
     +1.43 s across the episode. Writes the file; returns (s, b) or None when fewer than two windows measured."""
     pts = [(a + WINDOW_S / 2, o) for a, o in offsets if o is not None]
-    if len(pts) < 2:
-        return None
+    if len(pts) < 2 or any(abs(o) > REFIT_MAX for _, o in pts):
+        return None                              # big window errors are another edit, not a drift: a line makes it worse
     n = len(pts)
     mx, my = sum(x for x, _ in pts) / n, sum(y for _, y in pts) / n
     s = sum((x - mx) * (y - my) for x, y in pts) / sum((x - mx) ** 2 for x, _ in pts)

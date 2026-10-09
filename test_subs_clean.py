@@ -121,6 +121,20 @@ def test_windows_catch_a_cold_open_the_global_fit_hides():
     print("test_windows_catch_a_cold_open_the_global_fit_hides OK")
 
 
+def test_refit_from_windows_removes_a_small_linear_drift():
+    """E08: windows at 0/17/35 min said -0.57/+0.89/+1.43 s. The refit line must bring every window to ~0."""
+    cues = [(60.0 * i, 60.0 * i + 2, f"l{i}") for i in range(1, 45)]
+    p = _write("mm-test-refit.srt", cues)
+    drift = lambda t: -0.8 + 0.001 * t                         # what each cue still lacks to be in time
+    offs = [(a, drift(a + sc.WINDOW_S / 2)) for a in (0, 1000, 2100)]
+    s, b = sc.refit_from_windows(p, offs)
+    out = sc.parse(sc.decode(open(p, "rb").read()))
+    for (t, _, _), (t2, _, _) in zip(cues, out):
+        assert abs(t2 - (t + drift(t))) < 0.01, (t, t2)
+    os.unlink(p)
+    print("test_refit_from_windows_removes_a_small_linear_drift OK")
+
+
 def test_linear_override_scales_a_constant_drift_and_still_remeasures():
     """Prison Break S01: a constant 1.006 drift. Rejected by default; with linear=True it is scaled, and the result
     is kept only because the re-measure settles at 1.0000."""
@@ -164,6 +178,7 @@ if __name__ == "__main__":
     test_fix_rejects_nonstandard_speed()
     test_linear_override_scales_a_constant_drift_and_still_remeasures()
     test_windows_catch_a_cold_open_the_global_fit_hides()
+    test_refit_from_windows_removes_a_small_linear_drift()
     test_mid_file_ad_removed_dialogue_kept()
     test_credit_block_loses_the_name_too()
     test_cue_with_dialogue_keeps_dialogue()

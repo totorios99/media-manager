@@ -149,6 +149,22 @@ def window_offsets(media, srt, measure_fn=None, n=3):
     return out
 
 
+def refit_from_windows(srt, offsets):
+    """Least-squares line through the per-window offsets (offset = b + s*t), applied as scale (1+s) then shift b.
+    For a drift too small for the global measure to see: Prison Break E08 scaled 1.045 still went -0.57 s / +0.89 s /
+    +1.43 s across the episode. Writes the file; returns (s, b) or None when fewer than two windows measured."""
+    pts = [(a + WINDOW_S / 2, o) for a, o in offsets if o is not None]
+    if len(pts) < 2:
+        return None
+    n = len(pts)
+    mx, my = sum(x for x, _ in pts) / n, sum(y for _, y in pts) / n
+    s = sum((x - mx) * (y - my) for x, y in pts) / sum((x - mx) ** 2 for x, _ in pts)
+    b = my - s * mx
+    cues = parse(decode(open(srt, "rb").read()))
+    open(srt, "w", encoding="utf-8").write(render(shift(scale(cues, 1 + s), b)))
+    return s, b
+
+
 def windows_ok(offsets):
     return all(o is None or abs(o) <= WINDOW_OFF_OK for _, o in offsets) and any(o is not None for _, o in offsets)
 

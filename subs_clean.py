@@ -109,6 +109,50 @@ def measure(media, srt):
     return float(off[-1]), float(fac[-1])
 
 
+WINDOW_S, WINDOW_OFF_OK = 480, 0.3
+
+
+def window_offsets(media, srt, measure_fn=None, n=3):
+    """Offset measured separately at the start, middle and end of the film (WINDOW_S each). A single global fit can
+    average a wrong cold open into a right body: Prison Break E06 was 'factor 1.0000 / +0.00 s' overall and off before
+    the intro. -> [(window_start_s, offset_s or None)]. Each window: its audio cut to a temp WAV, its cues re-based."""
+    import tempfile
+    measure_fn = measure_fn or measure
+    cues = parse(decode(open(srt, "rb").read()))
+    if not cues:
+        return []
+    end = cues[-1][1]
+    starts = [max(cues[0][0] - 30, 0), max(end / 2 - WINDOW_S / 2, 0), max(end - WINDOW_S, 0)][:n]
+    out = []
+    for a in starts:
+        sub = [(x - a, y - a, t) for x, y, t in cues if a <= x < a + WINDOW_S]
+        if len(sub) < 8:                      # too little dialogue to say anything
+            out.append((a, None))
+            continue
+        fd, wav = tempfile.mkstemp(suffix=".wav", dir="/var/tmp")
+        os.close(fd)
+        fd2, s = tempfile.mkstemp(suffix=".srt", dir="/var/tmp")
+        os.close(fd2)
+        try:
+            subprocess.run(["ionice", "-c3", "nice", "-n", "10", "ffmpeg", "-v", "error", "-nostdin", "-y", "-ss", str(a),
+                            "-t", str(WINDOW_S), "-i", media, "-map", "0:a:0", "-ac", "1", "-ar", "16000", wav],
+                           check=True, capture_output=True, timeout=3600)
+            open(s, "w", encoding="utf-8").write(render(sub))
+            off, _ = measure_fn(wav, s)
+            out.append((a, off))
+        except Exception:
+            out.append((a, None))
+        finally:
+            for p in (wav, s):
+                if os.path.exists(p):
+                    os.unlink(p)
+    return out
+
+
+def windows_ok(offsets):
+    return all(o is None or abs(o) <= WINDOW_OFF_OK for _, o in offsets) and any(o is not None for _, o in offsets)
+
+
 def center_channel(media):
     """Path of a temporary 16 kHz mono WAV of the first audio track's centre channel, or None when there is no
     centre. On 5.1/7.1 mixes ffsubsync's speech detection over the whole mix can lock onto music and effects:

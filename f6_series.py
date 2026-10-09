@@ -59,8 +59,10 @@ def filtered_sidecars(folder, stem, log_text):
     return out
 
 
-def plan(conn, eid, sidecars, kind="episode"):
-    """-> (action, rows, why). Works on `conn`, which must be a throwaway copy. kind: episode | movie."""
+def plan(conn, eid, sidecars, kind="episode", replace=False):
+    """-> (action, rows, why). Works on `conn`, which must be a throwaway copy. kind: episode | movie.
+    replace=True: a filtered sidecar takes the place of the embedded text track of the same language instead of being
+    dropped as its duplicate (Prison Break E06, 2026-10-09: a hand-scaled embed drifted; the BluRay sub replaces it)."""
     col, table = ("episode_id", "episodes") if kind == "episode" else ("movie_id", "movies")
     for s in sidecars:
         conn.execute(f"INSERT INTO tracks ({col}, mkv_id, type, codec, lang, name, ext_path, sdh_flag, keep) "
@@ -70,6 +72,13 @@ def plan(conn, eid, sidecars, kind="episode"):
                 if r["lang"] == "spa" and not r["forced_flag"] and scan._sub_class(r) == "text"]
     scan.suggest_tracks(conn, eid, table=table, multi_audio=(kind == "episode"))
     rows = [dict(r) for r in conn.execute(f"SELECT * FROM tracks WHERE {col}=?", (eid,))]
+    for new in [r for r in rows if replace and r["ext_path"] and not r["keep"]]:
+        old = next((r for r in rows if r["mkv_id"] is not None and r["type"] == "subtitle" and r["keep"]
+                    and r["lang"] == new["lang"] and not r["forced_flag"] and scan._sub_class(r) == "text"), None)
+        if old:
+            for k in ("keep", "out_order", "out_default", "out_forced", "out_lang"):
+                new[k] = old[k]
+            old["keep"] = 0
     if len(full_spa) > 1:
         return "blocked", rows, f"{len(full_spa)} Spanish full text subtitles without variant (P1 first)"
     dropped = [r for r in rows if r["mkv_id"] is not None and not r["keep"]]
@@ -229,7 +238,7 @@ def recycle(path):
     return dst
 
 
-def main(run, limit, show, ignore_downloads=False):
+def main(run, limit, show, ignore_downloads=False, replace=False):
     src = sqlite3.connect(os.path.join(HERE, "media.db"))
     mem = sqlite3.connect(":memory:")
     src.backup(mem)
@@ -250,7 +259,7 @@ def main(run, limit, show, ignore_downloads=False):
         if not os.path.exists(path):
             continue
         sidecars = filtered_sidecars(folder, os.path.splitext(e["file"])[0], log_text)
-        action, rows, why = plan(mem, e["id"], sidecars)
+        action, rows, why = plan(mem, e["id"], sidecars, replace=replace)
         counts[action] = counts.get(action, 0) + 1
         if not run or action in ("skip", "blocked"):
             continue
@@ -361,4 +370,4 @@ if __name__ == "__main__":
         sys.exit()
     main("--run" in a, int(a[a.index("--limit") + 1]) if "--limit" in a else 0,
          a[a.index("--show") + 1] if "--show" in a else None,
-         "--ignore-downloads" in a)                  # Antonio 2026-10-04: the stalled downloads do not compete
+         "--ignore-downloads" in a, "--replace-sidecars" in a)                  # Antonio 2026-10-04: the stalled downloads do not compete

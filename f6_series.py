@@ -239,7 +239,7 @@ def recycle(path):
     return dst
 
 
-def main(run, limit, show, ignore_downloads=False, replace=False):
+def main(run, limit, show, ignore_downloads=False, replace=False, match=None):
     src = sqlite3.connect(os.path.join(HERE, "media.db"))
     mem = sqlite3.connect(":memory:")
     src.backup(mem)
@@ -257,7 +257,7 @@ def main(run, limit, show, ignore_downloads=False, replace=False):
     for e in eps:
         folder = os.path.join(la.SHOWS, e["sf"], e["ef"])
         path = os.path.join(folder, e["file"])
-        if not os.path.exists(path):
+        if not os.path.exists(path) or (match and not re.search(match, e["file"])):
             continue
         sidecars = filtered_sidecars(folder, os.path.splitext(e["file"])[0], log_text)
         action, rows, why = plan(mem, e["id"], sidecars, replace=replace)
@@ -374,4 +374,5 @@ if __name__ == "__main__":
         sys.exit()
     main("--run" in a, int(a[a.index("--limit") + 1]) if "--limit" in a else 0,
          a[a.index("--show") + 1] if "--show" in a else None,
-         "--ignore-downloads" in a, "--replace-sidecars" in a)                  # Antonio 2026-10-04: the stalled downloads do not compete
+         "--ignore-downloads" in a, "--replace-sidecars" in a,
+         a[a.index("--match") + 1] if "--match" in a else None)   # e.g. "S01E(0[7-9]|1\\d|2[0-2])"                  # Antonio 2026-10-04: the stalled downloads do not compete

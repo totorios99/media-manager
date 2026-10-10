@@ -19,9 +19,17 @@ TS = re.compile(r"(\d+):(\d\d):(\d\d)[,.](\d{3}) --> (\d+):(\d\d):(\d\d)[,.](\d{
 # Provider names are safe anywhere: dialogue never says them. Mr. Robot's
 # subtitulos.es card sits at 06:22, not at the edges, so position cannot be the test.
 STRONG = re.compile(r"subtitulos\.es|difunde la palabra|opensubtitles|subdivx|argenteam|"
-                    r"addic7ed|tusubtitulo|subscene|podnapisi", re.I)
+                    r"addic7ed|tusubtitulo|subscene|podnapisi|asia-team|subt[ií]tulos traducidos por", re.I)
+# A line that is little more than a web address or an e-mail is a credit (Prison Break E14 "OverCraft@gmail.com",
+# E17 ".: Www.Asia-Team.Net :." at minute 7); "Mira www.google.com y dime." is dialogue and stays.
+LINK = re.compile(r"\bwww\.[\w-]+\.\w+\S*|https?://\S+|\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b", re.I)
+
+
+def _link_only(line):
+    return bool(LINK.search(line)) and len(re.findall(r"\w+", LINK.sub(" ", line))) <= 2
 # Credits lines that could be real dialogue: only at the very start or end of the file.
-WEAK = re.compile(r"traducid[oa] por|sincronizad[oa] por|subtitulad[oa] por|subt[ií]tulos por|"   # Roman Holiday
+WEAK = re.compile(r"traducc?id[oa] por|sincronizad[oa] por|subtitulad[oa] por|subt[ií]tulos por|"   # Roman Holiday
+                  r"edici[oó]n final por|corregid[oa] por|"                                         # Prison Break E14
                   r"sync(?:hronized)? (?:and corrected )?by|\bresync\b", re.I)
 EDGE_S = 90
 
@@ -77,7 +85,7 @@ def strip_ads(cues):
             continue
         keep = []
         for ln in text.split("\n"):
-            if STRONG.search(ln) or (edge and WEAK.search(ln)):
+            if STRONG.search(ln) or _link_only(ln) or (edge and WEAK.search(ln)):
                 removed.append((a, ln.strip()))
             else:
                 keep.append(ln)

@@ -62,6 +62,19 @@ def test_credit_block_loses_the_name_too():
     print("test_credit_block_loses_the_name_too OK")
 
 
+def test_urls_emails_and_team_credits_anywhere():
+    """Prison Break E14/E17: e-mail credits at the edges, an Asia-Team block at minute 7."""
+    kept, removed = sc.strip_ads(sc.parse(
+        "1\n00:00:05,000 --> 00:00:08,000\nTraduccido por Aleath\nSincronizado por OverCraft\n\n"
+        "2\n00:00:09,000 --> 00:00:10,000\nOverCraft@gmail.com\n\n"
+        "3\n00:06:54,000 --> 00:07:00,000\nSubtítulos Traducidos por:\n\n"
+        "4\n00:07:06,000 --> 00:07:13,000\nEquipo Asia-Team\n.: Www.Asia-Team.Net :.\n\n"
+        "5\n00:20:00,000 --> 00:20:02,000\nTenemos que salir de aquí.\n\n"
+        "6\n00:42:42,000 --> 00:42:47,000\nEdicion final por OverCraft\n"))
+    assert [t for _, _, t in kept] == ["Tenemos que salir de aquí."], kept
+    print("test_urls_emails_and_team_credits_anywhere OK")
+
+
 def test_cue_with_dialogue_keeps_dialogue():
     kept, removed = sc.strip_ads(sc.parse(
         "1\n00:00:05,000 --> 00:00:06,000\nHola\nwww.subtitulos.es\n"))
@@ -181,5 +194,6 @@ if __name__ == "__main__":
     test_refit_from_windows_removes_a_small_linear_drift()
     test_mid_file_ad_removed_dialogue_kept()
     test_credit_block_loses_the_name_too()
+    test_urls_emails_and_team_credits_anywhere()
     test_cue_with_dialogue_keeps_dialogue()
     test_render_roundtrip_and_shift()

@@ -36,10 +36,10 @@ LOG, REVIEW = os.path.join(HERE, "ocr_pass.jsonl"), os.path.join(HERE, "ocr_revi
 def targets(conn):
     """(kind, id, path, original_language) for every file the DB says has a kept PGS track."""
     q = ("SELECT DISTINCT 'movie', m.id, m.folder, m.file, m.original_language FROM tracks t JOIN movies m ON m.id=t.movie_id "
-         "WHERE t.type='subtitle' AND t.codec LIKE '%PGS%' AND t.keep=1 "
+         "WHERE t.type='subtitle' AND (t.codec LIKE '%PGS%' OR t.codec LIKE '%VobSub%') AND t.keep=1 "
          "UNION SELECT DISTINCT 'episode', e.id, s.folder || '/' || e.folder, e.file, s.original_language FROM tracks t "
          "JOIN episodes e ON e.id=t.episode_id JOIN shows s ON s.id=e.show_id "
-         "WHERE t.type='subtitle' AND t.codec LIKE '%PGS%' AND t.keep=1")
+         "WHERE t.type='subtitle' AND (t.codec LIKE '%PGS%' OR t.codec LIKE '%VobSub%') AND t.keep=1")
     out = []
     for kind, oid, folder, file, orig in conn.execute(q):
         root = la.MOVIES if kind == "movie" else la.SHOWS
@@ -64,7 +64,18 @@ def plan_file(path, orig_lang, vocs, run):
              for t in tracks if t["type"] == "subtitles" and "PGS" not in t["codec"] and "VobSub" not in t["codec"]
              and t["properties"].get("language_ietf") != "es-ES"}
     pgs = [t for t in tracks if t["type"] == "subtitles" and "PGS" in t["codec"]]
-    decisions, need_ocr = [], []
+    vobs = [t for t in tracks if t["type"] == "subtitles" and "VobSub" in t["codec"]]
+    decisions, need_ocr, need_save = [], [], []
+    for t in vobs:      # no VobSub OCR here: same rule as a failed gate (Antonio 2026-10-11), original kept in .recycle
+        lang, forced = t["properties"].get("language"), bool(t["properties"].get("forced_track"))
+        if lang not in LANG2:
+            decisions.append((t, "drop", f"{lang}: outside the convention", None))
+        elif (lang, forced) in texts:
+            decisions.append((t, "drop", f"{lang}{' forced' if forced else ''} already has a text track", None))
+        elif t["properties"].get("language_ietf") == "es-ES" and orig_lang != "es":
+            decisions.append((t, "drop", "castellano VobSub; D5", None))
+        else:
+            need_save.append(t)
     for t in pgs:
         lang, forced = t["properties"].get("language"), bool(t["properties"].get("forced_track"))
         if lang not in LANG2:
@@ -73,13 +84,19 @@ def plan_file(path, orig_lang, vocs, run):
             decisions.append((t, "drop", f"{lang}{' forced' if forced else ''} already has a text track", None))
         else:
             need_ocr.append(t)
-    if not need_ocr or not run:
+    if not run:
         decisions += [(t, "ocr", "planned", None) for t in need_ocr]
+        decisions += [(t, "drop", "VobSub: no OCR; left to Bazarr", None) for t in need_save]
+        return decisions
+    if not need_ocr and not need_save:
         return decisions
     d = os.path.join(WORK, str(abs(hash(path))))
     os.makedirs(d, exist_ok=True)
-    subprocess.run(["ionice", "-c3", "mkvextract", path, "tracks"] + [f"{t['id']}:{d}/{t['id']}.sup" for t in need_ocr],
-                   capture_output=True, check=True)
+    subprocess.run(["ionice", "-c3", "mkvextract", path, "tracks"] + [f"{t['id']}:{d}/{t['id']}.sup" for t in need_ocr]
+                   + [f"{t['id']}:{d}/{t['id']}.sub" for t in need_save], capture_output=True, check=True)
+    for t in need_save:
+        decisions.append((t, "drop", "VobSub: no OCR; left to Bazarr",
+                          {"sup": [p for p in (f"{d}/{t['id']}.sub", f"{d}/{t['id']}.idx") if os.path.exists(p)]}))
     for t in need_ocr:
         p, lang2 = t["properties"], LANG2[t["properties"]["language"]]
         forced = bool(p.get("forced_track"))
@@ -143,9 +160,11 @@ def remux(path, info, decisions):
         new = json.loads(subprocess.run(["mkvmerge", "-J", tmp], capture_output=True, text=True).stdout)["tracks"]
         if len(new) != len(order):
             return f"tracks {len(new)} != planned {len(order)}"
-        kept_pgs = sum(1 for t, a, _, _ in decisions if a == "keep")
-        if sum("PGS" in t["codec"] for t in new) != kept_pgs:
-            return f"PGS tracks in the output: {sum('PGS' in t['codec'] for t in new)}, expected {kept_pgs}"
+        kept_pgs = sum(1 for t in info["tracks"] if ("PGS" in t["codec"] or "VobSub" in t["codec"])
+                       and by_id.get(t["id"], ("keep",))[0] == "keep")
+        images = sum("PGS" in t["codec"] or "VobSub" in t["codec"] for t in new)
+        if images != kept_pgs:
+            return f"image subtitle tracks in the output: {images}, expected {kept_pgs}"
         out_ids = [k for k, spec in enumerate(order) if spec.startswith("0:")]
         a, b = f6.stream_md5(path, keep_ids), f6.stream_md5(tmp, out_ids)
         if a != b:
@@ -206,10 +225,12 @@ def main(run, limit, match, ignore_window):
         if not err:
             for t, a, why, x in decisions:
                 if x and x.get("sup"):
-                    dst = os.path.join(f6.RECYCLE, os.path.relpath(path, os.path.dirname(f6.RECYCLE))
-                                       + f".track{t['id']}.{t['properties'].get('language')}.sup")
-                    os.makedirs(os.path.dirname(dst), exist_ok=True)
-                    shutil.copyfile(x["sup"], dst)
+                    srcs = x["sup"] if isinstance(x["sup"], list) else [x["sup"]]
+                    base = os.path.join(f6.RECYCLE, os.path.relpath(path, os.path.dirname(f6.RECYCLE))
+                                        + f".track{t['id']}.{t['properties'].get('language')}")
+                    os.makedirs(os.path.dirname(base), exist_ok=True)
+                    for src in srcs:
+                        shutil.copyfile(src, dst := base + os.path.splitext(src)[1])
                     open(REVIEW, "a").write(json.dumps({"path": path, "track": t["id"], "lang": t["properties"].get("language"),
                                                         "why": why, "sup": dst}, ensure_ascii=False) + "\n")
             import app

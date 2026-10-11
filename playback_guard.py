@@ -17,7 +17,7 @@ import json, os, re, signal, sys, time, urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHECK = 10
 ROOT_BINARIES = {"python", "python3", "uv", "uvx", "ffmpeg"}   # not shells or grep that merely mention a job
-HEAVY = re.compile(r"f6_series\.py|ocr_pass\.py|ffsubsync|pgsrip|subs_variant_pass\.py|pan=mono\|c0=FC|subs_queue\.py")
+HEAVY = re.compile(r"f6_series\.py|ocr_pass\.py|subs_check\.py|dbz_rm_subs\.py|ffsubsync|pgsrip|subs_variant_pass\.py|pan=mono\|c0=FC|subs_queue\.py")
 
 
 def env():

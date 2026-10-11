@@ -26,5 +26,17 @@ def test_classify():
     print("test_classify OK")
 
 
+def test_tie_plan_keeps_only_the_dub():
+    s04e12 = {"3": dict(t(818, False, 0), lat=4), "4": dict(t(1637, True, 0), lat=2)}
+    assert d.tie_plan(s04e12) == ("3", [], ["4"]), "the lyrics-free dub stays, the fansub goes"
+    s04e05 = {"3": t(278, True, 0), "4": t(833, True, 1), "5": t(2177, True, 1), "6": t(235, True, 0)}
+    assert d.tie_plan(s04e05) == (None, ["3", "6"], ["4", "5"]), "no dub track: nothing Spanish stays"
+    s06e16 = {"3": t(242, True, 0), "4": t(1411, True, 0), "5": dict(t(981, False, 0), lat=1)}
+    assert d.tie_plan(s06e16) == ("5", ["3"], ["4"])
+    assert d.tie_plan({"3": t(900, False, 3)})[0] is None, "a castellano dub subtitle is not kept"
+    print("test_tie_plan_keeps_only_the_dub OK")
+
+
 if __name__ == "__main__":
     test_classify()
+    test_tie_plan_keeps_only_the_dub()

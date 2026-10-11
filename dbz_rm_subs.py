@@ -13,7 +13,7 @@ anything else, or not exactly one Latino when castellano is absent -> blocked.
 Rick and Morty: the second track is "FORZADO" (36-258 words) without the forced flag -> flag-forced=1.
 mkvpropedit by UID; the DB row is re-read; F6 does the remux afterwards.
 """
-import json, os, sqlite3, subprocess, sys
+import json, os, sqlite3, subprocess, sys, time
 
 import commands
 import library_audit as la
@@ -48,20 +48,88 @@ def classify(tracks):
     return acts, None
 
 
+def tie_plan(tracks):
+    """Antonio 2026-10-11 for the ties: "conserva los del doblaje siempre y cuando no sean castellano".
+    The dub's subtitle is the full track WITHOUT the opening lyrics (the Latino dub sings its own). -> (dub, castellano
+    ids, other ids to drop). dub is None when there is none, or it reads castellano (>= 2 markers)."""
+    dubs = [i for i, t in tracks.items() if t["words"] >= 300 and not t["chala"]]
+    dub = dubs[0] if len(dubs) == 1 and tracks[dubs[0]]["cast"] <= 1 else None
+    cast = [i for i, t in tracks.items() if i != dub and (t["words"] < 300 or t["cast"] >= 2)]
+    other = [i for i in tracks if i != dub and i not in cast]
+    return dub, cast, other
+
+
+def apply_tie(r, conn_path):
+    """Tag, then a verified remux that keeps only the dub's Spanish subtitle. -> (status, detail)."""
+    import f6_series as f6
+    dub, cast, other = tie_plan(r["tracks"])
+    tracks = {str(t["id"]): t for t in la.probe(r["path"])["tracks"]}
+    edits = []
+    for i in cast:
+        edits += ["--edit", f"track:={tracks[i]['properties']['uid']}", "--set", "language=spa",
+                  "--set", "language-ietf=es-ES", "--set", "name=Español (España)"]
+    if dub:
+        p = tracks[dub]["properties"]
+        nm = commands._canonical_name({"type": "subtitle", "out_lang": "spa", "lang": "spa-mx",
+                                       "sdh_flag": p.get("flag_hearing_impaired"), "out_forced": p.get("forced_track")})
+        edits += ["--edit", f"track:={p['uid']}", "--set", "language=spa", "--set", "language-ietf=es-419", "--set", f"name={nm}"]
+    res = subprocess.run(["ionice", "-c3", "mkvpropedit", r["path"]] + edits, capture_output=True, text=True)
+    if res.returncode:
+        return "FAILED", f"mkvpropedit {res.stdout[-200:]}"
+    import app
+    c = app.get_db()
+    try:
+        app._reinspect_in_place(c, "episode", r["id"], r["path"])
+        c.commit()
+    finally:
+        c.close()
+    src = sqlite3.connect(conn_path)
+    mem = sqlite3.connect(":memory:")
+    src.backup(mem)
+    mem.row_factory = sqlite3.Row
+    _, rows, _ = f6.plan(mem, r["id"], [])
+    drop = {int(i) for i in cast + other}
+    for row in rows:
+        if row["mkv_id"] in drop:
+            row["keep"], row["out_default"] = 0, 0
+    if dub and not any(row["mkv_id"] == int(dub) and row["keep"] for row in rows):
+        return "FAILED", "the plan does not keep the dub's subtitle"
+    err = f6.remux_verified(r["path"], rows)
+    if err:
+        return "FAILED", err
+    c = app.get_db()
+    try:
+        c.execute("UPDATE episodes SET output_file=NULL, status='clean', updated_at=? WHERE id=?", (app._now(), r["id"]))
+        app._reinspect_in_place(c, "episode", r["id"], r["path"])
+        c.commit()
+    finally:
+        c.close()
+    return "ok", f"dub {dub}, dropped {sorted(drop)}" + ("" if dub else " (no Latino sub left: Bazarr)")
+
+
 def main(survey, run):
     conn = sqlite3.connect(os.path.join(HERE, "media.db"))
     conn.row_factory = sqlite3.Row
     rows = [json.loads(l) for l in open(survey)]
+    # track ids are those of the survey: once a file was tagged or remuxed, never touch it again from this survey
+    done = {json.loads(l)["path"] for l in open(LOG) if '"ok"' in l} if os.path.exists(LOG) else set()
+    rows = [r for r in rows if r["path"] not in done]
     log = open(LOG, "a") if run else None
     counts = {}
     for r in rows:
         acts, why = classify(r["tracks"])
         name = os.path.basename(r["path"])
         if not acts:
-            counts["blocked"] = counts.get("blocked", 0) + 1
-            print("BLOCKED", name, why, flush=True)
+            dub, cast, other = tie_plan(r["tracks"])
+            counts["tie"] = counts.get("tie", 0) + 1
+            print("TIE", name, why, "-> keep dub", dub, "castellano", cast, "drop", other, flush=True)
             if run:
-                log.write(json.dumps({"id": r["id"], "path": r["path"], "status": "blocked", "why": why}, ensure_ascii=False) + "\n")
+                t0 = time.time()
+                status, detail = apply_tie(r, os.path.join(HERE, "media.db"))
+                log.write(json.dumps({"id": r["id"], "path": r["path"], "status": status, "tie": True, "detail": detail,
+                                      "secs": round(time.time() - t0)}, ensure_ascii=False) + "\n")
+                log.flush()
+                print(status, name, detail, flush=True)
             continue
         tracks = {str(t["id"]): t for t in la.probe(r["path"])["tracks"]}
         edits = []

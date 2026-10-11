@@ -122,7 +122,8 @@ TEXT_SUBS = {"ass": "ass", "ssa": "ass", "subrip": "srt"}
 
 def drop_end_times(data):
     """Text subtitle with every cue's END time removed; text and starts still decide. Death Note's karaoke has
-    zero-duration lines that mkvmerge lengthens (Antonio, 2026-10-11: accept that, video/audio stay bit-exact)."""
+    zero-duration lines that mkvmerge lengthens (Antonio, 2026-10-11: accept that, video/audio stay bit-exact).
+    The caller also drops CRs: mkvmerge turns a cue's inner LF into CRLF (Avengers Endgame, Matrix Resurrections)."""
     data = re.sub(rb"(\d\d:\d\d:\d\d,\d{3}) --> \d\d:\d\d:\d\d,\d{3}", rb"\1", data)
     return re.sub(rb"^(Dialogue: [^,]*,[^,]*),[^,]*,", rb"\1,", data, flags=re.M)
 
@@ -155,7 +156,7 @@ def stream_md5(path, ids, normalize=False):
             f = os.path.join(d, f"{i}.sub")
             if os.path.exists(f):
                 data = open(f, "rb").read()
-                res[i] = hashlib.md5(drop_end_times(data) if normalize else data).hexdigest()
+                res[i] = hashlib.md5(drop_end_times(data.replace(b"\r", b"")) if normalize else data).hexdigest()
         return [res[i] for i in ids] if len(res) == len(ids) else []
     finally:
         shutil.rmtree(d, ignore_errors=True)

@@ -14,3 +14,4 @@ hand fix, and the change folded into the pipeline, or why it stays manual. Rule 
 | 10-11 | DBZ S01E14, S04E01/02/06/08/09 (+4 ties): no Latino sub anywhere | DBZ has no Bazarr profile; providers return 0 results | — | Antonio's call (profile for DBZ) | waiting 10-19 |
 | 10-11 | Pirates of the Caribbean (2003): F6 "duration of track 1 differs" | packets identical; audio end 0.36 s later after remux; checking DTS timestamp gaps | pending | pending | investigating |
 | 10-11 | ASS subtitles not checked for ads/sync | subs_clean parses SRT only | — | **gap** | open |
+| 10-11 | ocr_pass/subs_check remux did not check per-track duration | found with Pirates: mkvmerge re-times DTS with duplicate-pts packets; hashes alone pass | — | `f6.durations_differ` shared by F6 and ocr_pass.remux (subs_check uses it too) | in pipeline |

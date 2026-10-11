@@ -166,6 +166,9 @@ def remux(path, info, decisions):
         if images != kept_pgs:
             return f"image subtitle tracks in the output: {images}, expected {kept_pgs}"
         out_ids = [k for k, spec in enumerate(order) if spec.startswith("0:")]
+        err = f6.durations_differ(path, info["tracks"], tmp, new, list(zip(keep_ids, out_ids)))
+        if err:
+            return err
         a, b = f6.stream_md5(path, keep_ids), f6.stream_md5(tmp, out_ids)
         if a != b:
             a, b = f6.stream_md5(path, keep_ids, True), f6.stream_md5(tmp, out_ids, True)

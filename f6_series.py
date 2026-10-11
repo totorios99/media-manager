@@ -167,6 +167,26 @@ def chapters(path):
     return re.findall(r"<ChapterTimeStart>([\d:.]+)", x), re.findall(r"<ChapterString>(.*?)</ChapterString>", x, re.S)
 
 
+def durations_differ(path, old_tracks, tmp, new_tracks, pairs):
+    """Per kept audio/video track (old id, new index): same end, or why not. The container lasts as long as its LONGEST
+    track, so dropping a subtitle legitimately shortens it (DBZ S09E15); subtitle statistics are recomputed anyway.
+    mkvmerge re-times some streams (Pirates of the Caribbean 2003: duplicate-pts DTS packets in the last 40 s, audio
+    end 0.36 s later with identical packets), so every remux path checks this, not only F6."""
+    old_tr = {t["id"]: t for t in old_tracks}
+    for o, n in pairs:
+        t = old_tr[o]
+        if t["type"] == "subtitles":
+            continue
+        a, b = secs(t["properties"].get("tag_duration")), secs(new_tracks[n]["properties"].get("tag_duration"))
+        if a is not None and b is not None and abs(a - b) > 0.1:
+            # the tag is a statistic mkvmerge recomputes; Heat (1995): 10224.256 -> 10218.303 s with the same last
+            # packet at 10224.245. Only the packets decide.
+            la_, lb = last_pts(path, o, a), last_pts(tmp, new_tracks[n]["id"], a)
+            if la_ is None or lb is None or abs(la_ - lb) > 0.1:
+                return f"duration of track {o} differs: {a:.3f} vs {b:.3f} s"
+    return None
+
+
 def remux_verified(path, rows):
     """Rewrite `path` in place per `rows` (suggest_tracks output). -> None on success, else why it was refused.
     The original is untouched unless every check passes."""
@@ -191,17 +211,10 @@ def remux_verified(path, rows):
             return "track layout differs from the plan"
         # per kept track, not the container: the container lasts as long as its LONGEST track, and dropping a
         # subtitle that ran past the video legitimately shortens it (DBZ S09E15: container 1481.8 s, video 1479.9 s)
-        old_tr = {t["id"]: t for t in info["tracks"]}
-        for t, n in zip(order, nt):
-            if t["mkv_id"] is None or t["type"] == "subtitle":    # subtitle statistics are recomputed; the text is compared below
-                continue
-            a, b = secs(old_tr[t["mkv_id"]]["properties"].get("tag_duration")), secs(n["properties"].get("tag_duration"))
-            if a is not None and b is not None and abs(a - b) > 0.1:
-                # the tag is a statistic mkvmerge recomputes; Heat (1995): 10224.256 -> 10218.303 s with the same last
-                # packet at 10224.245. Only the packets decide.
-                la_, lb = last_pts(path, t["mkv_id"], a), last_pts(tmp, n["id"], a)
-                if la_ is None or lb is None or abs(la_ - lb) > 0.1:
-                    return f"duration of track {t['mkv_id']} differs: {a:.3f} vs {b:.3f} s"
+        err = durations_differ(path, info["tracks"], tmp, nt,
+                               [(t["mkv_id"], i) for i, t in enumerate(order) if t["mkv_id"] is not None])
+        if err:
+            return err
         if not any(not t["keep"] for t in rows) and abs(
                 (new["container"]["properties"].get("duration") or 0) - (props.get("duration") or 0)) > 1e8:
             return "duration differs by more than 0.1 s"

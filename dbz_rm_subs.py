@@ -36,8 +36,8 @@ def classify(tracks):
             acts[i] = "es-ES"
         elif t["cast"] >= 2:
             acts[i] = "es-ES"
-        elif not t["chala"] and t["cast"] == 0:
-            acts[i] = "es-419"
+        elif not t["chala"] and (t["cast"] == 0 or t.get("lat", 0) >= max(3, 3 * t["cast"])):
+            acts[i] = "es-419"                  # S02E16: 1 castellano marker against 7 Latino ones
         else:
             return None, f"track {i}: {t['words']} words, lyrics {t['chala']}, castellano markers {t['cast']}"
     if list(acts.values()).count("es-419") > 1:

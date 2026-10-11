@@ -16,6 +16,9 @@ def test_classify():
     assert acts == {"3": "es-ES", "4": "es-ES", "5": "es-419"}, "S02E08: songs, castellano, Latino"
     acts, _ = d.classify({"3": t(160, True, 0), "4": t(1305, True, 4)})
     assert acts == {"3": "es-ES", "4": "es-ES"}, "S01E14: no Latino track at all"
+    s02e16 = {"3": t(163, True, 0), "4": t(1290, True, 22), "5": dict(t(1061, False, 1), lat=7)}
+    assert d.classify(s02e16)[0] == {"3": "es-ES", "4": "es-ES", "5": "es-419"}, "Latino markers outweigh one stray"
+    assert d.classify({"3": dict(t(1228, False, 1), lat=1), "4": t(2124, True, 0)})[0] is None, "S04E11 stays a tie"
     acts, why = d.classify({"3": t(1031, True, 1), "4": t(799, False, 0)})
     assert acts is None and "track 3" in why, "one castellano marker with lyrics is a tie"
     acts, _ = d.classify({"3": t(2901, False, 2, "GATON"), "5": t(41, False, 0, "FORZADO")})

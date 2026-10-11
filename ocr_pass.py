@@ -10,7 +10,8 @@ Per file with PGS tracks (read live with mkvmerge -J, not from the DB):
     punctuation-only lines removed, then the gate: OOV <= 8 % against the library vocabulary and enough cues
     (>= 50 for a full track, >= 1 for forced). Spanish gets a variant verdict from its text: castellano is dropped
     (D5) unless Spanish is the film's original language; latino -> es-419; unknown -> bare spa.
-  * a track that fails the gate keeps its PGS and is written to ocr_review.jsonl for Antonio.
+  * a track that fails the gate is dropped too (Antonio, 2026-10-11): its disc .sup is copied to .recycle, the
+    track goes to ocr_review.jsonl, and Bazarr's wanted search fills the language with a hook-verified SRT.
 The remux keeps every other stream bit for bit (f6_series.stream_md5, chapters compared), puts each SRT where its PGS
 was, writes to a hidden .ocr-tmp, fsyncs and replaces. Night window MM_NIGHT between files, like F6.
 """
@@ -89,7 +90,10 @@ def plan_file(path, orig_lang, vocs, run):
         n = clean_srt(srt) if os.path.exists(srt) and os.path.getsize(srt) else 0
         rate = op.oov(srt, vocs[lang2])[0] * 100 if n else 100.0
         if n < (1 if forced else MIN_CUES) or rate > OOV_MAX:
-            decisions.append((t, "keep", f"OCR failed the gate: {n} cues, OOV {rate:.1f} %", None))
+            # Antonio 2026-10-11: no PGS left even then; the disc .sup goes to .recycle and Bazarr's wanted search
+            # (language now missing) brings an SRT through the /api/subs/fix hook
+            decisions.append((t, "drop", f"OCR failed the gate: {n} cues, OOV {rate:.1f} %; left to Bazarr",
+                              {"sup": f"{d}/{t['id']}.sup"}))
             continue
         extra = {"srt": srt, "oov": round(rate, 1), "cues": n, "lang": p["language"], "ietf": None}
         if p["language"] == "spa":
@@ -200,6 +204,14 @@ def main(run, limit, match, ignore_window):
         info = json.loads(subprocess.run(["mkvmerge", "-J", path], capture_output=True, text=True).stdout)
         err = remux(path, info, decisions)
         if not err:
+            for t, a, why, x in decisions:
+                if x and x.get("sup"):
+                    dst = os.path.join(f6.RECYCLE, os.path.relpath(path, os.path.dirname(f6.RECYCLE))
+                                       + f".track{t['id']}.{t['properties'].get('language')}.sup")
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copyfile(x["sup"], dst)
+                    open(REVIEW, "a").write(json.dumps({"path": path, "track": t["id"], "lang": t["properties"].get("language"),
+                                                        "why": why, "sup": dst}, ensure_ascii=False) + "\n")
             import app
             c = app.get_db()
             try:

@@ -99,6 +99,19 @@ def test_recycle_never_overwrites():
     print("test_recycle_never_overwrites OK")
 
 
+def test_end_times_do_not_decide_but_text_and_starts_do():
+    srt = b"1\n00:00:01,000 --> 00:00:01,000\nka-ra-o-ke\n"
+    longer = b"1\n00:00:01,000 --> 00:00:01,040\nka-ra-o-ke\n"
+    assert f6.drop_end_times(srt) == f6.drop_end_times(longer)
+    assert f6.drop_end_times(srt) != f6.drop_end_times(longer.replace(b"01,000 -->", b"01,500 -->"))
+    assert f6.drop_end_times(srt) != f6.drop_end_times(srt.replace(b"ke", b"ko"))
+    ass = b"Dialogue: 0,0:00:01.00,0:00:01.00,Kara,,0,0,0,,la\n"
+    assert f6.drop_end_times(ass) == f6.drop_end_times(ass.replace(b"01.00,Kara", b"01.04,Kara"))
+    assert f6.drop_end_times(ass) != f6.drop_end_times(ass.replace(b"0:00:01.00,0", b"0:00:02.00,0", 1))
+    print("test_end_times_do_not_decide_but_text_and_starts_do OK")
+
+
 if __name__ == "__main__":
     test_remux_in_place_drops_french_and_keeps_the_rest(); test_refused_plan_leaves_the_original_alone(); test_downloads_busy()
     test_recycle_never_overwrites()
+    test_end_times_do_not_decide_but_text_and_starts_do()

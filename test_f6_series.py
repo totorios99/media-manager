@@ -111,7 +111,26 @@ def test_end_times_do_not_decide_but_text_and_starts_do():
     print("test_end_times_do_not_decide_but_text_and_starts_do OK")
 
 
+def test_ffmpeg_fallback_makes_the_same_file():
+    d = tempfile.mkdtemp()
+    ep = make_episode(d)
+    rows = [row("video", 0, "eng", default=1),
+            row("audio", 1, "eng", order=0, default=1), row("audio", 2, "spa", order=1),
+            row("subtitle", 3, "spa", order=0, default=1, codec="SubRip/SRT"),
+            row("subtitle", 4, "fre", keep=0, codec="SubRip/SRT"),
+            row("subtitle", 5, "eng", order=1, codec="SubRip/SRT")]
+    tmp = os.path.join(d, "out.f6-tmp")
+    assert f6.ffmpeg_mux(ep, rows, tmp, "Show") is None
+    assert f6._check(ep, la.probe(ep), tmp, rows) is None, f6._check(ep, la.probe(ep), tmp, rows)
+    tr = la.probe(tmp)["tracks"]
+    assert [(t["properties"]["language"], bool(t["properties"].get("default_track"))) for t in tr] == [
+        ("eng", True), ("eng", True), ("spa", False), ("spa", True), ("eng", False)], tr
+    assert la.probe(tmp)["container"]["properties"].get("title") == "Show"
+    print("test_ffmpeg_fallback_makes_the_same_file OK")
+
+
 if __name__ == "__main__":
     test_remux_in_place_drops_french_and_keeps_the_rest(); test_refused_plan_leaves_the_original_alone(); test_downloads_busy()
     test_recycle_never_overwrites()
     test_end_times_do_not_decide_but_text_and_starts_do()
+    test_ffmpeg_fallback_makes_the_same_file()

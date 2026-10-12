@@ -187,50 +187,108 @@ def durations_differ(path, old_tracks, tmp, new_tracks, pairs):
     return None
 
 
+def _order(rows):
+    kept = [t for t in rows if t["keep"]]
+    return (sorted([t for t in kept if t["type"] == "video"], key=lambda t: t["mkv_id"])
+            + sorted([t for t in kept if t["type"] == "audio"], key=lambda t: t["out_order"])
+            + sorted([t for t in kept if t["type"] == "subtitle"], key=lambda t: t["out_order"]))
+
+
+def _check(path, info, tmp, rows):
+    """Every check of the remuxed `tmp` against `path`. -> None or why it was refused."""
+    props, order = info["container"]["properties"], _order(rows)
+    new = la.probe(tmp)
+    nt = new["tracks"]
+    if len(nt) != len(order):
+        return f"tracks {len(nt)} != planned {len(order)}"
+    kinds = {"video": "video", "audio": "audio", "subtitle": "subtitles"}
+    if [t["type"] for t in nt] != [kinds[t["type"]] for t in order]:
+        return "track layout differs from the plan"
+    # per kept track, not the container: the container lasts as long as its LONGEST track, and dropping a
+    # subtitle that ran past the video legitimately shortens it (DBZ S09E15: container 1481.8 s, video 1479.9 s)
+    err = durations_differ(path, info["tracks"], tmp, nt,
+                           [(t["mkv_id"], i) for i, t in enumerate(order) if t["mkv_id"] is not None])
+    if err:
+        return err
+    if not any(not t["keep"] for t in rows) and abs(
+            (new["container"]["properties"].get("duration") or 0) - (props.get("duration") or 0)) > 1e8:
+        return "duration differs by more than 0.1 s"
+    for t, n in zip(order, nt):
+        if t["type"] != "video" and bool(n["properties"].get("default_track")) != bool(t["out_default"]):
+            return f"default flag of output track {n['id']}"
+        if t["type"] != "video" and n["properties"].get("language") != (t["out_lang"] or "und"):
+            return f"language of output track {n['id']}: {n['properties'].get('language')}"
+    if chapters(path) != chapters(tmp):
+        return "chapters differ"
+    pairs = [(t["mkv_id"], i) for i, t in enumerate(order) if t["mkv_id"] is not None]
+    a, b = stream_md5(path, [p for p, _ in pairs]), stream_md5(tmp, [q for _, q in pairs])
+    if a and a != b:
+        a, b = stream_md5(path, [p for p, _ in pairs], True), stream_md5(tmp, [q for _, q in pairs], True)
+    if not a or a != b:
+        return "stream hashes differ"
+    return None
+
+
+def ffmpeg_copy(path, maps, ext_paths, labels, title, tmp):
+    """ffmpeg -c copy keeps every packet timestamp as it is; mkvpropedit then sets each output track's labels.
+    maps: "-map" specs in output order ("0:3", "1:0" = first external file); labels: one dict per output track
+    (language, name, default, forced, hi, commentary; video only uses language/name/default).
+    Used when mkvmerge re-times a stream: Pirates of the Caribbean (2003) has 50 duplicate-pts DTS frames from 11:30
+    on, and mkvmerge spreads them (audio up to 0.36 s later with identical packets)."""
+    cmd = NICE + ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", path]
+    for e in ext_paths:
+        cmd += ["-i", e]
+    for m in maps:
+        cmd += ["-map", m]
+    cmd += ["-map", "0:t?", "-map_chapters", "0", "-c", "copy", "-f", "matroska", tmp]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode or not os.path.exists(tmp):
+        return f"ffmpeg rc={r.returncode} {r.stderr[-200:]}"
+    edits = ["--edit", "info", "--set", f"title={title}"]
+    for n, l in enumerate(labels, start=1):
+        edits += ["--edit", f"track:{n}", "--set", f"language={l['language']}", "--set", f"name={l.get('name') or ''}",
+                  "--set", f"flag-default={1 if l.get('default') else 0}"]
+        if not l.get("video"):
+            edits += ["--set", f"flag-forced={1 if l.get('forced') else 0}",
+                      "--set", f"flag-hearing-impaired={1 if l.get('hi') else 0}",
+                      "--set", f"flag-commentary={1 if l.get('commentary') else 0}",
+                      "--set", "flag-original=0", "--set", "flag-text-descriptions=0", "--set", "flag-visual-impaired=0"]
+    r = subprocess.run(["mkvpropedit", tmp] + edits, capture_output=True, text=True)
+    return None if r.returncode == 0 else f"mkvpropedit rc={r.returncode} {r.stdout[-200:]}"
+
+
+def ffmpeg_mux(path, rows, tmp, title):
+    """build_mkvmerge_remux's plan through ffmpeg_copy, labelled with the same helpers."""
+    order = _order(rows)
+    ext = [t for t in order if t["mkv_id"] is None]
+    audio = [t for t in order if t["type"] == "audio"]
+    subs = [t for t in order if t["type"] == "subtitle"]
+    maps = [f"0:{t['mkv_id']}" if t["mkv_id"] is not None else f"{1 + ext.index(t)}:0" for t in order]
+    labels = [{"language": commands.lang_tag(t), "default": t["out_default"], "video": t["type"] == "video",
+               "name": (t["out_name"] or "") if t["type"] == "video"
+               else commands._canonical_name(t, audio if t["type"] == "audio" else subs),
+               "forced": t["out_forced"], "hi": t.get("sdh_flag"), "commentary": t.get("commentary_flag")}
+              for t in order]
+    return ffmpeg_copy(path, maps, [t["ext_path"] for t in ext], labels, title, tmp)
+
+
 def remux_verified(path, rows):
     """Rewrite `path` in place per `rows` (suggest_tracks output). -> None on success, else why it was refused.
-    The original is untouched unless every check passes."""
+    The original is untouched unless every check passes. If mkvmerge changed a track's length, ffmpeg_mux tries again."""
     info = la.probe(path)
-    props = info["container"]["properties"]
+    title = info["container"]["properties"].get("title") or ""
     tmp = os.path.join(os.path.dirname(path), "." + os.path.basename(path) + ".f6-tmp")   # not .mkv: Sonarr took E20's temp for the episode
-    argv = commands.build_mkvmerge_remux(rows, props.get("title") or "", path, tmp)
-    r = subprocess.run(NICE + argv, capture_output=True, text=True)
-    if r.returncode not in (0, 1) or not os.path.exists(tmp):
-        return f"mkvmerge rc={r.returncode} {r.stdout[-200:]}"
     try:
-        kept = [t for t in rows if t["keep"]]
-        order = (sorted([t for t in kept if t["type"] == "video"], key=lambda t: t["mkv_id"])
-                 + sorted([t for t in kept if t["type"] == "audio"], key=lambda t: t["out_order"])
-                 + sorted([t for t in kept if t["type"] == "subtitle"], key=lambda t: t["out_order"]))
-        new = la.probe(tmp)
-        nt = new["tracks"]
-        if len(nt) != len(order):
-            return f"tracks {len(nt)} != planned {len(order)}"
-        kinds = {"video": "video", "audio": "audio", "subtitle": "subtitles"}
-        if [t["type"] for t in nt] != [kinds[t["type"]] for t in order]:
-            return "track layout differs from the plan"
-        # per kept track, not the container: the container lasts as long as its LONGEST track, and dropping a
-        # subtitle that ran past the video legitimately shortens it (DBZ S09E15: container 1481.8 s, video 1479.9 s)
-        err = durations_differ(path, info["tracks"], tmp, nt,
-                               [(t["mkv_id"], i) for i, t in enumerate(order) if t["mkv_id"] is not None])
+        r = subprocess.run(NICE + commands.build_mkvmerge_remux(rows, title, path, tmp), capture_output=True, text=True)
+        if r.returncode not in (0, 1) or not os.path.exists(tmp):
+            return f"mkvmerge rc={r.returncode} {r.stdout[-200:]}"
+        err = _check(path, info, tmp, rows)
+        if err and err.startswith("duration of track"):
+            os.remove(tmp)
+            err2 = ffmpeg_mux(path, rows, tmp, title) or _check(path, info, tmp, rows)
+            err = f"{err}; ffmpeg fallback: {err2}" if err2 else None
         if err:
             return err
-        if not any(not t["keep"] for t in rows) and abs(
-                (new["container"]["properties"].get("duration") or 0) - (props.get("duration") or 0)) > 1e8:
-            return "duration differs by more than 0.1 s"
-        for t, n in zip(order, nt):
-            if t["type"] != "video" and bool(n["properties"].get("default_track")) != bool(t["out_default"]):
-                return f"default flag of output track {n['id']}"
-            if t["type"] != "video" and n["properties"].get("language") != (t["out_lang"] or "und"):
-                return f"language of output track {n['id']}: {n['properties'].get('language')}"
-        if chapters(path) != chapters(tmp):
-            return "chapters differ"
-        pairs = [(t["mkv_id"], i) for i, t in enumerate(order) if t["mkv_id"] is not None]
-        a, b = stream_md5(path, [p for p, _ in pairs]), stream_md5(tmp, [q for _, q in pairs])
-        if a and a != b:
-            a, b = stream_md5(path, [p for p, _ in pairs], True), stream_md5(tmp, [q for _, q in pairs], True)
-        if not a or a != b:
-            return "stream hashes differ"
         fd = os.open(tmp, os.O_RDONLY)
         os.fsync(fd)
         os.close(fd)

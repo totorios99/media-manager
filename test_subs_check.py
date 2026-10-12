@@ -32,5 +32,32 @@ def test_embedded_ad_is_removed_in_place():
     print("test_embedded_ad_is_removed_in_place OK")
 
 
+def test_ocr_remux_falls_back_to_ffmpeg_when_mkvmerge_retimes():
+    d = tempfile.mkdtemp()
+    ep = make_episode(d)
+    os.remove(ep)
+    open(os.path.join(d, "es.srt"), "w").write("1\n00:00:00,100 --> 00:00:00,900\nHola\n\n2\n00:00:01,000 --> 00:00:01,500\nwww.subdivx.com\n")
+    subprocess.run(["mkvmerge", "-q", "-o", ep, "--title", "T", "--language", "0:eng", "--language", "1:eng", os.path.join(d, "b.mkv"),
+                    "--language", "0:es-419", "--track-name", "0:Español (Latino)", os.path.join(d, "es.srt"),
+                    "--language", "0:eng", os.path.join(d, "en.srt")], capture_output=True)
+    decisions, rep = sk.check_file(ep, measure_fn=lambda wav, s: (0.0, 1.0))
+    real, calls = ocr_pass.f6.durations_differ, []
+    def first_fails(*a):
+        calls.append(1)
+        return "duration of track 1 differs: 1 vs 2 s" if len(calls) == 1 else real(*a)
+    ocr_pass.f6.durations_differ = first_fails
+    try:
+        err = ocr_pass.remux(ep, la.probe(ep), decisions)
+    finally:
+        ocr_pass.f6.durations_differ = real
+    assert err is None and len(calls) == 2, (err, calls)
+    tr = la.probe(ep)["tracks"]
+    assert [(t["properties"].get("language_ietf"), t["properties"].get("track_name")) for t in tr][2:] == [
+        ("es-419", "Español (Latino)"), ("en", None)], tr
+    assert la.probe(ep)["container"]["properties"].get("title") == "T"
+    print("test_ocr_remux_falls_back_to_ffmpeg_when_mkvmerge_retimes OK")
+
+
 if __name__ == "__main__":
     test_embedded_ad_is_removed_in_place()
+    test_ocr_remux_falls_back_to_ffmpeg_when_mkvmerge_retimes()

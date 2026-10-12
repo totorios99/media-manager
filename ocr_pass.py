@@ -135,6 +135,14 @@ def remux(path, info, decisions):
     if not subs_keep:
         cmd = f6.NICE + ["mkvmerge", "-o", tmp, "--no-subtitles", path]
     order, n_file = [f"0:{i}" for i in keep_ids], 1
+    tracks = {t["id"]: t for t in info["tracks"]}
+    labels = {f"0:{i}": {"language": tracks[i]["properties"].get("language_ietf") or tracks[i]["properties"].get("language"),
+                         "name": tracks[i]["properties"].get("track_name"), "video": tracks[i]["type"] == "video",
+                         "default": tracks[i]["properties"].get("default_track"),
+                         "forced": tracks[i]["properties"].get("forced_track"),
+                         "hi": tracks[i]["properties"].get("flag_hearing_impaired"),
+                         "commentary": tracks[i]["properties"].get("flag_commentary")} for i in keep_ids}
+    ext_paths = []
     for t in info["tracks"]:
         a, why, x = by_id.get(t["id"], ("keep", "", None))
         if a != "replace":
@@ -151,12 +159,15 @@ def remux(path, info, decisions):
         prev = [i for i in keep_ids if i < t["id"]]
         pos = order.index(f"0:{prev[-1]}") + 1 if prev else 0
         order.insert(pos, f"{n_file}:0")
+        labels[f"{n_file}:0"] = {"language": x["ietf"] or x["lang"], "name": name, "default": p.get("default_track"),
+                                 "forced": p.get("forced_track"), "hi": p.get("flag_hearing_impaired")}
+        ext_paths.append(x["srt"])
         n_file += 1
     cmd += ["--track-order", ",".join(order)]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode not in (0, 1) or not os.path.exists(tmp):
         return f"mkvmerge rc={r.returncode} {r.stdout[-200:]}"
-    try:
+    def check():
         new = json.loads(subprocess.run(["mkvmerge", "-J", tmp], capture_output=True, text=True).stdout)["tracks"]
         if len(new) != len(order):
             return f"tracks {len(new)} != planned {len(order)}"
@@ -176,6 +187,17 @@ def remux(path, info, decisions):
             return "stream hashes differ"
         if f6.chapters(path) != f6.chapters(tmp):
             return "chapters differ"
+        return None
+
+    try:
+        err = check()
+        if err and err.startswith("duration of track"):          # mkvmerge re-timed a stream (Pirates, DTS)
+            os.remove(tmp)
+            err2 = f6.ffmpeg_copy(path, order, ext_paths, [labels[o] for o in order],
+                                  info["container"]["properties"].get("title") or "", tmp) or check()
+            err = f"{err}; ffmpeg fallback: {err2}" if err2 else None
+        if err:
+            return err
         fd = os.open(tmp, os.O_RDONLY)
         os.fsync(fd)
         os.close(fd)

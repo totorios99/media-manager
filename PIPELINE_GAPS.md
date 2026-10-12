@@ -5,7 +5,7 @@ hand fix, and the change folded into the pipeline, or why it stays manual. Rule 
 
 | Date | Case | Cause (evidence) | Hand fix | Pipeline | Status |
 |---|---|---|---|---|---|
-| 10-11 | Avengers Endgame, Matrix Resurrections: F6 "stream hashes differ" | mkvmerge writes CRLF inside SRT cues; video/audio identical on a 120 s clip remuxed with the real plan | none needed | `stream_md5` normalized pass drops `\r` (2a5c158) | in pipeline; next F6 movies pass |
+| 10-11 | Avengers Endgame, Matrix Resurrections, Pirates On Stranger Tides (10-12): F6 "stream hashes differ" | mkvmerge writes CRLF inside SRT cues; video/audio identical on a 120 s clip remuxed with the real plan | none needed | `stream_md5` normalized pass drops `\r` (2a5c158) | in pipeline; next F6 movies pass |
 | 10-11 | Death Note, 7 eps: F6 refusal | mkvmerge lengthens zero-duration karaoke lines | none needed | normalized pass compares text + starts, not end times (1fd4702) | in pipeline |
 | 10-11 | DBZ 46 / R&M 8: two bare-`spa` text subs, F6 blocked | no variant evidence in tags; text shows castellano fansub + Latino dubtitles (+ songs, Latino ASS fansub) | `dbz_rm_subs.py` (markers, dub rule, verified remux) | `spa_unblock.py` runs first in library_maint: castellano by text verdict → es-ES, latino → es-419, then F6 plans the file; still ambiguous → spa_unblock_review.jsonl. The DBZ-specific dub rule (no opening lyrics) stays in dbz_rm_subs | in pipeline (clear cases) |
 | 10-11 | R&M S07: forced track named "FORZADO" without the forced flag | release mislabel | flag set by `dbz_rm_subs.py` | `spa_unblock.py`: a sub named forzado/forced with < 300 words gets the flag | in pipeline |

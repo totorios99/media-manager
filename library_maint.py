@@ -93,6 +93,9 @@ def run():
 
 
 if __name__ == "__main__":
+    if not overnight.in_window():                  # a Persistent= catch-up at 07:26 held the lock all day, waiting
+        print("outside the MM_NIGHT window; nothing to do")
+        sys.exit(0)
     if os.environ.get("MAINT_LOCK_HELD"):          # the trip chain took the lock for us
         sys.exit(run())
     fd = open(LOCK, "w")

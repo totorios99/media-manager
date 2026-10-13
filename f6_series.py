@@ -353,6 +353,10 @@ def main(run, limit, show, ignore_downloads=False, replace=False, match=None):
             time.sleep(QUIET)
         if stop:
             break
+        while not stop and not overnight.in_window():           # same window as --movies (USB drops at ~13 h)
+            time.sleep(300)
+        if stop:
+            break
         if e["id"] in busy:
             print("SKIP (job active)", e["file"], flush=True)
             continue

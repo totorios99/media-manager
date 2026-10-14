@@ -185,6 +185,24 @@ def test_nonstandard_on_the_mix_is_remeasured_on_the_centre_channel():
     print("test_nonstandard_on_the_mix_is_remeasured_on_the_centre_channel OK")
 
 
+def test_piecewise_follows_a_mid_episode_jump():
+    import tempfile
+    f = tempfile.mktemp(suffix=".srt")
+    cues = [(t, t + 1, f"l{t}") for t in range(0, 3000, 30)]
+    open(f, "w", encoding="utf-8").write(sc.render(cues))
+    W = sc.WINDOW_S
+    pts = sc.piecewise_from_windows(f, [(0, 0.0), (1000, 0.0), (2000, -1.6), (2500, None)])
+    assert len(pts) == 3
+    got = {int(t[1:]): a for a, _, t in sc.parse(sc.decode(open(f, "rb").read()))}   # label "l<orig>" -> new start
+    assert abs(got[0] - 0) < 0.01, "flat before the first centre"
+    assert abs(got[2490] - (2490 - 1.6)) < 0.01, "flat after the last centre"
+    mid = 1000 + W / 2 + (2000 - 1000) / 2
+    near = min(got, key=lambda k: abs(k - mid))
+    assert -1.0 < got[near] - near < -0.5, "interpolated between the two centres"
+    assert sc.piecewise_from_windows(f, [(0, 0.1), (900, None)]) is None
+    print("test_piecewise_follows_a_mid_episode_jump OK")
+
+
 if __name__ == "__main__":
     test_nonstandard_on_the_mix_is_remeasured_on_the_centre_channel()
     test_fix_constant_offset_is_corrected_and_remeasured()
@@ -197,3 +215,4 @@ if __name__ == "__main__":
     test_urls_emails_and_team_credits_anywhere()
     test_cue_with_dialogue_keeps_dialogue()
     test_render_roundtrip_and_shift()
+    test_piecewise_follows_a_mid_episode_jump()

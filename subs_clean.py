@@ -173,6 +173,26 @@ def refit_from_windows(srt, offsets):
     return s, b
 
 
+def piecewise_from_windows(srt, offsets):
+    """Shift every cue by the offset interpolated between the measured window centres (flat beyond the ends).
+    For an edit that a single line cannot follow: Prison Break E06 sidecar +0.77 / -0.37 / -0.31 / -1.61 / -0.37 s.
+    Writes the file; returns the (centre, offset) points used, or None when fewer than two windows measured."""
+    pts = sorted((a + WINDOW_S / 2, o) for a, o in offsets if o is not None and abs(o) <= REFIT_MAX)
+    if len(pts) < 2:
+        return None
+
+    def off(t):
+        if t <= pts[0][0]:
+            return pts[0][1]
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            if t <= x1:
+                return y0 + (y1 - y0) * (t - x0) / (x1 - x0)
+        return pts[-1][1]
+    cues = parse(decode(open(srt, "rb").read()))
+    open(srt, "w", encoding="utf-8").write(render([(a + off(a), b + off(a), t) for a, b, t in cues]))
+    return pts
+
+
 def windows_ok(offsets):
     return all(o is None or abs(o) <= WINDOW_OFF_OK for _, o in offsets) and any(o is not None for _, o in offsets)
 

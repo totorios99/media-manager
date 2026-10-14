@@ -86,6 +86,16 @@ def check_file(path, measure_fn=None):
                 w3 = sc.window_offsets(path, f, measure_fn)
                 if sc.windows_ok(w3):
                     fixed = ("refit", w3)
+            if not fixed:
+                open(f, "wb").write(backup)
+                w4 = w
+                for _ in range(3):                  # Prison Break E06 needed three passes (10-13)
+                    if sc.piecewise_from_windows(f, w4) is None:
+                        break
+                    w4 = sc.window_offsets(path, f, measure_fn)
+                    if sc.windows_ok(w4):
+                        fixed = ("piecewise", w4)
+                        break
             if fixed:
                 rep["sync"].update(how=fixed[0], after=fixed[1])
                 changed[main["id"]] = (changed.get(main["id"], "") + " sync").strip()

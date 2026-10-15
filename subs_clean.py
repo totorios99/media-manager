@@ -196,6 +196,29 @@ def piecewise_from_windows(srt, offsets):
     return pts
 
 
+def segment_fit(srt, offsets, jump=1.0, max_off=15.0):
+    """Two edits of different length (Netflix vs disc: The Seven Deadly Sins S01E18 was -4.9 s until the eyecatch at
+    12.7 min and +1.0 s after it). When neighbouring windows disagree by more than `jump`, cut at the largest gap
+    between cues inside that stretch and shift each side by its own windows' mean. One cut only; offsets beyond
+    `max_off` are measurement noise (opening/ending songs). Writes the file; returns the cut (s) or None."""
+    pts = sorted((a, o) for a, o in offsets if o is not None and abs(o) <= max_off)
+    jumps = [(abs(o1 - o0), i) for i, ((a0, o0), (a1, o1)) in enumerate(zip(pts, pts[1:])) if abs(o1 - o0) > jump]
+    if len(jumps) != 1 or len(pts) < 3:
+        return None
+    i = jumps[0][1]
+    lo, hi = pts[i][0], pts[i + 1][0] + WINDOW_S
+    cues = parse(decode(open(srt, "rb").read()))
+    gaps = [(b2 - a1, a1 + (b2 - a1) / 2) for (_, a1, _), (b2, _, _) in zip(cues, cues[1:]) if lo <= a1 <= hi]
+    if not gaps:
+        return None
+    cut = max(gaps)[1]
+    before = sum(o for _, o in pts[:i + 1]) / (i + 1)
+    after = sum(o for _, o in pts[i + 1:]) / (len(pts) - i - 1)
+    open(srt, "w", encoding="utf-8").write(render([(a + (before if a < cut else after), b + (before if a < cut else after), t)
+                                                   for a, b, t in cues]))
+    return cut
+
+
 def windows_ok(offsets):
     return all(o is None or abs(o) <= WINDOW_OFF_OK for _, o in offsets) and any(o is not None for _, o in offsets)
 

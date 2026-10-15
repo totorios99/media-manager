@@ -96,6 +96,12 @@ def check_file(path, measure_fn=None):
                     if sc.windows_ok(w4):
                         fixed = ("piecewise", w4)
                         break
+            if not fixed:
+                open(f, "wb").write(backup)
+                if sc.segment_fit(f, w) is not None:   # The Seven Deadly Sins S01E18: Netflix vs disc eyecatch
+                    w5 = sc.window_offsets(path, f, measure_fn)
+                    if sc.windows_ok(w5):
+                        fixed = ("segments", w5)
             if fixed:
                 rep["sync"].update(how=fixed[0], after=fixed[1])
                 changed[main["id"]] = (changed.get(main["id"], "") + " sync").strip()

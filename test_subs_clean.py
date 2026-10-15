@@ -214,6 +214,19 @@ def test_english_credits():
     print("test_english_credits OK")
 
 
+def test_segment_fit_cuts_at_the_eyecatch():
+    import tempfile
+    f = tempfile.mktemp(suffix=".srt")
+    cues = [(t, t + 2, f"l{t}") for t in list(range(0, 760, 20)) + list(range(770, 1400, 20))]   # 10 s gap at 760
+    open(f, "w", encoding="utf-8").write(sc.render(cues))
+    cut = sc.segment_fit(f, [(300, -4.9), (540, -4.9), (780, 1.0), (1020, 1.0), (1200, 60.0)])
+    assert cut is not None and 740 < cut < 780, cut
+    got = {int(t[1:]): a for a, _, t in sc.parse(sc.decode(open(f, "rb").read()))}
+    assert abs(got[700] - (700 - 4.9)) < 0.01 and abs(got[790] - 791.0) < 0.01, (got[700], got[790])
+    assert sc.segment_fit(f, [(300, 0.1), (540, 0.2), (780, 0.1)]) is None, "no jump, nothing to do"
+    print("test_segment_fit_cuts_at_the_eyecatch OK")
+
+
 if __name__ == "__main__":
     test_nonstandard_on_the_mix_is_remeasured_on_the_centre_channel()
     test_fix_constant_offset_is_corrected_and_remeasured()
@@ -228,3 +241,4 @@ if __name__ == "__main__":
     test_render_roundtrip_and_shift()
     test_piecewise_follows_a_mid_episode_jump()
     test_english_credits()
+    test_segment_fit_cuts_at_the_eyecatch()

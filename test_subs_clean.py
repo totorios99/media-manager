@@ -203,6 +203,17 @@ def test_piecewise_follows_a_mid_episode_jump():
     print("test_piecewise_follows_a_mid_episode_jump OK")
 
 
+def test_english_credits():
+    """Yellowstone S01E08 (Addic7ed): the credit line beside the web address goes too, at minute 5 and at the end."""
+    kept, removed = sc.strip_ads(sc.parse(
+        "1\n00:05:21,000 --> 00:05:26,000\n- Synced & corrected by <font color=\"#E83286\">MementMori</font> -\n"
+        "-- <font color=\"#138CE9\">www.addic7ed.com</font> --\n\n"
+        "2\n00:20:00,000 --> 00:20:02,000\nThe subtitles by the door are yours.\n\n"
+        "3\n00:40:17,000 --> 00:40:22,000\nSubtitles ripped by someone\n"))
+    assert [t for _, _, t in kept] == ["The subtitles by the door are yours."], kept
+    print("test_english_credits OK")
+
+
 if __name__ == "__main__":
     test_nonstandard_on_the_mix_is_remeasured_on_the_centre_channel()
     test_fix_constant_offset_is_corrected_and_remeasured()
@@ -216,3 +227,4 @@ if __name__ == "__main__":
     test_cue_with_dialogue_keeps_dialogue()
     test_render_roundtrip_and_shift()
     test_piecewise_follows_a_mid_episode_jump()
+    test_english_credits()

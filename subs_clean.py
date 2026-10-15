@@ -19,7 +19,10 @@ TS = re.compile(r"(\d+):(\d\d):(\d\d)[,.](\d{3}) --> (\d+):(\d\d):(\d\d)[,.](\d{
 # Provider names are safe anywhere: dialogue never says them. Mr. Robot's
 # subtitulos.es card sits at 06:22, not at the edges, so position cannot be the test.
 STRONG = re.compile(r"subtitulos\.es|difunde la palabra|opensubtitles|subdivx|argenteam|"
-                    r"addic7ed|tusubtitulo|subscene|podnapisi|asia-team|subt[ií]tulos traducidos por", re.I)
+                    r"addic7ed|tusubtitulo|subscene|podnapisi|asia-team|subt[ií]tulos traducidos por|"
+                    # English credit lines; never dialogue (Yellowstone S01E08: "- Synced & corrected by MementMori -")
+                    r"synced (?:&|and) corrected by|sync(?:ed)? and corrections? by|subtitles? ripped by|"
+                    r"subtitles? by\b.*(?:www|\.com|\.net|\.org|@)", re.I)
 # A line that is little more than a web address or an e-mail is a credit (Prison Break E14 "OverCraft@gmail.com",
 # E17 ".: Www.Asia-Team.Net :." at minute 7); "Mira www.google.com y dime." is dialogue and stays.
 LINK = re.compile(r"\bwww\.[\w-]+\.\w+\S*|https?://\S+|\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b", re.I)

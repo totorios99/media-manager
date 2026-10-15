@@ -33,8 +33,14 @@ def vocab(lang):
 
 
 def oov(srt, voc):
-    words = [w.lower() for _, _, t in sc.parse(sc.decode(open(srt, "rb").read())) for w in WORD.findall(t)]
-    return (sum(w not in voc for w in words) / len(words) if words else 1.0), len(words)
+    """Share of words outside the library vocabulary. A word always capitalized and seen 3+ times in this file is a
+    name (Death Note: Light, Ryuk, Misa put a clean Spanish OCR at 8.0-9.1 %, over the 8 % gate) and counts as known."""
+    raw = [w for _, _, t in sc.parse(sc.decode(open(srt, "rb").read())) for w in WORD.findall(t)]
+    seen = collections.Counter(w.lower() for w in raw)
+    lower = {w.lower() for w in raw if not w[:1].isupper()}
+    names = {w for w, n in seen.items() if n >= 3 and w not in lower}
+    words = [w.lower() for w in raw]
+    return (sum(w not in voc and w not in names for w in words) / len(words) if words else 1.0), len(words)
 
 
 def main(folders):

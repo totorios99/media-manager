@@ -24,6 +24,7 @@ STEPS = [  # (name, argv, its jsonl log)
     ("f6 series", ["f6_series.py", "--run", "--ignore-downloads"], "f6_series.jsonl"),
     ("f6 movies", ["f6_series.py", "--movies", "--run", "--ignore-downloads"], "f6_movies.jsonl"),
     ("ocr", ["ocr_pass.py", "--run"], "ocr_pass.jsonl"),
+    ("ocr recover", ["ocr_recover.py", "--run"], "ocr_recover.jsonl"),
     ("subs check", ["subs_check.py", "--run"], "subs_check.jsonl"),
 ]
 

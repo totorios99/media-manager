@@ -226,6 +226,13 @@ def settle_windows(media, srt, measure_fn=None, starts=None, windows_fn=None):
     """Verify `srt` by windows and repair it in place when a global fit was not enough (The Good, the Bad and the
     Ugly: global +1.24 s, windows -1.4 s). Windows beyond NOISE_S are ignored. Tries a piecewise fit (up to three
     passes) and then a two-segment cut. -> (ok, how, windows); ok needs 3+ trusted windows, all within WINDOW_OFF_OK."""
+    if starts is None:
+        # five windows inside the dialogue span: the default start/middle/end put one on the studio logos and one on
+        # the credits (Avengers Infinity War ES: +19.16 s and +1.39 s there, -0.27 s in the middle)
+        cues = parse(decode(open(srt, "rb").read()))
+        if cues:
+            a, b = cues[0][0], cues[-1][1]
+            starts = [max(a + f * (b - a) - WINDOW_S / 2, 0) for f in (0.1, 0.3, 0.5, 0.7, 0.9)]
     windows_fn = windows_fn or (lambda m, f: window_offsets(m, f, measure_fn, n=5, starts=starts))
     trusted = lambda w: [(a, o) for a, o in w if o is not None and abs(o) <= NOISE_S]
     good = lambda w: len(trusted(w)) >= 3 and all(abs(o) <= WINDOW_OFF_OK for _, o in trusted(w))

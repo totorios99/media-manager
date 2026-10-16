@@ -255,6 +255,11 @@ def settle_windows(media, srt, measure_fn=None, starts=None, windows_fn=None):
         if good(w):
             return True, "segments", w
     open(srt, "wb").write(original)
+    offs = [o for _, o in trusted(w0)]
+    if max(offs) - min(offs) > 10.0 and any(abs(o) <= WINDOW_OFF_OK for o in offs):
+        # scattered both ways by tens of seconds is the measurement failing (Avengers Infinity War: two independent
+        # subs gave the same -15/+30/-0.2/+24/+52 s), not the sub; a real edit offset is coherent (GBU: -1.4 everywhere)
+        return True, "unreliable windows", w0
     return False, "windows off", w0
 
 

@@ -2240,7 +2240,7 @@ def _fix_subtitle(srt, measure_fn=None, linear=False):
     if not ok:
         os.remove(tmp)
         return {**r, "status": "rejected", "action": f"{r['action']}; windows off {wins}", "written": False, "media": media}
-    if not changed and how in ("windows", "unmeasured"):
+    if not changed and how in ("windows", "unmeasured", "unreliable windows"):
         os.remove(tmp)
         return {**r, "action": f"{r['action']}; {how}", "written": False, "media": media}
     if not os.path.exists(real + ".orig"):

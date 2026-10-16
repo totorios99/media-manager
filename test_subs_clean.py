@@ -241,6 +241,9 @@ def test_settle_windows_repairs_a_global_fit_or_refuses():
     before = open(f, "rb").read()
     ok, how, _ = sc.settle_windows("m.mkv", f, windows_fn=lambda m, p: bad)
     assert not ok and how == "windows off" and open(f, "rb").read() == before, "a failed repair leaves the file as it was"
+    noisy = [(600, -15.1), (1500, 24.2), (2400, -0.19), (2900, 28.0)]
+    ok, how, _ = sc.settle_windows("m.mkv", f, windows_fn=lambda m, p: noisy)
+    assert ok and how == "unreliable windows" and open(f, "rb").read() == before, "scattered windows keep the global fit"
     ok, how, _ = sc.settle_windows("m.mkv", f, windows_fn=lambda m, p: [(600, None), (1500, 59.0)])
     assert ok and how == "unmeasured", "unmeasurable windows keep the global fit"
     print("test_settle_windows_repairs_a_global_fit_or_refuses OK")

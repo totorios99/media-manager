@@ -227,6 +227,25 @@ def test_segment_fit_cuts_at_the_eyecatch():
     print("test_segment_fit_cuts_at_the_eyecatch OK")
 
 
+def test_settle_windows_repairs_a_global_fit_or_refuses():
+    import tempfile
+    f = tempfile.mktemp(suffix=".srt")
+    open(f, "w", encoding="utf-8").write(sc.render([(t, t + 2, f"l{t}") for t in range(0, 3000, 15)]))
+    calls = iter([[(600, -1.4), (1500, -1.4), (2400, -1.4), (2900, 60.0)],     # global fit left it -1.4 s
+                  [(600, 0.02), (1500, -0.01), (2400, 0.03), (2900, 60.0)]])   # after the piecewise pass
+    ok, how, w = sc.settle_windows("m.mkv", f, windows_fn=lambda m, p: next(calls))
+    assert ok and how == "piecewise", (ok, how)
+    got = {int(t[1:]): a for a, _, t in sc.parse(sc.decode(open(f, "rb").read()))}
+    assert abs(got[300] - (300 - 1.4)) < 0.01, got[300]                        # the fit was really applied
+    bad = [(600, 2.0), (1500, -2.5), (2400, 2.2)]
+    before = open(f, "rb").read()
+    ok, how, _ = sc.settle_windows("m.mkv", f, windows_fn=lambda m, p: bad)
+    assert not ok and how == "windows off" and open(f, "rb").read() == before, "a failed repair leaves the file as it was"
+    ok, how, _ = sc.settle_windows("m.mkv", f, windows_fn=lambda m, p: [(600, None), (1500, 59.0)])
+    assert ok and how == "unmeasured", "unmeasurable windows keep the global fit"
+    print("test_settle_windows_repairs_a_global_fit_or_refuses OK")
+
+
 if __name__ == "__main__":
     test_nonstandard_on_the_mix_is_remeasured_on_the_centre_channel()
     test_fix_constant_offset_is_corrected_and_remeasured()
@@ -242,3 +261,4 @@ if __name__ == "__main__":
     test_piecewise_follows_a_mid_episode_jump()
     test_english_credits()
     test_segment_fit_cuts_at_the_eyecatch()
+    test_settle_windows_repairs_a_global_fit_or_refuses()

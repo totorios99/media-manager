@@ -2230,16 +2230,45 @@ def _fix_subtitle(srt, measure_fn=None, linear=False):
     r = subs_clean.fix(media, real, measure_fn, linear=linear)
     if r["status"] != "ok":
         return {**r, "written": False, "media": media}
-    if r["action"] == "none" and r["ads"] == 0:
-        return {**r, "written": False, "media": media}
-    if not os.path.exists(real + ".orig"):
-        shutil.copy2(real, real + ".orig")
+    changed = not (r["action"] == "none" and r["ads"] == 0)
     tmp = os.path.join(os.path.dirname(real), "." + os.path.basename(real) + ".fix.tmp")
     with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(r["text"])
+        fh.write(r["text"] if changed else open(real, encoding="utf-8", errors="replace").read())
+    # a global fit can hide a stretch that is off (The Good, the Bad and the Ugly: +1.24 s global, -1.4 s by windows)
+    ok, how, w = subs_clean.settle_windows(media, tmp, measure_fn)
+    wins = " ".join(f"{int(a) // 60}min:{'?' if o is None else f'{o:+.2f}'}" for a, o in w)
+    if not ok:
+        os.remove(tmp)
+        return {**r, "status": "rejected", "action": f"{r['action']}; windows off {wins}", "written": False, "media": media}
+    if not changed and how in ("windows", "unmeasured"):
+        os.remove(tmp)
+        return {**r, "action": f"{r['action']}; {how}", "written": False, "media": media}
+    if not os.path.exists(real + ".orig"):
+        shutil.copy2(real, real + ".orig")
     shutil.copymode(real, tmp)
     os.replace(tmp, real)
-    return {**r, "written": True, "media": media}
+    return {**r, "action": f"{r['action']}; {how}", "written": True, "media": media}
+
+
+SDH_MIN_CUES = 10     # Bazarr calls a sub SDH for one "[music]" line (Guardians, Infinity War, Possession: 1-2 lines)
+
+
+def _unmark_false_sdh(srt):
+    """<x>.<lang>.sdh.srt with fewer than SDH_MIN_CUES bracketed cues -> <x>.<lang>.srt (and its .orig), unless that
+    name is taken. -> the path in use."""
+    import subs_clean
+    if ".sdh." not in os.path.basename(srt).lower() or not os.path.isfile(srt):
+        return srt
+    plain = re.sub(r"\.sdh(?=\.srt$)", "", srt, flags=re.I)
+    cues = subs_clean.parse(subs_clean.decode(open(srt, "rb").read()))
+    hi = sum(1 for _, _, t in cues if re.search(r"\[[^\]]+\]|\([A-Z][A-Z ]+\)|♪", t))
+    if hi >= SDH_MIN_CUES or os.path.exists(plain):
+        return srt
+    os.replace(srt, plain)
+    if os.path.exists(srt + ".orig") and not os.path.exists(plain + ".orig"):
+        os.replace(srt + ".orig", plain + ".orig")
+    print(f"[subs] {os.path.basename(srt)}: renamed to {os.path.basename(plain)} ({hi} bracketed cues, not SDH)", flush=True)
+    return plain
 
 
 def _fix_subtitle_job(srt):
@@ -2252,6 +2281,8 @@ def _fix_subtitle_job(srt):
                 if not moved or moved == srt:
                     raise
                 srt, r = moved, _fix_subtitle(moved)
+            if r["status"] == "ok":
+                srt = _unmark_false_sdh(srt)
             name = os.path.basename(srt)
             print(f"[subs] {name}: {r['status']} ads={r['ads']} {r['action']} "
                   f"final={r['offset']:+.2f}s/{r['factor']:.4f} written={r['written']}", flush=True)

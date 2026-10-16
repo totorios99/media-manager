@@ -219,6 +219,38 @@ def segment_fit(srt, offsets, jump=1.0, max_off=15.0):
     return cut
 
 
+NOISE_S = 30.0       # a window this far off is the opening/ending song or a dialogue-free stretch, not a sync error
+
+
+def settle_windows(media, srt, measure_fn=None, starts=None, windows_fn=None):
+    """Verify `srt` by windows and repair it in place when a global fit was not enough (The Good, the Bad and the
+    Ugly: global +1.24 s, windows -1.4 s). Windows beyond NOISE_S are ignored. Tries a piecewise fit (up to three
+    passes) and then a two-segment cut. -> (ok, how, windows); ok needs 3+ trusted windows, all within WINDOW_OFF_OK."""
+    windows_fn = windows_fn or (lambda m, f: window_offsets(m, f, measure_fn, n=5, starts=starts))
+    trusted = lambda w: [(a, o) for a, o in w if o is not None and abs(o) <= NOISE_S]
+    good = lambda w: len(trusted(w)) >= 3 and all(abs(o) <= WINDOW_OFF_OK for _, o in trusted(w))
+    w = windows_fn(media, srt)
+    if good(w):
+        return True, "windows", w
+    if len(trusted(w)) < 3:
+        return True, "unmeasured", w        # too little dialogue to judge: the global fit stands, as before
+    original = open(srt, "rb").read()
+    for _ in range(3):
+        if piecewise_from_windows(srt, trusted(w)) is None:
+            break
+        w = windows_fn(media, srt)
+        if good(w):
+            return True, "piecewise", w
+    open(srt, "wb").write(original)
+    w0 = windows_fn(media, srt)
+    if segment_fit(srt, trusted(w0)) is not None:
+        w = windows_fn(media, srt)
+        if good(w):
+            return True, "segments", w
+    open(srt, "wb").write(original)
+    return False, "windows off", w0
+
+
 def windows_ok(offsets):
     return all(o is None or abs(o) <= WINDOW_OFF_OK for _, o in offsets) and any(o is not None for _, o in offsets)
 

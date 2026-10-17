@@ -11,7 +11,7 @@ Library functions, used before an SRT enters a remux:
 Order matters: strip ads first. An ad cue is fake dialogue and skews the measurement.
 Nothing here writes next to the original; callers decide where the result goes.
 """
-import json, os, re, subprocess, sys
+import json, os, re, statistics, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TS = re.compile(r"(\d+):(\d\d):(\d\d)[,.](\d{3}) --> (\d+):(\d\d):(\d\d)[,.](\d{3})")
@@ -222,10 +222,34 @@ def segment_fit(srt, offsets, jump=1.0, max_off=15.0):
 NOISE_S = 30.0       # a window this far off is the opening/ending song or a dialogue-free stretch, not a sync error
 
 
-def settle_windows(media, srt, measure_fn=None, starts=None, windows_fn=None):
+REF_SPREAD = 0.3      # sub-to-sub window offsets this close together are one constant offset
+
+
+def reference_offsets(srt, ref, starts, max_d=3.0):
+    """Per window of `starts`: median of (nearest `ref` cue start - cue start) over the cues of `srt` in it, pairs
+    further than max_d apart ignored. Two subs of the same cut in different languages share most cue starts."""
+    import bisect
+    cues = parse(decode(open(srt, "rb").read()))
+    rs = sorted(c[0] for c in parse(decode(open(ref, "rb").read())))
+    out = []
+    for a in starts:
+        d = []
+        for s, _, _ in cues:
+            if a <= s <= a + WINDOW_S and rs:
+                i = bisect.bisect_left(rs, s)
+                b = min((rs[j] - s for j in (i - 1, i) if 0 <= j < len(rs)), key=abs)
+                if abs(b) <= max_d:
+                    d.append(b)
+        out.append((a, statistics.median(d) if len(d) >= 10 else None))
+    return out
+
+
+def settle_windows(media, srt, measure_fn=None, starts=None, windows_fn=None, reference_fn=None):
     """Verify `srt` by windows and repair it in place when a global fit was not enough (The Good, the Bad and the
     Ugly: global +1.24 s, windows -1.4 s). Windows beyond NOISE_S are ignored. Tries a piecewise fit (up to three
-    passes) and then a two-segment cut. -> (ok, how, windows); ok needs 3+ trusted windows, all within WINDOW_OFF_OK."""
+    passes) and then a two-segment cut; when those fail, `reference_fn()` (lazy: it may extract a track) can give
+    an SRT already timed to the video to measure against. -> (ok, how, windows); ok needs 3+ trusted windows, all
+    within WINDOW_OFF_OK."""
     if starts is None:
         # five windows inside the dialogue span: the default start/middle/end put one on the studio logos and one on
         # the credits (Avengers Infinity War ES: +19.16 s and +1.39 s there, -0.27 s in the middle)
@@ -255,6 +279,18 @@ def settle_windows(media, srt, measure_fn=None, starts=None, windows_fn=None):
         if good(w):
             return True, "segments", w
     open(srt, "wb").write(original)
+    ref = reference_fn() if reference_fn else None
+    if ref and starts:
+        # audio windows failed: measure against a subtitle already timed to this video instead (Ballerina ES: audio
+        # +0.46/+57/-21/-19/+46 s, against the embedded English +0.49..+0.57 s everywhere -> one shift)
+        r = reference_offsets(srt, ref, starts)
+        vals = [o for _, o in r if o is not None]
+        if len(vals) >= 3 and max(vals) - min(vals) <= REF_SPREAD:
+            off = statistics.median(vals)
+            if abs(off) > WINDOW_OFF_OK:
+                open(srt, "w", encoding="utf-8").write(render(shift(parse(decode(original)), off)))
+                return True, "reference shift", reference_offsets(srt, ref, starts)
+            return True, "reference", r
     offs = [o for _, o in trusted(w0)]
     if max(offs) - min(offs) > 10.0 and any(abs(o) <= WINDOW_OFF_OK for o in offs):
         # scattered both ways by tens of seconds is the measurement failing (Avengers Infinity War: two independent

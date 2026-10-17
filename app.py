@@ -2235,12 +2235,18 @@ def _fix_subtitle(srt, measure_fn=None, linear=False):
     with open(tmp, "w", encoding="utf-8") as fh:
         fh.write(r["text"] if changed else open(real, encoding="utf-8", errors="replace").read())
     # a global fit can hide a stretch that is off (The Good, the Bad and the Ugly: +1.24 s global, -1.4 s by windows)
-    ok, how, w = subs_clean.settle_windows(media, tmp, measure_fn)
+    extracted = []
+    try:
+        ok, how, w = subs_clean.settle_windows(media, tmp, measure_fn,
+                                               reference_fn=lambda: _embedded_reference_srt(media, extracted))
+    finally:
+        for p in extracted:
+            os.remove(p)
     wins = " ".join(f"{int(a) // 60}min:{'?' if o is None else f'{o:+.2f}'}" for a, o in w)
     if not ok:
         os.remove(tmp)
         return {**r, "status": "rejected", "action": f"{r['action']}; windows off {wins}", "written": False, "media": media}
-    if not changed and how in ("windows", "unmeasured", "unreliable windows"):
+    if not changed and how in ("windows", "unmeasured", "unreliable windows", "reference"):
         os.remove(tmp)
         return {**r, "action": f"{r['action']}; {how}", "written": False, "media": media}
     if not os.path.exists(real + ".orig"):
@@ -2248,6 +2254,23 @@ def _fix_subtitle(srt, measure_fn=None, linear=False):
     shutil.copymode(real, tmp)
     os.replace(tmp, real)
     return {**r, "action": f"{r['action']}; {how}", "written": True, "media": media}
+
+
+def _embedded_reference_srt(media, extracted):
+    """Fullest non-forced SubRip track inside `media`, extracted to a temp file (appended to `extracted` for the
+    caller to remove), or None. One full read of the video, so settle_windows asks only when the audio failed."""
+    import tempfile
+    info = json.loads(subprocess.run(["mkvmerge", "-J", media], capture_output=True, text=True).stdout or "{}")
+    subs = [t for t in info.get("tracks", []) if t["type"] == "subtitles" and "SubRip" in t["codec"]
+            and not t["properties"].get("forced_track")]
+    if not subs:
+        return None
+    best = max(subs, key=lambda t: t["properties"].get("num_index_entries") or 0)
+    fd, out = tempfile.mkstemp(suffix=".srt", dir="/var/tmp")
+    os.close(fd)
+    extracted.append(out)
+    r = subprocess.run(["ionice", "-c3", "mkvextract", media, "tracks", f"{best['id']}:{out}"], capture_output=True)
+    return out if r.returncode == 0 and os.path.getsize(out) else None
 
 
 SDH_MIN_CUES = 10     # Bazarr calls a sub SDH for one "[music]" line (Guardians, Infinity War, Possession: 1-2 lines)

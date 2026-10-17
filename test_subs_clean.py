@@ -249,7 +249,25 @@ def test_settle_windows_repairs_a_global_fit_or_refuses():
     print("test_settle_windows_repairs_a_global_fit_or_refuses OK")
 
 
+def test_settle_windows_falls_back_to_a_reference_sub():
+    import tempfile
+    f, ref = tempfile.mktemp(suffix=".srt"), tempfile.mktemp(suffix=".srt")
+    times = [t * 7.3 for t in range(800)]                                       # ~97 min, irregular-ish
+    open(ref, "w", encoding="utf-8").write(sc.render([(t, t + 2, "en") for t in times]))
+    open(f, "w", encoding="utf-8").write(sc.render([(t - 0.52, t + 1.5, "es") for t in times]))
+    noisy = lambda m, p: [(600, 0.46), (1900, 57.0), (3300, -21.5), (4700, -19.2), (5500, 46.2)]   # Ballerina, audio
+    ok, how, w = sc.settle_windows("m.mkv", f, windows_fn=noisy, reference_fn=lambda: ref)
+    assert ok and how == "reference shift", (ok, how)
+    assert all(abs(o) < 0.01 for _, o in w), w
+    ok, how, _ = sc.settle_windows("m.mkv", f, windows_fn=noisy, reference_fn=lambda: ref)
+    assert ok and how == "reference", how                                       # already in sync: not rewritten
+    ok, how, _ = sc.settle_windows("m.mkv", f, windows_fn=noisy, reference_fn=lambda: None)
+    assert not ok and how == "windows off", how                                  # no reference: the hook's 10-17 verdict
+    print("test_settle_windows_falls_back_to_a_reference_sub OK")
+
+
 if __name__ == "__main__":
+    test_settle_windows_falls_back_to_a_reference_sub()
     test_nonstandard_on_the_mix_is_remeasured_on_the_centre_channel()
     test_fix_constant_offset_is_corrected_and_remeasured()
     test_fix_rejects_nonstandard_speed()

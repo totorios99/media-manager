@@ -272,6 +272,17 @@ def repair_by_reference(srt, ref, starts=None):
     if len(vals) >= 3 and max(vals) - min(vals) <= REF_SPREAD:
         open(srt, "w", encoding="utf-8").write(render(shift(parse(decode(original)), statistics.median(vals))))
         return True, "reference shift", reference_offsets(srt, ref, starts)
+    # a drift or a stretch (Need for Speed ES after the hook's 1.043 scale: +0.30 .. -0.94 s): piecewise on the
+    # reference windows, judged on nine windows so it is not graded on the same five points it was fitted to
+    check = dialogue_starts(srt, [i / 10 for i in range(1, 10)])
+    w = r
+    for _ in range(3):
+        if piecewise_from_windows(srt, w) is None:
+            break
+        w = reference_offsets(srt, ref, starts)
+        if good(w) and good(reference_offsets(srt, ref, check)):
+            return True, "reference piecewise", reference_offsets(srt, ref, check)
+    open(srt, "wb").write(original)
     out = srt + ".alass.srt"
     try:
         p = subprocess.run([ALASS, ref, srt, out], capture_output=True, timeout=1800)

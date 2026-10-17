@@ -3,7 +3,7 @@
     library_maint.py            # run every step (systemd: library-maint.timer, 00:41)
 
 Steps, each idempotent (a conform file is skipped by its own plan, so a quiet night costs a few DB reads):
-  spa_unblock (files F6 blocks on 2+ bare-spa subs) -> f6_series (episodes) -> f6_series --movies -> ocr_pass (no PGS/VobSub) -> subs_check (ads + sync of embedded SRT)
+  thin_forced (signs-only tracks get the forced flag) -> spa_unblock (files F6 blocks on 2+ bare-spa subs) -> f6_series (episodes) -> f6_series --movies -> ocr_pass (no PGS/VobSub) -> subs_check (ads + sync of embedded SRT)
 then a Jellyfin library refresh and the Media Segment Scan when any file changed.
 A flock on /var/tmp/library_maint.lock keeps two runs (or the trip chain, which takes the same lock) from overlapping.
 Failure handling: a step that exits non-zero or logs new FAILED/ERROR lines is counted; the run goes on with the
@@ -20,6 +20,7 @@ OUT = "/var/tmp/library_maint.out"
 UV = os.path.expanduser("~/.local/bin/uv")
 SEGMENT_SCAN = "f861734dd71b37f9482b52a820e39013"
 STEPS = [  # (name, argv, its jsonl log)
+    ("thin forced", ["thin_forced.py", "--run"], "thin_forced.jsonl"),
     ("spa unblock", ["spa_unblock.py", "--run"], "spa_unblock.jsonl"),
     ("f6 series", ["f6_series.py", "--run", "--ignore-downloads"], "f6_series.jsonl"),
     ("f6 movies", ["f6_series.py", "--movies", "--run", "--ignore-downloads"], "f6_movies.jsonl"),

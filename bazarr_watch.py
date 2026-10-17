@@ -3,8 +3,8 @@ episodios sin subtítulos para que bazarr los entregue correctamente").
 
     bazarr_watch.py            # prints the pending list; updates bazarr_watch.json (first_seen, delivered_at)
 
-Sources: ocr_review.jsonl (a PGS/VobSub dropped after a failed OCR gate, or a VobSub with no OCR) and dbz_rm_subs.jsonl
-(a DBZ tie with no dub subtitle left). A language counts as delivered when the file has a text track in it again
+Sources: ocr_review.jsonl (a PGS/VobSub dropped after a failed OCR gate, or a VobSub with no OCR), dbz_rm_subs.jsonl
+(a DBZ tie with no dub subtitle left) and thin_forced.jsonl (a language whose only track was signs, now flagged forced). A language counts as delivered when the file has a text track in it again
 (embedded, castellano excluded for Spanish) or a sidecar that the subtitle filter accepted.
 """
 import datetime, json, os, re
@@ -20,11 +20,15 @@ SIDE = {"spa": re.compile(r"\.(es|spa|es-MX|es-419)(\.(forced|sdh|hi))?\.srt$", 
 
 def wanted():
     out = {}
-    for name in ("ocr_review.jsonl", "dbz_rm_subs.jsonl"):
+    for name in ("ocr_review.jsonl", "dbz_rm_subs.jsonl", "thin_forced.jsonl"):
         p = os.path.join(HERE, name)
         for l in open(p, encoding="utf-8") if os.path.exists(p) else []:
             r = json.loads(l)
-            if name == "ocr_review.jsonl" and r.get("lang") in SIDE:
+            if name == "thin_forced.jsonl":
+                for lang in r.get("missing") or []:
+                    if lang in SIDE:
+                        out[(r["path"], lang)] = "only a signs/forced track (thin_forced)"
+            elif name == "ocr_review.jsonl" and r.get("lang") in SIDE:
                 out[(r["path"], r["lang"])] = r.get("why", "")
             elif r.get("tie") and r.get("status") == "ok" and "Bazarr" in (r.get("detail") or ""):
                 out[(r["path"], "spa")] = "DBZ tie without a dub subtitle"

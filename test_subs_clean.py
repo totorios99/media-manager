@@ -266,8 +266,31 @@ def test_settle_windows_falls_back_to_a_reference_sub():
     print("test_settle_windows_falls_back_to_a_reference_sub OK")
 
 
+def test_repair_by_reference_fixes_a_pal_speed_sub_or_leaves_it():
+    import random, tempfile
+    random.seed(3)
+    f, ref = tempfile.mktemp(suffix=".srt"), tempfile.mktemp(suffix=".srt")
+    times, t = [], 60.0
+    for _ in range(900):                                  # irregular dialogue, ~2 h
+        t += random.uniform(2.5, 14.0)
+        times.append(t)
+    open(ref, "w", encoding="utf-8").write(sc.render([(x, x + 2, "en") for x in times]))
+    k = 23.976 / 25                                       # a sub timed to a PAL release (Need for Speed ES: 1.042)
+    open(f, "w", encoding="utf-8").write(sc.render([(x * k, x * k + 1.9, "es") for x in times]))
+    ok, how, w = sc.repair_by_reference(f, ref)
+    assert ok and how == "reference alass", (ok, how, w)
+    assert all(o is None or abs(o) <= sc.WINDOW_OFF_OK for _, o in w), w
+    junk = [(x, x + 1, "x") for x in sorted(random.uniform(60, 7000) for _ in range(900))]
+    open(f, "w", encoding="utf-8").write(sc.render(junk))
+    before = open(f, "rb").read()
+    ok, how, _ = sc.repair_by_reference(f, ref)
+    assert not ok and open(f, "rb").read() == before, how                  # unrelated sub: untouched, refused
+    print("test_repair_by_reference_fixes_a_pal_speed_sub_or_leaves_it OK")
+
+
 if __name__ == "__main__":
     test_settle_windows_falls_back_to_a_reference_sub()
+    test_repair_by_reference_fixes_a_pal_speed_sub_or_leaves_it()
     test_nonstandard_on_the_mix_is_remeasured_on_the_centre_channel()
     test_fix_constant_offset_is_corrected_and_remeasured()
     test_fix_rejects_nonstandard_speed()

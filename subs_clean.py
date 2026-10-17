@@ -244,6 +244,49 @@ def reference_offsets(srt, ref, starts, max_d=3.0):
     return out
 
 
+ALASS = os.path.expanduser("~/.local/bin/alass")
+
+
+def dialogue_starts(srt, fractions=(0.1, 0.3, 0.5, 0.7, 0.9)):
+    """Window starts spread over the dialogue span, not on the logos or the credits."""
+    cues = parse(decode(open(srt, "rb").read()))
+    if not cues:
+        return []
+    a, b = cues[0][0], cues[-1][1]
+    return [max(a + f * (b - a) - WINDOW_S / 2, 0) for f in fractions]
+
+
+def repair_by_reference(srt, ref, starts=None):
+    """Verify `srt` against `ref`, a subtitle already timed to the same video (usually the embedded track of another
+    language), and repair it in place: one coherent offset -> shift; anything else (another frame rate, a cut) ->
+    alass to the reference, kept only if every window then agrees within WINDOW_OFF_OK. The file is left as it was
+    on failure. -> (ok, how, windows)."""
+    starts = starts or dialogue_starts(srt)
+    original = open(srt, "rb").read()
+    good = lambda w: len([o for _, o in w if o is not None]) >= 3 and all(
+        abs(o) <= WINDOW_OFF_OK for _, o in w if o is not None)
+    r = reference_offsets(srt, ref, starts)
+    vals = [o for _, o in r if o is not None]
+    if good(r):
+        return True, "reference", r
+    if len(vals) >= 3 and max(vals) - min(vals) <= REF_SPREAD:
+        open(srt, "w", encoding="utf-8").write(render(shift(parse(decode(original)), statistics.median(vals))))
+        return True, "reference shift", reference_offsets(srt, ref, starts)
+    out = srt + ".alass.srt"
+    try:
+        p = subprocess.run([ALASS, ref, srt, out], capture_output=True, timeout=1800)
+        if p.returncode == 0 and os.path.exists(out):
+            w = reference_offsets(out, ref, starts)
+            if good(w):
+                open(srt, "wb").write(open(out, "rb").read())
+                return True, "reference alass", w
+    finally:
+        if os.path.exists(out):
+            os.remove(out)
+    open(srt, "wb").write(original)
+    return False, "reference off", r
+
+
 def settle_windows(media, srt, measure_fn=None, starts=None, windows_fn=None, reference_fn=None):
     """Verify `srt` by windows and repair it in place when a global fit was not enough (The Good, the Bad and the
     Ugly: global +1.24 s, windows -1.4 s). Windows beyond NOISE_S are ignored. Tries a piecewise fit (up to three
@@ -280,17 +323,12 @@ def settle_windows(media, srt, measure_fn=None, starts=None, windows_fn=None, re
             return True, "segments", w
     open(srt, "wb").write(original)
     ref = reference_fn() if reference_fn else None
-    if ref and starts:
+    if ref:
         # audio windows failed: measure against a subtitle already timed to this video instead (Ballerina ES: audio
         # +0.46/+57/-21/-19/+46 s, against the embedded English +0.49..+0.57 s everywhere -> one shift)
-        r = reference_offsets(srt, ref, starts)
-        vals = [o for _, o in r if o is not None]
-        if len(vals) >= 3 and max(vals) - min(vals) <= REF_SPREAD:
-            off = statistics.median(vals)
-            if abs(off) > WINDOW_OFF_OK:
-                open(srt, "w", encoding="utf-8").write(render(shift(parse(decode(original)), off)))
-                return True, "reference shift", reference_offsets(srt, ref, starts)
-            return True, "reference", r
+        ok, how, r = repair_by_reference(srt, ref, starts)
+        if ok:
+            return True, how, r
     offs = [o for _, o in trusted(w0)]
     if max(offs) - min(offs) > 10.0 and any(abs(o) <= WINDOW_OFF_OK for o in offs):
         # scattered both ways by tens of seconds is the measurement failing (Avengers Infinity War: two independent

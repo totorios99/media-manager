@@ -2273,6 +2273,52 @@ def _embedded_reference_srt(media, extracted):
     return out if r.returncode == 0 and os.path.getsize(out) else None
 
 
+REJECTED_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rejected_subs.jsonl")
+SUB_LANG = re.compile(r"\.(es|spa|es-MX|es-419|en|eng)(?:\.(?:forced|sdh|hi|cc))?\.srt$", re.I)
+
+
+def _repair_or_recycle(srt, r):
+    """A sub the audio could not confirm: try the embedded subtitle as the timing reference (subs_clean.
+    repair_by_reference: shift, or alass for another frame rate/cut). If that fails too, the sub leaves the player's
+    view -- moved to .recycle -- and its language goes to rejected_subs.jsonl for bazarr_watch (Need for Speed ES,
+    10-17: a rejected 22-cue PAL sub stayed next to the video and Jellyfin offered it)."""
+    import subs_clean
+    extracted = []
+    try:
+        ref = _embedded_reference_srt(r["media"], extracted)
+        if ref:
+            tmp = os.path.join(os.path.dirname(srt), "." + os.path.basename(srt) + ".ref.tmp")
+            kept, removed = subs_clean.strip_ads(subs_clean.parse(subs_clean.decode(open(srt, "rb").read())))
+            open(tmp, "w", encoding="utf-8").write(subs_clean.render(kept))
+            ok, how, _ = subs_clean.repair_by_reference(tmp, ref)
+            if ok:
+                if how == "reference" and not removed:
+                    os.remove(tmp)
+                    return {**r, "status": "ok", "ads": 0, "action": f"{r['action']}; {how}", "written": False}
+                if not os.path.exists(srt + ".orig"):
+                    shutil.copy2(srt, srt + ".orig")
+                shutil.copymode(srt, tmp)
+                os.replace(tmp, srt)
+                return {**r, "status": "ok", "ads": len(removed), "action": f"{r['action']}; {how}", "written": True}
+            os.remove(tmp)
+    finally:
+        for p in extracted:
+            os.remove(p)
+    base = os.path.dirname(SHOWS_ROOT if srt.startswith(SHOWS_ROOT) else MEDIA_ROOT)     # /srv/storage
+    dst = os.path.join(base, ".recycle", os.path.relpath(srt, base))
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    dst = dst if not os.path.exists(dst) else dst + f".{int(time.time())}"
+    os.rename(srt, dst)
+    if os.path.exists(srt + ".orig"):
+        os.rename(srt + ".orig", dst + ".orig")
+    m = SUB_LANG.search(srt)
+    lang = {"es": "spa", "spa": "spa", "es-mx": "spa", "es-419": "spa", "en": "eng", "eng": "eng"}.get(
+        m.group(1).lower()) if m else None
+    with open(REJECTED_LOG, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"path": r["media"], "lang": lang, "sub": dst, "why": r["action"]}, ensure_ascii=False) + "\n")
+    return {**r, "action": f"{r['action']}; no reference fix: moved to .recycle"}
+
+
 SDH_MIN_CUES = 10     # Bazarr calls a sub SDH for one "[music]" line (Guardians, Infinity War, Possession: 1-2 lines)
 
 
@@ -2304,6 +2350,8 @@ def _fix_subtitle_job(srt):
                 if not moved or moved == srt:
                     raise
                 srt, r = moved, _fix_subtitle(moved)
+            if r["status"] == "rejected" and r.get("media"):
+                r = _repair_or_recycle(srt, r)
             if r["status"] == "ok":
                 srt = _unmark_false_sdh(srt)
             name = os.path.basename(srt)

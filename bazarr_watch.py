@@ -20,7 +20,7 @@ SIDE = {"spa": re.compile(r"\.(es|spa|es-MX|es-419)(\.(forced|sdh|hi))?\.srt$", 
 
 def wanted():
     out = {}
-    for name in ("ocr_review.jsonl", "dbz_rm_subs.jsonl", "thin_forced.jsonl"):
+    for name in ("ocr_review.jsonl", "dbz_rm_subs.jsonl", "thin_forced.jsonl", "rejected_subs.jsonl"):
         p = os.path.join(HERE, name)
         for l in open(p, encoding="utf-8") if os.path.exists(p) else []:
             r = json.loads(l)
@@ -28,6 +28,8 @@ def wanted():
                 for lang in r.get("missing") or []:
                     if lang in SIDE:
                         out[(r["path"], lang)] = "only a signs/forced track (thin_forced)"
+            elif name == "rejected_subs.jsonl" and r.get("lang") in SIDE:
+                out[(r["path"], r["lang"])] = "hook rejected the sub, no reference fix: " + (r.get("why") or "")[:80]
             elif name == "ocr_review.jsonl" and r.get("lang") in SIDE:
                 out[(r["path"], r["lang"])] = r.get("why", "")
             elif r.get("tie") and r.get("status") == "ok" and "Bazarr" in (r.get("detail") or ""):

@@ -21,10 +21,17 @@ WORK = "/var/tmp/ocr_recover"
 SUFFIX = {"spa": ".es-MX.srt", "eng": ".en.srt"}
 
 
+def pending(review, logged):
+    """Review rows with a kept .sup that were never tried: the same .sup gives the same OCR, so a failed or castellano
+    verdict is final too (Kill Bill Vol. 1 ES was re-OCR'd six times with the same 37 %)."""
+    done = {(r["path"], r["track"]) for r in logged}
+    return [r for r in review if r.get("sup", "").endswith(".sup") and r["lang"] in SUFFIX
+            and (r["path"], r["track"]) not in done]
+
+
 def main(run):
-    done = {(r["path"], r["track"]) for r in map(json.loads, open(LOG)) if r["status"] == "ok"} if os.path.exists(LOG) else set()
-    todo = [r for r in map(json.loads, open(opass.REVIEW)) if r.get("sup", "").endswith(".sup")
-            and r["lang"] in SUFFIX and (r["path"], r["track"]) not in done and os.path.exists(r["sup"])]
+    logged = list(map(json.loads, open(LOG))) if os.path.exists(LOG) else []
+    todo = [r for r in pending(map(json.loads, open(opass.REVIEW)), logged) if os.path.exists(r["sup"])]
     print(len(todo), "recyclable tracks", flush=True)
     vocs = {"es": op.vocab("es"), "en": op.vocab("en")} if run else {}
     os.makedirs(WORK, exist_ok=True)

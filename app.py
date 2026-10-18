@@ -2277,7 +2277,7 @@ REJECTED_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rejecte
 SUB_LANG = re.compile(r"\.(es|spa|es-MX|es-419|en|eng)(?:\.(?:forced|sdh|hi|cc))?\.srt$", re.I)
 
 
-def _repair_or_recycle(srt, r):
+def _repair_or_recycle(srt, r, keep_without_reference=False):
     """A sub the audio could not confirm: try the embedded subtitle as the timing reference (subs_clean.
     repair_by_reference: shift, or alass for another frame rate/cut). If that fails too, the sub leaves the player's
     view -- moved to .recycle -- and its language goes to rejected_subs.jsonl for bazarr_watch (Need for Speed ES,
@@ -2301,6 +2301,8 @@ def _repair_or_recycle(srt, r):
                 os.replace(tmp, srt)
                 return {**r, "status": "ok", "ads": len(removed), "action": f"{r['action']}; {how}", "written": True}
             os.remove(tmp)
+        elif keep_without_reference:          # a weak check has no worse news than before: leave the sub alone
+            return {**r, "status": "ok", "action": f"{r['action']}; no embedded reference, kept"}
     finally:
         for p in extracted:
             os.remove(p)

@@ -318,7 +318,10 @@ def settle_windows(media, srt, measure_fn=None, starts=None, windows_fn=None, re
     if good(w):
         return True, "windows", w
     if len(trusted(w)) < 3:
-        return True, "unmeasured", w        # too little dialogue to judge: the global fit stands, as before
+        # too little the audio can say: the embedded subtitle decides when there is one (GoodFellas ES, 10-17:
+        # "shift +3.59 s; unmeasured"), else the global fit stands, as before
+        ref = reference_fn() if reference_fn else None
+        return repair_by_reference(srt, ref, starts) if ref else (True, "unmeasured", w)
     original = open(srt, "rb").read()
     for _ in range(3):
         if piecewise_from_windows(srt, trusted(w)) is None:
@@ -344,7 +347,7 @@ def settle_windows(media, srt, measure_fn=None, starts=None, windows_fn=None, re
     if max(offs) - min(offs) > 10.0 and any(abs(o) <= WINDOW_OFF_OK for o in offs):
         # scattered both ways by tens of seconds is the measurement failing (Avengers Infinity War: two independent
         # subs gave the same -15/+30/-0.2/+24/+52 s), not the sub; a real edit offset is coherent (GBU: -1.4 everywhere)
-        return True, "unreliable windows", w0
+        return (False, "reference off", w0) if ref else (True, "unreliable windows", w0)
     return False, "windows off", w0
 
 

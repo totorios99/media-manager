@@ -2235,13 +2235,7 @@ def _fix_subtitle(srt, measure_fn=None, linear=False):
     with open(tmp, "w", encoding="utf-8") as fh:
         fh.write(r["text"] if changed else open(real, encoding="utf-8", errors="replace").read())
     # a global fit can hide a stretch that is off (The Good, the Bad and the Ugly: +1.24 s global, -1.4 s by windows)
-    extracted = []
-    try:
-        ok, how, w = subs_clean.settle_windows(media, tmp, measure_fn,
-                                               reference_fn=lambda: _embedded_reference_srt(media, extracted))
-    finally:
-        for p in extracted:
-            os.remove(p)
+    ok, how, w = subs_clean.settle_windows(media, tmp, measure_fn, reference_fn=lambda: _reference_for(media))
     wins = " ".join(f"{int(a) // 60}min:{'?' if o is None else f'{o:+.2f}'}" for a, o in w)
     if not ok:
         os.remove(tmp)
@@ -2254,6 +2248,27 @@ def _fix_subtitle(srt, measure_fn=None, linear=False):
     shutil.copymode(real, tmp)
     os.replace(tmp, real)
     return {**r, "action": f"{r['action']}; {how}", "written": True, "media": media}
+
+
+_REFS = {}            # media -> extracted reference SRT (or None) for the job in progress; one full read per video
+
+
+def _reference_for(media):
+    if media not in _REFS:
+        extracted = []
+        ref = _embedded_reference_srt(media, extracted)
+        for p in extracted:
+            if p != ref:
+                os.remove(p)
+        _REFS[media] = ref
+    return _REFS[media]
+
+
+def _drop_references():
+    for p in filter(None, _REFS.values()):
+        if os.path.exists(p):
+            os.remove(p)
+    _REFS.clear()
 
 
 def _embedded_reference_srt(media, extracted):
@@ -2283,29 +2298,24 @@ def _repair_or_recycle(srt, r, keep_without_reference=False):
     view -- moved to .recycle -- and its language goes to rejected_subs.jsonl for bazarr_watch (Need for Speed ES,
     10-17: a rejected 22-cue PAL sub stayed next to the video and Jellyfin offered it)."""
     import subs_clean
-    extracted = []
-    try:
-        ref = _embedded_reference_srt(r["media"], extracted)
-        if ref:
-            tmp = os.path.join(os.path.dirname(srt), "." + os.path.basename(srt) + ".ref.tmp")
-            kept, removed = subs_clean.strip_ads(subs_clean.parse(subs_clean.decode(open(srt, "rb").read())))
-            open(tmp, "w", encoding="utf-8").write(subs_clean.render(kept))
-            ok, how, _ = subs_clean.repair_by_reference(tmp, ref)
-            if ok:
-                if how == "reference" and not removed:
-                    os.remove(tmp)
-                    return {**r, "status": "ok", "ads": 0, "action": f"{r['action']}; {how}", "written": False}
-                if not os.path.exists(srt + ".orig"):
-                    shutil.copy2(srt, srt + ".orig")
-                shutil.copymode(srt, tmp)
-                os.replace(tmp, srt)
-                return {**r, "status": "ok", "ads": len(removed), "action": f"{r['action']}; {how}", "written": True}
-            os.remove(tmp)
-        elif keep_without_reference:          # a weak check has no worse news than before: leave the sub alone
-            return {**r, "status": "ok", "action": f"{r['action']}; no embedded reference, kept"}
-    finally:
-        for p in extracted:
-            os.remove(p)
+    ref = _reference_for(r["media"])
+    if ref:
+        tmp = os.path.join(os.path.dirname(srt), "." + os.path.basename(srt) + ".ref.tmp")
+        kept, removed = subs_clean.strip_ads(subs_clean.parse(subs_clean.decode(open(srt, "rb").read())))
+        open(tmp, "w", encoding="utf-8").write(subs_clean.render(kept))
+        ok, how, _ = subs_clean.repair_by_reference(tmp, ref)
+        if ok:
+            if how == "reference" and not removed:
+                os.remove(tmp)
+                return {**r, "status": "ok", "ads": 0, "action": f"{r['action']}; {how}", "written": False}
+            if not os.path.exists(srt + ".orig"):
+                shutil.copy2(srt, srt + ".orig")
+            shutil.copymode(srt, tmp)
+            os.replace(tmp, srt)
+            return {**r, "status": "ok", "ads": len(removed), "action": f"{r['action']}; {how}", "written": True}
+        os.remove(tmp)
+    elif keep_without_reference:          # a weak check has no worse news than before: leave the sub alone
+        return {**r, "status": "ok", "action": f"{r['action']}; no embedded reference, kept"}
     base = os.path.dirname(SHOWS_ROOT if srt.startswith(SHOWS_ROOT) else MEDIA_ROOT)     # /srv/storage
     dst = os.path.join(base, ".recycle", os.path.relpath(srt, base))
     os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -2368,6 +2378,7 @@ def _fix_subtitle_job(srt):
             if not (not os.path.exists(srt) and os.path.exists(srt + ".orig")):
                 _notify_subs_burst("Subtítulo sin procesar", f"{os.path.basename(srt)}: {e}")
         finally:
+            _drop_references()
             _SUBFIX_BUSY.discard(srt)
 
 

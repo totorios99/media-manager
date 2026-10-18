@@ -27,6 +27,7 @@ def test_reject_recycle():
     assert abs(sc.parse(sc.decode(open(sub, "rb").read()))[0][0] - 60) < 0.01
     assert os.path.exists(sub + ".orig")
 
+    app._REFS.clear()                                                    # per-job cache (the job drops it)
     app._embedded_reference_srt = lambda media, extracted: None        # nothing to measure against
     r = app._repair_or_recycle(sub, rej)
     assert r["status"] == "rejected" and not os.path.exists(sub), r

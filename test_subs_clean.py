@@ -263,6 +263,12 @@ def test_settle_windows_falls_back_to_a_reference_sub():
     assert ok and how == "reference", how                                       # already in sync: not rewritten
     ok, how, _ = sc.settle_windows("m.mkv", f, windows_fn=noisy, reference_fn=lambda: None)
     assert not ok and how == "windows off", how                                  # no reference: the hook's 10-17 verdict
+    open(f, "w", encoding="utf-8").write(sc.render([(t + 3.59, t + 5, "es") for t in times]))
+    quiet = lambda m, p: [(600, None), (1900, None), (3300, 40.0)]              # GoodFellas ES: "unmeasured"
+    ok, how, w = sc.settle_windows("m.mkv", f, windows_fn=quiet, reference_fn=lambda: ref)
+    assert ok and how.startswith("reference") and all(abs(o) < 0.01 for _, o in w if o is not None), (how, w)
+    ok, how, _ = sc.settle_windows("m.mkv", f, windows_fn=quiet, reference_fn=lambda: None)
+    assert ok and how == "unmeasured", how
     print("test_settle_windows_falls_back_to_a_reference_sub OK")
 
 

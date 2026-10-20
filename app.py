@@ -2352,7 +2352,39 @@ def _unmark_false_sdh(srt):
     return plain
 
 
-def _fix_subtitle_job(srt):
+BAZARR_META = ("provider", "subtitle_id", "language", "radarr_id", "series_id", "episode_id")
+
+
+def _bazarr_blacklist(meta, bazarr_path):
+    """Tell Bazarr not to pick a sub the hook gave up on again (10-18: Lawrence of Arabia, Sound of Music, This Is
+    Not Berlin... were re-downloaded and re-rejected, a full audio read each time). Needs BAZARR_URL/BAZARR_API_KEY
+    and the provider/subtitle_id/ids the post-processing payload carries. The file is already in .recycle: Bazarr's
+    own delete of subtitles_path then fails harmlessly after the blacklist row is written (homelab, 10-18).
+    -> a short note for the log line; never raises."""
+    url, key = os.environ.get("BAZARR_URL", "").rstrip("/"), os.environ.get("BAZARR_API_KEY", "")
+    if not (url and key and meta.get("provider") and meta.get("subtitle_id") and meta.get("language")):
+        return ""
+    import urllib.parse, urllib.request
+    if meta.get("episode_id") and meta.get("series_id"):
+        endpoint = f"{url}/api/episodes/blacklist?seriesid={meta['series_id']}&episodeid={meta['episode_id']}"
+    elif meta.get("radarr_id"):
+        endpoint = f"{url}/api/movies/blacklist?radarrid={meta['radarr_id']}"
+    else:
+        return ""
+    form = urllib.parse.urlencode({"provider": meta["provider"], "subs_id": meta["subtitle_id"],
+                                   "language": meta["language"], "subtitles_path": bazarr_path}).encode()
+    req = urllib.request.Request(endpoint, data=form, method="POST", headers={"X-API-KEY": key})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return f"; Bazarr blacklisted ({resp.status})"
+    except urllib.error.HTTPError as e:
+        return f"; Bazarr blacklist HTTP {e.code}"   # 500 = its delete of the (recycled) file failed, row is written
+    except Exception as e:
+        return f"; Bazarr blacklist failed: {e!r}"[:120]
+
+
+def _fix_subtitle_job(srt, meta=None):
+    meta = meta or {}
     with _SUBFIX_LOCK:
         try:
             try:
@@ -2364,6 +2396,8 @@ def _fix_subtitle_job(srt):
                 srt, r = moved, _fix_subtitle(moved)
             if r["status"] == "rejected" and r.get("media"):
                 r = _repair_or_recycle(srt, r)
+                if r["status"] != "ok" and not os.path.exists(srt):
+                    r = {**r, "action": r["action"] + _bazarr_blacklist(meta, meta.get("bazarr_path") or srt)}
             if r["status"] == "ok":
                 srt = _unmark_false_sdh(srt)
             name = os.path.basename(srt)
@@ -2400,7 +2434,9 @@ async def subs_fix(request: Request):
     if real in _SUBFIX_BUSY:
         return JSONResponse({"ok": True, "queued": False, "reason": "already queued"}, status_code=202)
     _SUBFIX_BUSY.add(real)
-    threading.Thread(target=_fix_subtitle_job, args=(real,), daemon=True).start()
+    meta = {k: str(body[k]).strip() for k in BAZARR_META if body.get(k) not in (None, "")}
+    meta["bazarr_path"] = (body.get("subtitle") or "").strip()
+    threading.Thread(target=_fix_subtitle_job, args=(real, meta), daemon=True).start()
     return JSONResponse({"ok": True, "queued": True}, status_code=202)
 
 

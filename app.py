@@ -2365,14 +2365,18 @@ def _bazarr_blacklist(meta, bazarr_path):
     if not (url and key and meta.get("provider") and meta.get("subtitle_id") and meta.get("language")):
         return ""
     import urllib.parse, urllib.request
+    # Bazarr's post-processing: episodes carry series_id + episode_id; movies an empty series_id and the radarrId in
+    # episode_id (bazarr processing.py, homelab 10-20)
+    radarr_id = meta.get("radarr_id") or (meta.get("episode_id") if not meta.get("series_id") else "")
     if meta.get("episode_id") and meta.get("series_id"):
         endpoint = f"{url}/api/episodes/blacklist?seriesid={meta['series_id']}&episodeid={meta['episode_id']}"
-    elif meta.get("radarr_id"):
-        endpoint = f"{url}/api/movies/blacklist?radarrid={meta['radarr_id']}"
+    elif radarr_id:
+        endpoint = f"{url}/api/movies/blacklist?radarrid={radarr_id}"
     else:
         return ""
     form = urllib.parse.urlencode({"provider": meta["provider"], "subs_id": meta["subtitle_id"],
-                                   "language": meta["language"], "subtitles_path": bazarr_path}).encode()
+                                   "language": meta["language"].split(":")[0],          # "es:hi" -> "es"
+                                   "subtitles_path": bazarr_path}).encode()
     req = urllib.request.Request(endpoint, data=form, method="POST", headers={"X-API-KEY": key})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:

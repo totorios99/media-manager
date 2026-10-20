@@ -33,6 +33,10 @@ def test_bazarr_blacklist():
     app._bazarr_blacklist(ep, "/hdd1/Shows/S/e.en.srt")
     assert seen[-1][0] == "/api/episodes/blacklist?seriesid=7&episodeid=99", seen[-1]
     assert app._bazarr_blacklist({"provider": "subx", "language": "es", "radarr_id": "1"}, "p") == ""   # no subs id
+    # what Bazarr really sends for a movie: empty series_id, radarrId in episode_id, language with a suffix
+    app._bazarr_blacklist({"provider": "subx", "subtitle_id": "q", "language": "es:hi", "series_id": "",
+                           "episode_id": "351"}, "/hdd1/Movies/Y/Y.es-MX.srt")
+    assert seen[-1][0] == "/api/movies/blacklist?radarrid=351" and seen[-1][2]["language"] == ["es"], seen[-1]
     srv.shutdown()
     print("test_bazarr_blacklist OK")
 

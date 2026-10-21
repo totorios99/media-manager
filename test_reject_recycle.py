@@ -34,6 +34,15 @@ def test_reject_recycle():
     assert os.path.exists(os.path.join(root, ".recycle", "Movies", "Film (2014)", "Film (2014).es-MX.srt"))
     logged = json.loads(open(app.REJECTED_LOG).read().splitlines()[-1])
     assert logged["lang"] == "spa" and logged["path"].endswith("Film (2014).mkv"), logged
+    # no embedded text track, but a sidecar the hook already verified: it becomes the reference (Allegiant, 10-21)
+    app._REFS.clear()
+    en = os.path.join(d, "Film (2014).en.srt")
+    open(en, "w", encoding="utf-8").write(sc.render([(t, t + 2, "en") for t in times]))
+    app.SERVER_LOG = os.path.join(root, "server.log")
+    open(app.SERVER_LOG, "w").write("[subs] Film (2014).en.srt: ok ads=0 none; windows\n")
+    open(sub, "w", encoding="utf-8").write(sc.render([(t - 0.8, t + 1, "es") for t in times]))
+    r = app._repair_or_recycle(sub, rej)
+    assert r["status"] == "ok" and "reference" in r["action"], r
     print("test_reject_recycle OK")
 
 

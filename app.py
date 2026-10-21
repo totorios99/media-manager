@@ -2235,7 +2235,7 @@ def _fix_subtitle(srt, measure_fn=None, linear=False):
     with open(tmp, "w", encoding="utf-8") as fh:
         fh.write(r["text"] if changed else open(real, encoding="utf-8", errors="replace").read())
     # a global fit can hide a stretch that is off (The Good, the Bad and the Ugly: +1.24 s global, -1.4 s by windows)
-    ok, how, w = subs_clean.settle_windows(media, tmp, measure_fn, reference_fn=lambda: _reference_for(media))
+    ok, how, w = subs_clean.settle_windows(media, tmp, measure_fn, reference_fn=lambda: _reference_for(media, real))
     wins = " ".join(f"{int(a) // 60}min:{'?' if o is None else f'{o:+.2f}'}" for a, o in w)
     if not ok:
         os.remove(tmp)
@@ -2253,7 +2253,10 @@ def _fix_subtitle(srt, measure_fn=None, linear=False):
 _REFS = {}            # media -> extracted reference SRT (or None) for the job in progress; one full read per video
 
 
-def _reference_for(media):
+def _reference_for(media, exclude=None):
+    """Timing reference for a sub next to `media`: the fullest embedded SRT, else a sidecar of the same video that
+    the hook already verified (Allegiant, 10-21: only VobSub inside, the EN SDH sidecar was 'ok' -> the ES was
+    repaired against it). `exclude` is the sub being judged."""
     if media not in _REFS:
         extracted = []
         ref = _embedded_reference_srt(media, extracted)
@@ -2261,7 +2264,27 @@ def _reference_for(media):
             if p != ref:
                 os.remove(p)
         _REFS[media] = ref
-    return _REFS[media]
+    return _REFS[media] or _verified_sidecar(media, exclude)
+
+
+def _verified_sidecar(media, exclude=None):
+    stem = os.path.splitext(os.path.basename(media))[0]
+    folder = os.path.dirname(media)
+    try:
+        log = open(SERVER_LOG, encoding="utf-8", errors="replace").read().splitlines()
+    except OSError:
+        return None
+    last = {}
+    for l in log:
+        m = re.match(r"\[subs\] (.+?\.srt): (\w+)", l)
+        if m:
+            last[m.group(1)] = m.group(2)
+    for name in sorted(os.listdir(folder)):
+        p = os.path.join(folder, name)
+        if (name.startswith(stem + ".") and name.endswith(".srt") and p != exclude
+                and last.get(name) == "ok"):
+            return p
+    return None
 
 
 def _drop_references():
@@ -2289,6 +2312,7 @@ def _embedded_reference_srt(media, extracted):
 
 
 REJECTED_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rejected_subs.jsonl")
+SERVER_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.log")   # where the [subs] verdicts land
 SUB_LANG = re.compile(r"\.(es|spa|es-MX|es-419|en|eng)(?:\.(?:forced|sdh|hi|cc))?\.srt$", re.I)
 
 
@@ -2298,7 +2322,7 @@ def _repair_or_recycle(srt, r, keep_without_reference=False):
     view -- moved to .recycle -- and its language goes to rejected_subs.jsonl for bazarr_watch (Need for Speed ES,
     10-17: a rejected 22-cue PAL sub stayed next to the video and Jellyfin offered it)."""
     import subs_clean
-    ref = _reference_for(r["media"])
+    ref = _reference_for(r["media"], srt)
     if ref:
         tmp = os.path.join(os.path.dirname(srt), "." + os.path.basename(srt) + ".ref.tmp")
         kept, removed = subs_clean.strip_ads(subs_clean.parse(subs_clean.decode(open(srt, "rb").read())))

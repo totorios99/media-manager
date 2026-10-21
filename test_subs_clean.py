@@ -294,9 +294,28 @@ def test_repair_by_reference_fixes_a_pal_speed_sub_or_leaves_it():
     print("test_repair_by_reference_fixes_a_pal_speed_sub_or_leaves_it OK")
 
 
+def test_repair_by_reference_follows_a_short_stretch():
+    import random, tempfile
+    random.seed(5)
+    f, ref = tempfile.mktemp(suffix=".srt"), tempfile.mktemp(suffix=".srt")
+    times, t = [], 60.0
+    for _ in range(1000):
+        t += random.uniform(3.0, 9.0)
+        times.append(t)
+    open(ref, "w", encoding="utf-8").write(sc.render([(x, x + 2, "en") for x in times]))
+    # Allegiant ES: +0.6 s only between 18 and 41 min, in sync elsewhere
+    bump = lambda x: x - 0.6 if 18 * 60 <= x <= 41 * 60 else x
+    open(f, "w", encoding="utf-8").write(sc.render([(bump(x), bump(x) + 1.9, "es") for x in times]))
+    ok, how, w = sc.repair_by_reference(f, ref)
+    assert ok and how.startswith("reference"), (ok, how, w)
+    assert all(o is None or abs(o) <= sc.WINDOW_OFF_OK for _, o in w), w
+    print("test_repair_by_reference_follows_a_short_stretch OK")
+
+
 if __name__ == "__main__":
     test_settle_windows_falls_back_to_a_reference_sub()
     test_repair_by_reference_fixes_a_pal_speed_sub_or_leaves_it()
+    test_repair_by_reference_follows_a_short_stretch()
     test_nonstandard_on_the_mix_is_remeasured_on_the_centre_channel()
     test_fix_constant_offset_is_corrected_and_remeasured()
     test_fix_rejects_nonstandard_speed()

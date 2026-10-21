@@ -282,6 +282,17 @@ def repair_by_reference(srt, ref, starts=None):
         w = reference_offsets(srt, ref, starts)
         if good(w) and good(reference_offsets(srt, ref, check)):
             return True, "reference piecewise", reference_offsets(srt, ref, check)
+    # a stretch shorter than the window spacing (Allegiant ES, 10-21: +0.5..0.9 s only between 18 and 41 min):
+    # fit on twenty windows, judged on nineteen others placed between them
+    open(srt, "wb").write(original)
+    fine = dialogue_starts(srt, [0.025 + i / 20 for i in range(20)])
+    between = dialogue_starts(srt, [0.05 + i / 20 for i in range(19)])
+    for _ in range(4):
+        w = [(a, o) for a, o in reference_offsets(srt, ref, fine) if o is not None]
+        if piecewise_from_windows(srt, w) is None:
+            break
+    if good(reference_offsets(srt, ref, fine)) and good(reference_offsets(srt, ref, between)):
+        return True, "reference fine piecewise", reference_offsets(srt, ref, between)
     open(srt, "wb").write(original)
     out = srt + ".alass.srt"
     try:

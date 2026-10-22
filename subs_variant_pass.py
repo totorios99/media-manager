@@ -207,12 +207,20 @@ def report(conn, done):
 IETF = {"latino": "es-419", "castellano": "es-ES"}
 
 
+NO_INHERIT = ("Dragon Ball Z",)    # two translations per episode: only a track's own verdict counts
+
+
+def forced_track(t):
+    return bool(t.get("forced_flag")) or "forzad" in (t.get("name") or "").lower()
+
+
 def tags(conn, done, spanish_original="es-419"):
     """{path: {mkv_id: 'es-419'|'es-ES'}} from the reviewed rules (D3):
     a group's agreed verdict covers every member; in a conflicting group only a file's own decisive verdict counts;
     unknown gets no tag. A title whose ORIGINAL language is Spanish is not judged by its text: its subtitles transcribe
     the dialogue, so a Spanish character's vosotros says nothing about the translator. They take `spanish_original`
-    (all such titles in this library are Mexican productions) or nothing when it is None."""
+    (all such titles in this library are Mexican productions) or nothing when it is None.
+    A forced track (songs and signs) carries no variant evidence: never tagged. Titles in NO_INHERIT use own verdicts."""
     by_path = {v["path"]: v for v in done.values()}
     orig = {}
     for r in conn.execute("SELECT e.id, s.original_language ol FROM episodes e JOIN shows s ON s.id=e.show_id"):
@@ -225,16 +233,19 @@ def tags(conn, done, spanish_original="es-419"):
     out = {}
     for g, members in groups.items():
         for pos in range(len(members[0][5])):
-            verdicts = []
+            verdicts, forced = [], []
             for kind, id_, _, path, sz, tracks in members:
                 t = (by_path.get(path) or {}).get("tracks", {})
                 t = t.get(str(tracks[pos][0])) if pos < len(tracks) else None
                 verdicts.append(effective(t) if t else None)
+                forced.append(bool(t) and forced_track(t))
             decisive = {v for v in verdicts if v in IETF}
-            for (kind, id_, _, path, sz, tracks), own in zip(members, verdicts):
-                if pos >= len(tracks):
+            for (kind, id_, _, path, sz, tracks), own, frc in zip(members, verdicts, forced):
+                if pos >= len(tracks) or frc:
                     continue
-                if orig.get((kind, id_)) == "es":
+                if any(n in path for n in NO_INHERIT):
+                    tag = IETF.get(own)
+                elif orig.get((kind, id_)) == "es":
                     tag = spanish_original
                 elif len(decisive) == 1:
                     tag = IETF[next(iter(decisive))]

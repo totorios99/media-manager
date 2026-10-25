@@ -23,6 +23,9 @@ import subs_clean as sc
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOG, REVIEW = os.path.join(HERE, "subs_check.jsonl"), os.path.join(HERE, "subs_check_review.jsonl")
 ALASS = os.path.expanduser("~/.local/bin/alass")
+# Antonio 2026-10-25: ads only. The window measure passed R&M S07E05 at -0.14 s while Whisper puts its cues 7.5 s
+# late, and 266/280 "unfixed" files were noise (credits, action, a dubbed audio 0). Off windows go to REVIEW instead.
+FIX_SYNC = False
 
 
 def targets(conn):
@@ -71,7 +74,9 @@ def check_file(path, measure_fn=None):
         f = f"{d}/{main['id']}.srt"
         w = sc.window_offsets(path, f, measure_fn)
         rep["sync"] = {"before": w}
-        if worst(w) is not None and worst(w) > sc.WINDOW_OFF_OK:
+        if worst(w) is not None and worst(w) > sc.WINDOW_OFF_OK and not FIX_SYNC:
+            rep["sync"]["unfixed"] = True
+        elif worst(w) is not None and worst(w) > sc.WINDOW_OFF_OK:
             backup = open(f, "rb").read()
             fixed = None
             if eng:

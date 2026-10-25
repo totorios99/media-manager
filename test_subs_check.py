@@ -58,6 +58,28 @@ def test_ocr_remux_falls_back_to_ffmpeg_when_mkvmerge_retimes():
     print("test_ocr_remux_falls_back_to_ffmpeg_when_mkvmerge_retimes OK")
 
 
+def test_off_sync_is_reported_not_rewritten():
+    d = tempfile.mkdtemp()
+    ep = make_episode(d)
+    os.remove(ep)
+    # 30 cues 40 s apart: three distinct windows, each with enough cues to be measured
+    open(os.path.join(d, "es.srt"), "w").write("".join(
+        f"{i}\n00:{i * 40 // 60:02d}:{i * 40 % 60:02d},000 --> 00:{i * 40 // 60:02d}:{i * 40 % 60:02d},800\nL{i}\n\n"
+        for i in range(1, 31)))
+    subprocess.run(["mkvmerge", "-q", "-o", ep, os.path.join(d, "b.mkv"), "--language", "0:spa", os.path.join(d, "es.srt")],
+                   capture_output=True)
+    calls = []                      # first measure 1 s off, every later one 0: a fix would be "verified" and written
+    real = sk.sc.window_offsets
+    sk.sc.window_offsets = lambda *a, **k: (calls.append(1) or [(t, 1.0 if len(calls) == 1 else 0.0) for t in (10, 360, 720)])
+    try:
+        decisions, rep = sk.check_file(ep)
+    finally:
+        sk.sc.window_offsets = real
+    assert not decisions and rep["sync"].get("unfixed") and "how" not in rep["sync"], rep
+    print("test_off_sync_is_reported_not_rewritten OK")
+
+
 if __name__ == "__main__":
+    test_off_sync_is_reported_not_rewritten()
     test_embedded_ad_is_removed_in_place()
     test_ocr_remux_falls_back_to_ffmpeg_when_mkvmerge_retimes()

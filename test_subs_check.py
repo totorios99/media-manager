@@ -69,12 +69,13 @@ def test_off_sync_is_reported_not_rewritten():
     subprocess.run(["mkvmerge", "-q", "-o", ep, os.path.join(d, "b.mkv"), "--language", "0:spa", os.path.join(d, "es.srt")],
                    capture_output=True)
     calls = []                      # first measure 1 s off, every later one 0: a fix would be "verified" and written
-    real = sk.sc.window_offsets
+    real, fix = sk.sc.window_offsets, sk.FIX_SYNC
+    sk.FIX_SYNC = False
     sk.sc.window_offsets = lambda *a, **k: (calls.append(1) or [(t, 1.0 if len(calls) == 1 else 0.0) for t in (10, 360, 720)])
     try:
         decisions, rep = sk.check_file(ep)
     finally:
-        sk.sc.window_offsets = real
+        sk.sc.window_offsets, sk.FIX_SYNC = real, fix
     assert not decisions and rep["sync"].get("unfixed") and "how" not in rep["sync"], rep
     print("test_off_sync_is_reported_not_rewritten OK")
 

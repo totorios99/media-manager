@@ -23,9 +23,9 @@ import subs_clean as sc
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOG, REVIEW = os.path.join(HERE, "subs_check.jsonl"), os.path.join(HERE, "subs_check_review.jsonl")
 ALASS = os.path.expanduser("~/.local/bin/alass")
-# Antonio 2026-10-25: ads only. 266/280 "unfixed" files had one window 20-60 s off; Whisper on 6 of 9 checked found the
-# subtitle in sync (the window fell on credits, action, silence or a dubbed audio 0). Off windows go to REVIEW instead.
-FIX_SYNC = False
+# False = ads only, off windows go to REVIEW. Antonio 2026-10-25: re-timing stays on (the 7.5 s "proof" against it was
+# an artifact of my check); the measure is noisy (266/280 "unfixed" had one window 20-60 s off on files Whisper found in sync).
+FIX_SYNC = True
 
 
 def targets(conn):

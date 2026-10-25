@@ -23,7 +23,7 @@ import subs_clean as sc
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOG, REVIEW = os.path.join(HERE, "subs_check.jsonl"), os.path.join(HERE, "subs_check_review.jsonl")
 ALASS = os.path.expanduser("~/.local/bin/alass")
-# Antonio 2026-10-25: ads only. 266/280 "unfixed" files had one window 20-60 s off; Whisper on 7 of them found the
+# Antonio 2026-10-25: ads only. 266/280 "unfixed" files had one window 20-60 s off; Whisper on 6 of 9 checked found the
 # subtitle in sync (the window fell on credits, action, silence or a dubbed audio 0). Off windows go to REVIEW instead.
 FIX_SYNC = False
 

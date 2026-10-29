@@ -123,7 +123,11 @@ LANG_ISO1_TO_3 = LANG_2TO3  # reuse for original_language (TMDB gives ISO 639-1)
 
 def clean_title_year(raw):
     name = re.sub(r"[._]+", " ", raw)
-    m = re.search(r"(?:19|20)\d{2}", name)
+    # A title can itself be a year ("2001 A Space Odyssey (1968)"): the first match made it
+    # "A Space Odyssey" (2001) and matched NASA: A Space Odyssey Vol. 1. Prefer a (year) or
+    # [year], else the last bare one.
+    ms = list(re.finditer(r"(?<!\d)(?:19|20)\d{2}(?!\d)", name))
+    m = next((x for x in ms if name[x.start() - 1:x.start()] in "([" and x.start() > 0), ms[-1] if ms else None)
     year = int(m.group()) if m else None
     if year:
         before, after = name[:m.start()], name[m.end():]
@@ -1005,7 +1009,7 @@ def inspect_file(path):
     }
 
 
-def upsert_movie(conn, media_root, folder_name, api_key):
+def upsert_movie(conn, media_root, folder_name, api_key, tmdb_id=None):
     """Scan one top-level folder, upsert movies + tracks rows. Preserves existing
     track config (keep/out_order/out_lang/out_default/out_forced/out_name) across
     rescans by matching on mkv_id (internal) or ext_path (external)."""
@@ -1050,7 +1054,8 @@ def upsert_movie(conn, media_root, folder_name, api_key):
                 "year": existing["year"], "original_language": existing["original_language"],
                 "poster_path": existing["poster_path"], "animation": existing["animation"]}
     else:
-        tmdb = tmdb_search(clean_title, guess_year, api_key)
+        # the Radarr hook knows the id: a title search can only add a mismatch
+        tmdb = (tmdb_get_movie(tmdb_id, api_key) if tmdb_id else None) or tmdb_search(clean_title, guess_year, api_key)
     info = inspect_file(file_path)
     ext_subs = find_external_subs(folder_path)
 
@@ -1271,6 +1276,9 @@ if __name__ == "__main__":
     t, y = clean_title_year("[2016] ¿Qué culpa tiene el niño")
     assert y == 2016 and "culpa" in t.lower(), (t, y)
     assert clean_title_year("12 Angry Men (1957)") == ("12 Angry Men", 1957)
+    assert clean_title_year("2001 A Space Odyssey (1968)") == ("2001 A Space Odyssey", 1968)
+    assert clean_title_year("2001.A.Space.Odyssey.1968.Multi.2160p.x265") == ("2001 A Space Odyssey", 1968)
+    assert clean_title_year("Blade Runner 2049 (2017)") == ("Blade Runner 2049", 2017)
     assert guess_srt_lang("movie.eng.sdh.srt") == "eng"
     assert guess_srt_lang("movie.spa.srt") == "spa"
     assert guess_srt_lang("movie.srt") == "und"

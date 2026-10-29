@@ -2626,7 +2626,7 @@ async def radarr_hook(request: Request):
             # while Jellyfin still does not
             _adopt_from_staging(folder)
         if folder:
-            scan.upsert_movie(conn, MEDIA_ROOT, folder, TMDB_API_KEY)
+            scan.upsert_movie(conn, MEDIA_ROOT, folder, TMDB_API_KEY, tmdb_id=tmdb)
             row = conn.execute("SELECT id FROM movies WHERE folder=?", (folder,)).fetchone()
         if not row:
             # Radarr can import into a root folder media-manager does not watch.

@@ -60,6 +60,11 @@ def candidates(conn):
 
 
 def queue_next(conn):
+    # Without the Flatpak build in HANDBRAKE_CLI the job runs Arch's HandBrakeCLI, which strips Dolby Vision: a
+    # day and a half of CPU that encode_checks then throws away. mm-compress.service started without
+    # .env.systemd on its first run (Rocky IV, job 2081, cancelled at 0.05 %).
+    if "flatpak" not in os.environ.get("HANDBRAKE_CLI", ""):
+        raise SystemExit("HANDBRAKE_CLI is not the Flatpak HandBrake (load .env.systemd); not queuing")
     if conn.execute("SELECT 1 FROM jobs WHERE kind='encode' AND status IN ('running','queued')").fetchone():
         return None
     todo = candidates(conn)

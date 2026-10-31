@@ -50,6 +50,11 @@ Leídas del código, no de memoria: `suggest_tracks` en `scan.py`.
   and Morty cuenta como animación y se habría quedado fuera.
 - Castellano (`spa-es`) solo sobrevive si es el idioma original.
 - Techo de bitrate: 4K 32 Mbps, 1080p 15, SD 8.
+  Lo que lo supera se recodifica (Antonio, 2026-10-31): x265 por CPU con el HandBrake de
+  Flatpak (conserva el Dolby Vision; el de Arch lo borra en silencio), uno a la vez en el
+  carril `encode` de media-manager, congelado mientras alguien ve algo. `compress.py`
+  encola el siguiente desde library_maint; margen del 10 % sobre el techo. La salida se
+  rechaza si pierde DV/HDR o no es más pequeña, y el original va a `.recycle`.
 - Nombres: `Título (Año).mkv` en `Título (Año)/`; series con `Season N` (formato de Sonarr)
   o `Season NN` en las reconstruidas a mano (DBZ, DBS, FMAB). Jellyfin acepta las dos; no
   mezclarlas dentro de una serie.

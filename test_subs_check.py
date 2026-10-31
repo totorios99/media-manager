@@ -80,7 +80,18 @@ def test_off_sync_is_reported_not_rewritten():
     print("test_off_sync_is_reported_not_rewritten OK")
 
 
+def test_retimed_track_is_backed_up_as_extracted():
+    root = tempfile.mkdtemp()
+    rep = {"orig": {3: b"1\n00:00:01,000 --> 00:00:02,000\nHola\n", 4: b"en"}}
+    decisions = [({"id": 3}, "replace", "ads sync", {}), ({"id": 4}, "replace", "ads", {})]
+    out = sk.backup_retimed("/srv/storage/Movies/X (2000)/X (2000).mkv", decisions, rep, root=root)
+    assert out == [os.path.join(root, "Movies/X (2000)/X (2000).mkv.track3.srt")], out   # ads-only track: no copy
+    assert open(out[0], "rb").read() == rep["orig"][3]
+    print("test_retimed_track_is_backed_up_as_extracted OK")
+
+
 if __name__ == "__main__":
+    test_retimed_track_is_backed_up_as_extracted()
     test_off_sync_is_reported_not_rewritten()
     test_embedded_ad_is_removed_in_place()
     test_ocr_remux_falls_back_to_ffmpeg_when_mkvmerge_retimes()

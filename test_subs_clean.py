@@ -312,7 +312,23 @@ def test_repair_by_reference_follows_a_short_stretch():
     print("test_repair_by_reference_follows_a_short_stretch OK")
 
 
+def test_windows_leave_the_opening_song_out_of_the_measure():
+    """7DS S01E20: lyrics of the opening fitted a false speed. Cues inside skip=[(0, 20)] never reach the measure."""
+    import tempfile
+    from test_f6_series import make_episode
+    ep = make_episode(tempfile.mkdtemp())
+    p = _write("mm-test-skip.srt", [(2.0 * i, 2.0 * i + 1, f"l{i}") for i in range(30)])
+    seen = []
+    fake = lambda wav, s: (seen.append(len(sc.parse(sc.decode(open(s, "rb").read())))) or (0.0, 1.0))
+    sc.window_offsets(ep, p, fake, starts=[0], skip=[(0, 20)])
+    sc.window_offsets(ep, p, fake, starts=[0], skip=[])
+    assert seen == [20, 30], seen                       # 10 cues start before 20 s
+    os.unlink(p)
+    print("test_windows_leave_the_opening_song_out_of_the_measure OK")
+
+
 if __name__ == "__main__":
+    test_windows_leave_the_opening_song_out_of_the_measure()
     test_settle_windows_falls_back_to_a_reference_sub()
     test_repair_by_reference_fixes_a_pal_speed_sub_or_leaves_it()
     test_repair_by_reference_follows_a_short_stretch()

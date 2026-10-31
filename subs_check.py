@@ -23,6 +23,7 @@ import subs_clean as sc
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOG, REVIEW = os.path.join(HERE, "subs_check.jsonl"), os.path.join(HERE, "subs_check_review.jsonl")
 ALASS = os.path.expanduser("~/.local/bin/alass")
+BACKUP = os.path.join(HERE, "retimed_backup")
 # False = ads only, off windows go to REVIEW. Antonio 2026-10-25: re-timing stays on (the 7.5 s "proof" against it was
 # an artifact of my check); the measure is noisy (266/280 "unfixed" had one window 20-60 s off on files Whisper found in sync).
 FIX_SYNC = True
@@ -59,6 +60,7 @@ def check_file(path, measure_fn=None):
     subprocess.run(["ionice", "-c3", "mkvextract", path, "tracks"] + [f"{t['id']}:{d}/{t['id']}.srt" for t in srts],
                    capture_output=True, check=True)
     changed = {}
+    rep["orig"] = {t["id"]: open(f"{d}/{t['id']}.srt", "rb").read() for t in srts}   # as extracted, for BACKUP
     for t in srts:
         f = f"{d}/{t['id']}.srt"
         cues = sc.parse(sc.decode(open(f, "rb").read()))
@@ -123,6 +125,21 @@ def check_file(path, measure_fn=None):
     return decisions, rep
 
 
+def backup_retimed(path, decisions, rep, root=BACKUP):
+    """Keep the track as it was before a re-time: BACKUP/<path under /srv/storage>.track<id>.srt.
+    A re-time rests on a measure that has been wrong before (PIPELINE_GAPS 10-25); this is the way back.
+    On the local disk, not in .recycle, which expires in seven days. -> list of files written."""
+    out = []
+    for t, _, why, _ in decisions:
+        if "sync" not in why or t["id"] not in rep.get("orig", {}):
+            continue
+        dst = os.path.join(root, os.path.relpath(path, "/srv/storage") + f".track{t['id']}.srt")
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        open(dst, "wb").write(rep["orig"][t["id"]])
+        out.append(dst)
+    return out
+
+
 def main(run, limit, match, ignore_window):
     import shutil
     stop = []
@@ -152,6 +169,7 @@ def main(run, limit, match, ignore_window):
         rep, err = {}, None
         try:
             decisions, rep = check_file(path)
+            backup_retimed(path, decisions, rep)
             if decisions:
                 info = json.loads(subprocess.run(["mkvmerge", "-J", path], capture_output=True, text=True).stdout)
                 err = ocr_pass.remux(path, info, decisions)

@@ -123,15 +123,48 @@ def measure(media, srt):
 WINDOW_S, WINDOW_OFF_OK, REFIT_MAX = 480, 0.3, 3.0   # REFIT_MAX: Prison Break E12/E21/E22 went to tens of seconds after refitting
 
 
-def window_offsets(media, srt, measure_fn=None, n=3, starts=None, length=WINDOW_S):
+JELLYFIN, JF_ROOT, LIB_ROOT = "http://localhost:8097", "/hdd1/", "/srv/storage/"
+_JF = {"ids": {}, "at": 0.0}
+
+
+def intro_outro(media):
+    """Jellyfin's Intro/Outro media segments for this file -> [(start_s, end_s)]; [] when Jellyfin, its token or the
+    item is missing (the measure then runs as before). One item list per 10 minutes, not one search per file."""
+    import time, urllib.request
+    tok_file = os.path.join(HERE, ".jellyfin-token")
+
+    def get(path):
+        tok = open(tok_file).read().strip()
+        req = urllib.request.Request(JELLYFIN + path, headers={"Authorization": f'MediaBrowser Token="{tok}"'})
+        return json.load(urllib.request.urlopen(req, timeout=60))
+    try:
+        if media not in _JF["ids"] and time.time() - _JF["at"] > 600:
+            items = get("/Items?Recursive=true&IncludeItemTypes=Episode,Movie&CollapseBoxSetItems=false"
+                        "&Fields=Path&EnableImages=false&EnableUserData=false")["Items"]
+            _JF["ids"] = {i["Path"].replace(JF_ROOT, LIB_ROOT, 1): i["Id"] for i in items if i.get("Path")}
+            _JF["at"] = time.time()
+        iid = _JF["ids"].get(media)
+        if not iid:
+            return []
+        return [(s["StartTicks"] / 1e7, s["EndTicks"] / 1e7) for s in get(f"/MediaSegments/{iid}")["Items"]
+                if s.get("Type") in ("Intro", "Outro")]
+    except Exception:
+        return []
+
+
+def window_offsets(media, srt, measure_fn=None, n=3, starts=None, length=WINDOW_S, skip=None):
     """Offset measured separately at the start, middle and end of the film (WINDOW_S each). A single global fit can
     average a wrong cold open into a right body: Prison Break E06 was 'factor 1.0000 / +0.00 s' overall and off before
-    the intro. -> [(window_start_s, offset_s or None)]. Each window: its audio cut to a temp WAV, its cues re-based."""
+    the intro. -> [(window_start_s, offset_s or None)]. Each window: its audio cut to a temp WAV, its cues re-based.
+    Cues inside the opening/ending (`skip`, default Jellyfin's Intro/Outro segments) are left out of the measure:
+    song lyrics are timed to the song, and 7DS S01E20 fitted a false speed on them (PIPELINE_GAPS 10-15)."""
     import tempfile
     measure_fn = measure_fn or measure
     cues = parse(decode(open(srt, "rb").read()))
     if not cues:
         return []
+    skip = intro_outro(media) if skip is None else skip
+    cues = [c for c in cues if not any(a <= c[0] < b for a, b in skip)] or cues
     end = cues[-1][1]
     starts = starts or [max(cues[0][0] - 30, 0), max(end / 2 - WINDOW_S / 2, 0), max(end - WINDOW_S, 0)][:n]
     out = []

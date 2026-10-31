@@ -478,10 +478,12 @@ def _job_ticker():
             try:
                 for r in conn.execute("SELECT id FROM jobs WHERE status='running'").fetchall():
                     _poll_and_finalize(conn, r["id"])
-                if not conn.execute("SELECT id FROM jobs WHERE status='running' LIMIT 1").fetchone():
-                    nxt = conn.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
-                    if nxt:
-                        jobs.launch_queued(conn, dict(nxt), LOG_DIR, cpu_quota=_current_quota(conn))
+                for lane_sql in _LANE_SQL.values():
+                    if not conn.execute(f"SELECT id FROM jobs WHERE status='running' AND {lane_sql} LIMIT 1").fetchone():
+                        nxt = conn.execute(f"SELECT * FROM jobs WHERE status='queued' AND {lane_sql} "
+                                           "ORDER BY id LIMIT 1").fetchone()
+                        if nxt:
+                            jobs.launch_queued(conn, dict(nxt), LOG_DIR, cpu_quota=_current_quota(conn))
                 # Quota stays on the old 30s cadence: every application is a
                 # `systemctl set-property` fork per running scope, and the tick
                 # is now 15x faster. Live changes still apply instantly --
@@ -1648,6 +1650,15 @@ def preview_command(movie_id: int, kind: str, quality: int = 22):
         conn.close()
 
 
+# Two lanes, one job running in each: an encode takes a day or more of CPU and must not hold back the remux of a
+# new import, which is disk-bound and done in minutes (Antonio 2026-10-31: compress over months, in idle time).
+def _lane(job_kind):
+    return "encode" if job_kind == "encode" else "main"
+
+
+_LANE_SQL = {"main": "kind!='encode'", "encode": "kind='encode'"}
+
+
 def _enqueue(conn, kind, owner_id, job_kind, quality):
     if job_kind not in ("remux", "propedit", "encode", "sample"):
         raise HTTPException(400, "kind must be remux|propedit|encode|sample")
@@ -1696,7 +1707,7 @@ def _enqueue(conn, kind, owner_id, job_kind, quality):
             raise HTTPException(409, msg)
 
     # global single runner: one job hammers the CPU at a time, rest queue up
-    busy = conn.execute("SELECT id FROM jobs WHERE status='running' LIMIT 1").fetchone()
+    busy = conn.execute(f"SELECT id FROM jobs WHERE status='running' AND {_LANE_SQL[_lane(job_kind)]} LIMIT 1").fetchone()
     cmd_str, out_path = _build_job_cmd(conn, kind, owner, job_kind, quality)
     id_kwargs = {"movie_id": owner_id} if kind == "movie" else {"episode_id": owner_id}
     job_id = jobs.start_job(conn, job_kind, cmd_str, LOG_DIR,
@@ -2779,6 +2790,8 @@ def _verify_and_finalize(conn, kind, owner_id, job):
     # check against, so expectations line up by mkv_id, not by out_order.
     ok, msg = jobs.verify_output(owner["output_file"], kept, owner["duration"], source_path=src,
                                  order_key="mkv_id" if job["kind"] == "propedit" else "out_order")
+    if ok and job["kind"] == "encode":
+        ok, msg = jobs.encode_checks(src, owner["output_file"])
     if ok:
         conn.execute("UPDATE jobs SET status='verified' WHERE id=?", (job["id"],))
         _set_owner_status(conn, kind, owner_id, "clean")
@@ -3139,7 +3152,13 @@ def _delete_original(conn, kind, owner_id):
         # a Radarr import 8 MB short; a remux finished minutes earlier survived
         # only because it was old enough to have been flushed.
         _fsync_file(out)
-        os.remove(old_path)
+        if out.endswith(".hevc.mkv"):
+            # an encode loses quality on purpose: the original goes to .recycle (a rename, same filesystem), not away
+            dst = os.path.join(graft.RECYCLE, os.path.relpath(old_path, os.path.dirname(_root_for(kind))))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            os.rename(old_path, dst)
+        else:
+            os.remove(old_path)
     col = _owner_col(kind)
     # External .srt files are Bazarr's, not ours: it maintains and re-syncs
     # them, and deleting one only makes it download the file again. We stopped

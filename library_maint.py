@@ -27,6 +27,7 @@ STEPS = [  # (name, argv, its jsonl log)
     ("ocr", ["ocr_pass.py", "--run"], "ocr_pass.jsonl"),
     ("ocr recover", ["ocr_recover.py", "--run"], "ocr_recover.jsonl"),
     ("subs check", ["subs_check.py", "--run"], "subs_check.jsonl"),
+    ("compress", ["compress.py", "--run"], "compress.jsonl"),      # queues one encode; media-manager runs it
 ]
 
 

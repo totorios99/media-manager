@@ -275,6 +275,31 @@ def verify_output(out_path, kept_tracks, source_duration=None, source_path=None,
     return True, "ok"
 
 
+def video_props(path):
+    """(dv_profile or None, color_transfer, size) of the first video stream. ffprobe reads the header only."""
+    import json
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                          "stream=color_transfer:stream_side_data=dv_profile", "-of", "json", path],
+                         capture_output=True, text=True, timeout=120)
+    st = (json.loads(out.stdout or "{}").get("streams") or [{}])[0]
+    dv = next((d.get("dv_profile") for d in st.get("side_data_list", []) if "dv_profile" in d), None)
+    return dv, st.get("color_transfer"), os.path.getsize(path)
+
+
+def encode_checks(src, out, props=video_props):
+    """What verify_output cannot see in a re-encode: Dolby Vision and the HDR transfer kept, and the file smaller.
+    Arch's HandBrakeCLI drops the DV RPU without a word; the Flatpak build keeps it (Coyote vs. Acme, 2026-10-31:
+    profile 8.1 in, 8.1 out). -> (ok, msg)"""
+    (sdv, str_, ssz), (odv, otr, osz) = props(src), props(out)
+    if sdv is not None and odv is None:
+        return False, f"Dolby Vision lost (source profile {sdv})"
+    if str_ != otr:
+        return False, f"HDR transfer changed: {str_} -> {otr}"
+    if osz >= ssz:
+        return False, f"encode is not smaller ({osz} >= {ssz} bytes)"
+    return True, "ok"
+
+
 def free_bytes(path):
     st = os.statvfs(path)
     return st.f_bavail * st.f_frsize
@@ -287,6 +312,11 @@ def has_space_for(path, source_size_bytes, factor=1.2):
 
 
 if __name__ == "__main__":
+    fake = lambda table: (lambda p: table[p])
+    assert encode_checks("s", "o", fake({"s": (8, "smpte2084", 40), "o": (8, "smpte2084", 20)})) == (True, "ok")
+    assert not encode_checks("s", "o", fake({"s": (8, "smpte2084", 40), "o": (None, "smpte2084", 20)}))[0]
+    assert not encode_checks("s", "o", fake({"s": (None, "smpte2084", 40), "o": (None, "bt709", 20)}))[0]
+    assert not encode_checks("s", "o", fake({"s": (None, "bt709", 40), "o": (None, "bt709", 41)}))[0]
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         log = os.path.join(d, "job-1.log")

@@ -38,7 +38,7 @@ def targets(conn):
     out = []
     for kind, oid, folder, file in conn.execute(q):
         p = os.path.join(la.SHOWS if kind == "episode" else la.MOVIES, folder, file)
-        if os.path.exists(p):
+        if os.path.exists(p) and not file.startswith("."):   # .X.import.mkv: an import still in flight (Titane 10-31)
             out.append((kind, oid, p))
     return sorted(out, key=lambda x: (x[0] != "episode", os.path.getsize(x[2])))
 
@@ -193,6 +193,8 @@ def main(run, limit, match, ignore_window):
             if rep.get("dir"):
                 shutil.rmtree(rep["dir"], ignore_errors=True)
         sync = rep.get("sync") or {}
+        if not os.path.exists(path):              # renamed or replaced under us: nothing to record, next file
+            continue
         rec = {"path": path, "size": os.path.getsize(path), "status": status, "error": err, "ads": rep.get("ads"),
                "sync": {k: v for k, v in sync.items()}, "measure": "vad", "secs": round(time.time() - t0)}
         open(LOG, "a").write(json.dumps(rec, ensure_ascii=False) + "\n")

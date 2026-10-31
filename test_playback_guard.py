@@ -30,5 +30,21 @@ def test_proc_table_reads_this_process():
     print("test_proc_table_reads_this_process OK")
 
 
+def test_disk_rest_is_the_last_20_minutes_of_every_3_hours():
+    import time
+    at = lambda h, m: time.mktime((2026, 10, 31, h, m, 0, 0, 0, -1))
+    assert g.resting(at(2, 40)) and g.resting(at(2, 59)) and g.resting(at(23, 45))
+    assert not g.resting(at(2, 39)) and not g.resting(at(3, 0)) and not g.resting(at(12, 0))
+    print("test_disk_rest_is_the_last_20_minutes_of_every_3_hours OK")
+
+
+def test_import_remux_is_heavy_but_a_probe_is_not():
+    assert g.HEAVY.search("mkvmerge -o /srv/storage/Movies/X/.X.remux.mkv --title X in.mkv")
+    assert not g.HEAVY.search("mkvmerge -J /srv/storage/Movies/X/X.mkv")
+    print("test_import_remux_is_heavy_but_a_probe_is_not OK")
+
+
 if __name__ == "__main__":
+    test_disk_rest_is_the_last_20_minutes_of_every_3_hours()
+    test_import_remux_is_heavy_but_a_probe_is_not()
     test_watching(); test_heavy_trees_takes_descendants_only_of_jobs(); test_proc_table_reads_this_process()

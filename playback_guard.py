@@ -16,8 +16,11 @@ import json, os, re, signal, sys, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHECK = 10
-ROOT_BINARIES = {"python", "python3", "uv", "uvx", "ffmpeg", "HandBrakeCLI"}   # not shells or grep that merely mention a job
-HEAVY = re.compile(r"f6_series\.py|ocr_pass\.py|subs_check\.py|dbz_rm_subs\.py|ffsubsync|pgsrip|subs_variant_pass\.py|pan=mono\|c0=FC|subs_queue\.py|HandBrakeCLI")
+# Disk rest (Antonio 2026-10-31, replacing the daily 11:00-15:00 pause): the heavy jobs stop REST_MIN minutes in every
+# PERIOD_MIN, at the end of each block counted from midnight (02:40-03:00, 05:40-06:00, ...). MM_REST="180/20".
+PERIOD_MIN, REST_MIN = (int(x) for x in os.environ.get("MM_REST", "180/20").split("/"))
+ROOT_BINARIES = {"python", "python3", "uv", "uvx", "ffmpeg", "HandBrakeCLI", "mkvmerge"}   # not shells or grep that merely mention a job
+HEAVY = re.compile(r"f6_series\.py|ocr_pass\.py|subs_check\.py|dbz_rm_subs\.py|ffsubsync|pgsrip|subs_variant_pass\.py|pan=mono\|c0=FC|subs_queue\.py|HandBrakeCLI|mkvmerge (.* )?-o ")
 
 
 def env():
@@ -30,6 +33,12 @@ def env():
     except OSError:
         pass
     return e
+
+
+def resting(t=None):
+    t = time.localtime(t)
+    m = t.tm_hour * 60 + t.tm_min
+    return m % PERIOD_MIN >= PERIOD_MIN - REST_MIN
 
 
 def watching(sessions):
@@ -96,13 +105,15 @@ def main():
     frozen = False
     while True:
         try:
-            busy = watching(sessions(url, token))
+            why = "watching" if watching(sessions(url, token)) else None
         except Exception:
-            busy = False
+            why = None
+        why = why or ("disk rest" if resting() else None)
+        busy = bool(why)
         pids = heavy_trees(proc_table())
         send(pids, signal.SIGSTOP if busy else signal.SIGCONT)
         if busy != frozen:
-            print(time.strftime("%F %T"), ("froze" if busy else "thawed"), len(pids), "processes", flush=True)
+            print(time.strftime("%F %T"), (f"froze ({why})" if busy else "thawed"), len(pids), "processes", flush=True)
             frozen = busy
         time.sleep(CHECK)
 

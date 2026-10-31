@@ -19,6 +19,7 @@ import library_audit as la
 import ocr_pass
 import overnight
 import subs_clean as sc
+import sync_vad
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOG, REVIEW = os.path.join(HERE, "subs_check.jsonl"), os.path.join(HERE, "subs_check_review.jsonl")
@@ -48,7 +49,9 @@ def worst(w):
 
 
 def check_file(path, measure_fn=None):
-    """-> (decisions for ocr_pass.remux, report dict). Writes cleaned SRTs to a temp dir kept in report['dir']."""
+    """-> (decisions for ocr_pass.remux, report dict). Writes cleaned SRTs to a temp dir kept in report['dir'].
+    The sync measure is sync_vad (speech spans) unless a test passes its own."""
+    measure_fn = measure_fn or sync_vad.measure
     info = json.loads(subprocess.run(["mkvmerge", "-J", path], capture_output=True, text=True).stdout)
     srts = [t for t in info["tracks"] if t["type"] == "subtitles" and "SubRip" in t["codec"]
             and t["properties"].get("language") in ("spa", "eng")]
@@ -149,7 +152,9 @@ def main(run, limit, match, ignore_window):
     if os.path.exists(LOG):
         for l in open(LOG):
             r = json.loads(l)
-            if r["status"] in ("ok", "clean"):
+            # an "unfixed" verdict from the old ffsubsync windows is read once more with the VAD measure:
+            # on 15 of them, 14 were in sync (PIPELINE_GAPS 10-31)
+            if r["status"] in ("ok", "clean") and not ((r.get("sync") or {}).get("unfixed") and r.get("measure") != "vad"):
                 done.add((r["path"], r["size"]))
     todo = [x for x in targets(conn) if (x[2], os.path.getsize(x[2])) not in done and (not match or re.search(match, x[2]))]
     conn.close()
@@ -189,7 +194,7 @@ def main(run, limit, match, ignore_window):
                 shutil.rmtree(rep["dir"], ignore_errors=True)
         sync = rep.get("sync") or {}
         rec = {"path": path, "size": os.path.getsize(path), "status": status, "error": err, "ads": rep.get("ads"),
-               "sync": {k: v for k, v in sync.items()}, "secs": round(time.time() - t0)}
+               "sync": {k: v for k, v in sync.items()}, "measure": "vad", "secs": round(time.time() - t0)}
         open(LOG, "a").write(json.dumps(rec, ensure_ascii=False) + "\n")
         if sync.get("unfixed") or status in ("FAILED", "ERROR"):
             open(REVIEW, "a").write(json.dumps({"path": path, "status": status, "error": err, "sync": sync},

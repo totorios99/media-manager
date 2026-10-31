@@ -20,7 +20,8 @@ import subs_clean as sc
 VAD_PY = os.path.expanduser("~/.local/share/uv/tools/whisper-ctranslate2/bin/python")
 SEARCH_S, STEP_S = 15.0, 0.05
 MIN_CUES, MIN_SCORE = 8, 0.35       # too few cues, or too little overlap anywhere: no verdict
-GAIN = 1.15                         # the best offset must beat 0 s by 15 % to be believed
+MIN_PEAK = 0.03                     # peak height over the curve's floor; less is a flat curve: no verdict
+NEAR_PEAK = 0.25                    # 0 s within this share of the peak height counts as the peak itself
 
 _HELPER = """
 import json, sys
@@ -61,9 +62,13 @@ def best_offset(cues, speech, search=SEARCH_S, step=STEP_S):
     top = [o for o, s in curve if s >= best - 0.005]
     off = top[len(top) // 2]                     # a cue shorter than its speech span fits a plateau: take its middle
     at0 = next(s for o, s in curve if abs(o) < step / 2)
-    if best < MIN_SCORE:
+    # Judged on the peak's height over the curve's floor, not as a ratio to 0 s: in a talky film speech covers
+    # most of the window, so the curve is shallow (When Harry Met Sally: 0.749 at the peak, 0.673 at +-4 s) and a
+    # +2 s shift beat 0 s by only 11 %; the old "beat 0 s by 15 %" rule called it in sync.
+    peak = best - min(s for _, s in curve)
+    if best < MIN_SCORE or peak < MIN_PEAK:
         return None, best
-    if abs(off) <= 0.3 or best < at0 * GAIN:
+    if abs(off) <= 0.3 or best - at0 < NEAR_PEAK * peak:
         return 0.0, at0
     return round(off, 2), best
 

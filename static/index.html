@@ -1155,7 +1155,7 @@ function step3Html(m, running) {
   const est = selSample && selSample.est_full_bytes ? ` · est ~${fmtG(selSample.est_full_bytes)}` : '';
   return `${banner}
     <div class="btnrow" style="margin-top:12px">
-      <button class="btn gold ${shrink ? 'g-shr' : ''}" onclick="runJob(${m.id}, 'encode')">Heavy Encode @ RF <span id="encRf">${SELRF}</span><span id="encEst">${est}</span></button>
+      <button class="btn gold ${tier === 'bloated' ? 'g-shr' : ''}" onclick="runJob(${m.id}, 'encode')">Heavy Encode @ RF <span id="encRf">${SELRF}</span><span id="encEst">${est}</span></button>
       <button class="btn ghost2" onclick="runJob(${m.id}, 'remux')">Quick Remux <span style="color:var(--faint);font-weight:400">(minutes)</span></button>
       <button class="btn fine" onclick="acceptAsIs(${m.id}, '${esc(m.title || m.clean_title || '')}')">Accept as-is</button>
       <span class="linky" role="button" tabindex="0" onclick="previewCmd(${m.id})">view command ›</span>

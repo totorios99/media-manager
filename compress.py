@@ -17,6 +17,8 @@ MOVIES = os.environ.get("MEDIA_ROOT", "/srv/storage/Movies")
 CEILING = [(1600, 32e6), (700, 15e6), (0, 8e6)]          # (min height, video bps)
 QUALITY = 22                                             # HandBrake RF, the encode path's default
 MARGIN = 1.10                                            # 15.1 on a 15 Mbps ceiling is not worth a lossy pass
+# Never queued from here. The Odyssey (Antonio 2026-11-18): targets ~44 Mbps at an RF he picks from samples, not RF 22.
+HOLD = {"The Odyssey (2026)"}
 
 
 def ceiling(height):
@@ -46,7 +48,7 @@ def candidates(conn):
     out = []
     for mid, folder, file, height, total in conn.execute(
             "SELECT id, folder, file, height, bitrate FROM movies WHERE status='clean' AND file IS NOT NULL"):
-        if mid in failed or mid in active or not file.lower().endswith(".mkv"):
+        if mid in failed or mid in active or folder in HOLD or not file.lower().endswith(".mkv"):
             continue
         if total and total <= ceiling(height):     # the container total bounds the video: no header to read
             continue

@@ -92,7 +92,16 @@ def _launch(conn, job_id, cmd_str, log_dir, cpu_quota):
     conn.execute("UPDATE jobs SET status='running', tmux_session=?, log_path=?, started_at=? WHERE id=?",
                  (session, log_path, _now(), job_id))
     conn.commit()
-    subprocess.run(["tmux", "new-session", "-d", "-s", session, "sh", "-c", full_cmd], check=True)
+    argv = ["tmux", "new-session", "-d", "-s", session, "sh", "-c", full_cmd]
+    env = None
+    if not NO_SYSTEMD:
+        # A tmux server started here would otherwise live in the caller's cgroup and die with it: the oneshot
+        # mm-compress.service killed nine encodes that way, and a media-manager restart would do the same.
+        uid = os.getuid()
+        env = {**os.environ, "XDG_RUNTIME_DIR": f"/run/user/{uid}",
+               "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus"}
+        argv = ["systemd-run", "--user", "--scope", "--quiet", "--collect", f"--unit=mm-tmux-{job_id}"] + argv
+    subprocess.run(argv, check=True, env=env)
 
 
 def launch_queued(conn, job, log_dir, cpu_quota=None):
@@ -183,6 +192,9 @@ def poll_job(conn, job_id):
             time.sleep(0.1)
             if EXIT_RE.findall(tail(job["log_path"]) if job["log_path"] else ""):
                 return poll_job(conn, job_id)
+        # _launch commits 'running' before tmux exists, so a poll can land in that gap
+        if session_alive(job["tmux_session"]):
+            return job
         conn.execute("UPDATE jobs SET status='failed', finished_at=? WHERE id=?", (now, job_id))
         conn.commit()
     else:

@@ -540,7 +540,7 @@ document.addEventListener('keydown', e => {
 });
 
 // ---------- state ----------
-let MOVIES = [], SHOWS = [], JOBS = [], POWER = null, STATS = { reclaimed_bytes: 0 };
+let MOVIES = [], SHOWS = [], JOBS = [], INBOX = [], POWER = null, STATS = { reclaimed_bytes: 0 };
 let TAB = 'needs', SORT = 'size', DUPONLY = false, Q = '', RES = 'all';
 // grid reads like a shelf; rows read like a worklist -- same data, and the
 // choice survives a reload because it is a working preference, not a filter
@@ -637,7 +637,7 @@ function qChanged(v) { Q = v; clearTimeout(qTimer); qTimer = setTimeout(() => lo
 // ---------- home ----------
 async function renderHome() {
   document.getElementById('page').innerHTML = headerHtml() + `
-    <div id="dash"></div><div id="tabs"></div><div id="gridwrap"><div class="grid">${'<div class="skel" style="aspect-ratio:2/3.4"></div>'.repeat(12)}</div></div>`;
+    <div id="dash"></div><div id="inbox"></div><div id="tabs"></div><div id="gridwrap"><div class="grid">${'<div class="skel" style="aspect-ratio:2/3.4"></div>'.repeat(12)}</div></div>`;
   await loadMovies();
   paintHomeBody();
 }
@@ -646,8 +646,53 @@ async function loadMovies() {
   if (Q) params.set('q', Q);
   MOVIES = await api('/api/movies?' + params).catch(e => { oops(e); return MOVIES; });
   SHOWS = await api('/api/shows?' + params).catch(() => SHOWS);
+  INBOX = await api('/api/inbox').catch(() => INBOX);
 }
-function paintHomeBody() { if (CURID) return; paintDash(); paintTabs(); paintGrid(); }
+function paintHomeBody() { if (CURID) return; paintDash(); paintInbox(); paintTabs(); paintGrid(); }
+
+// ---------- manual inbox (inbox.py moves these; this only shows them and fixes a title) ----------
+const INBOX_STATE = { waiting: 'Esperando', needs_title: 'Necesita título', importing: 'Importando',
+                      normalizing: 'Normalizando', ready: 'Listo', failed: 'Falló' };
+function paintInbox() {
+  const el = document.getElementById('inbox');
+  if (!el) return;
+  // a finished item stays listed for a day, then only the open ones
+  // updated_at is local wall-clock time (scan._now), so shift before comparing
+  const dayAgo = new Date(Date.now() - 864e5 - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 19);
+  const items = INBOX.filter(i => i.status !== 'ready' || (i.updated_at || '') > dayAgo);
+  if (!items.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<section class="dash" style="display:block;padding:12px 16px" aria-label="Manual inbox">
+    <div class="lbl" style="display:flex;justify-content:space-between">Entrada manual
+      <button class="btn" style="padding:2px 8px;font-size:10px" onclick="loadMovies().then(paintInbox)">⟳</button></div>
+    ${items.map(i => `<div style="margin-top:8px">
+      <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+        <span style="font-weight:600">${esc(i.title ? (i.year ? `${i.title} (${i.year})` : i.title) : i.path.split('/').pop())}</span>
+        <span class="mono" style="font-size:11px;color:${i.status === 'failed' ? 'var(--shr)' : i.status === 'ready' ? 'var(--fine)' : 'var(--acc)'}">${INBOX_STATE[i.status] || esc(i.status)}</span>
+        ${i.reason ? `<span style="font-size:12px;color:var(--mut)">${esc(i.reason)}</span>` : ''}
+        ${i.status === 'failed' ? `<button class="btn" style="padding:2px 8px;font-size:10px" onclick="inboxRetry(${i.id})">Reintentar</button>` : ''}
+      </div>
+      ${i.status === 'needs_title' ? `<div style="display:flex;gap:8px;margin-top:6px">
+        <label class="visually-hidden" for="ibq${i.id}">Buscar en TMDB</label>
+        <input id="ibq${i.id}" value="${esc(i.title || '')}" style="flex:1" onkeydown="if(event.key==='Enter')inboxSearch(${i.id})">
+        <button class="btn" onclick="inboxSearch(${i.id})">Buscar</button></div>
+        <div id="ibr${i.id}"></div>` : ''}
+    </div>`).join('')}
+  </section>`;
+}
+async function inboxSearch(id) {
+  const q = document.getElementById('ibq' + id).value;
+  const results = await api(`/api/tmdb/search?q=${encodeURIComponent(q)}`).catch(e => { oops(e); return []; });
+  document.getElementById('ibr' + id).innerHTML = results.map(r => `
+    <div class="cand" role="button" tabindex="0" onclick="inboxRetry(${id}, ${r.tmdb_id})" onkeydown="if(event.key==='Enter')inboxRetry(${id}, ${r.tmdb_id})">
+      ${r.poster_path ? `<img src="${posterUrl(r.poster_path)}" alt="" width="40" height="60" loading="lazy">` : ''}
+      <span>${esc(r.title)} (${r.year || '?'}) <span class="cl">${esc(r.original_language || '')}</span></span>
+    </div>`).join('') || '<div class="empty" style="padding:14px">NO RESULTS</div>';
+}
+async function inboxRetry(id, tmdbId) {
+  await api(`/api/inbox/${id}/retry`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(tmdbId ? { tmdb_id: tmdbId } : {}) }).catch(oops);
+  await loadMovies(); paintInbox();
+}
 
 // A title can sit in more than one bucket: `clean` describes the track work,
 // `needs` describes the bitrate. A remuxed 4K still carrying 40 Mbps is both

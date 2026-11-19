@@ -136,6 +136,12 @@ CREATE INDEX IF NOT EXISTS idx_jobs_movie ON jobs(movie_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_episode ON jobs(episode_id);
 CREATE INDEX IF NOT EXISTS idx_episodes_show ON episodes(show_id);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS inbox_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT UNIQUE NOT NULL, size INTEGER, status TEXT DEFAULT 'waiting', reason TEXT,
+    tmdb_id INTEGER, title TEXT, year INTEGER, movie_id INTEGER, radarr_cmd INTEGER,
+    last_job INTEGER, imported_at REAL, updated_at TEXT
+);
 """
 
 # Columns of the pre-TV `tracks` table, in order -- used verbatim by the
@@ -774,6 +780,33 @@ def set_tmdb(movie_id: int, body: dict):
         )
         conn.commit()
         return {"ok": True, "movie": info}
+    finally:
+        conn.close()
+
+
+@app.get("/api/inbox")
+def inbox_list():
+    conn = get_db()
+    try:
+        return [dict(r) for r in conn.execute("SELECT * FROM inbox_items ORDER BY id DESC LIMIT 50")]
+    finally:
+        conn.close()
+
+
+@app.post("/api/inbox/{item_id}/retry")
+def inbox_retry(item_id: int, body: dict | None = None):
+    """Back to `waiting`, optionally pinned to a TMDB id (the "Necesita título" fix). inbox.py picks it up on its
+    next pass; nothing heavy runs inside the request."""
+    tmdb_id = (body or {}).get("tmdb_id")
+    conn = get_db()
+    try:
+        n = conn.execute("UPDATE inbox_items SET status='waiting', reason=NULL, tmdb_id=COALESCE(?, tmdb_id), "
+                         "updated_at=? WHERE id=? AND status IN ('needs_title','failed')",
+                         (tmdb_id, _now(), item_id)).rowcount
+        conn.commit()
+        if not n:
+            raise HTTPException(409, "only a stuck item can be retried")
+        return {"ok": True}
     finally:
         conn.close()
 

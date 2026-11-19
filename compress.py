@@ -19,6 +19,9 @@ QUALITY = 22                                             # HandBrake RF, the enc
 MARGIN = 1.10                                            # 15.1 on a 15 Mbps ceiling is not worth a lossy pass
 # Never queued from here (Antonio 2026-11-18): each gets its own bitrate target, at an RF he picks from samples, not RF 22.
 HOLD = {"The Odyssey (2026)", "Toy Story 5 (2026)"}
+# Failed encodes that say nothing about the film: Rocky IV (2082) died in the 2026-11-04 crash, the other nine had
+# their tmux killed with mm-compress.service's cgroup at second 0 (fixed in c465569). These may be queued again.
+INFRA_FAILED = {2082, 2084, 2085, 2086, 2087, 2088, 2089, 2090, 2091, 2092}
 
 
 def ceiling(height):
@@ -43,7 +46,8 @@ def video_bps(path):
 
 
 def candidates(conn):
-    failed = {r[0] for r in conn.execute("SELECT movie_id FROM jobs WHERE kind='encode' AND status='failed'")}
+    failed = {r[0] for r in conn.execute("SELECT movie_id, id FROM jobs WHERE kind='encode' AND status='failed'")
+              if r[1] not in INFRA_FAILED}
     active = {r[0] for r in conn.execute("SELECT movie_id FROM jobs WHERE status IN ('running','queued')")}
     out = []
     for mid, folder, file, height, total in conn.execute(

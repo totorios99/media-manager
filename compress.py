@@ -17,8 +17,8 @@ MOVIES = os.environ.get("MEDIA_ROOT", "/srv/storage/Movies")
 CEILING = [(1600, 32e6), (700, 15e6), (0, 8e6)]          # (min height, video bps)
 QUALITY = 22                                             # HandBrake RF, the encode path's default
 MARGIN = 1.10                                            # 15.1 on a 15 Mbps ceiling is not worth a lossy pass
-# Never queued from here. The Odyssey (Antonio 2026-11-18): targets ~44 Mbps at an RF he picks from samples, not RF 22.
-HOLD = {"The Odyssey (2026)"}
+# Never queued from here (Antonio 2026-11-18): each gets its own bitrate target, at an RF he picks from samples, not RF 22.
+HOLD = {"The Odyssey (2026)", "Toy Story 5 (2026)"}
 
 
 def ceiling(height):

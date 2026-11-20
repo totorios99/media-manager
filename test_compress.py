@@ -25,7 +25,7 @@ def main():
       INSERT INTO movies VALUES (474, 'O (2026)', 'O.mkv', 2160, 1, 'clean');
       INSERT INTO jobs (movie_id, kind, status) VALUES (9, 'encode', 'running');
     """)
-    compress.SAMPLES = {"O (2026)": {"starts": [100, 200], "rf": [20, 22]}}
+    compress.SAMPLES = [("O (2026)", 100, 20), ("O (2026)", 100, 22), ("O (2026)", 200, 20)]
     assert compress.queue_next(c) is None and not calls, "a sample must wait for the running encode"
     c.execute("UPDATE jobs SET status='verified'")
     q = compress.queue_next(c)

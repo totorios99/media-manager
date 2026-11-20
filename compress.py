@@ -22,9 +22,15 @@ HOLD = {"The Odyssey (2026)", "Toy Story 5 (2026)"}
 # Failed encodes that say nothing about the film: Rocky IV (2082) died in the 2026-11-04 crash, the other nine had
 # their tmux killed with mm-compress.service's cgroup at second 0 (fixed in c465569). These may be queued again.
 INFRA_FAILED = {2082, 2084, 2085, 2086, 2087, 2088, 2089, 2090, 2091, 2092}
-# Samples go before the next film (Antonio 2026-11-19): every (scene start in s, RF) pair is one 30 s job in the
-# encode lane, same preset as the full encode, one per run. A pair with a job of any status is never queued again.
-SAMPLES = {}   # folder -> {"starts": [s, ...], "rf": [q, ...]}; filled once the scenes are picked
+# Samples go before the next film (Antonio 2026-11-19): each (folder, scene start in s, RF) is one 30 s job in the
+# encode lane, same preset as the full encode, one per run, in this order. One with a job of any status is never
+# queued again. Scenes: the three 30 s windows with the most bytes between keyframes in the file's Cues index,
+# 10 min apart, past the logos and before the credits. Toy Story 5 goes first with ONE sample: if HandBrake turns
+# its Dolby Vision P7 into P8.1 (EL dropped), the rest of TS5 waits for Antonio.
+_TS5, _ODY = "Toy Story 5 (2026)", "The Odyssey (2026)"
+SAMPLES = ([(_TS5, 3243, 20)]
+           + [(_ODY, s, q) for s in (2599, 3539, 7843) for q in (16, 18, 20)]
+           + [(_TS5, s, q) for s in (3243, 4924, 2104) for q in (16, 18, 20, 22) if (s, q) != (3243, 20)])
 
 
 def ceiling(height):
@@ -69,16 +75,12 @@ def candidates(conn):
 
 
 def next_sample(conn):
-    """-> (movie id, folder, start, rf) of the first pair in SAMPLES that has no job yet, or None."""
-    for folder, spec in SAMPLES.items():
+    """-> (movie id, folder, start, rf) of the first entry in SAMPLES that has no job yet, or None."""
+    for folder, s, q in SAMPLES:
         m = conn.execute("SELECT id FROM movies WHERE folder=?", (folder,)).fetchone()
-        if not m:
-            continue
-        tried = " ".join(r[0] or "" for r in conn.execute("SELECT cmd FROM jobs WHERE movie_id=? AND kind='sample'", (m[0],)))
-        for s in spec["starts"]:
-            for q in spec["rf"]:
-                if f".sample.rf{q}.t{s}.mkv" not in tried:
-                    return m[0], folder, s, q
+        if m and not conn.execute("SELECT 1 FROM jobs WHERE movie_id=? AND kind='sample' AND cmd LIKE ?",
+                                  (m[0], f"%.sample.rf{q}.t{s}.mkv%")).fetchone():
+            return m[0], folder, s, q
     return None
 
 

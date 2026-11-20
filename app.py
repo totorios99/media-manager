@@ -953,7 +953,7 @@ def rename_movie(movie_id: int):
         conn.close()
 
 
-SAMPLE_RE = re.compile(r"\.sample\.rf(\d+)\.mkv$")
+SAMPLE_RE = re.compile(r"\.sample\.rf(\d+)(?:\.t(\d+))?\.mkv$")   # .t<start s> when the scene was chosen
 
 
 @app.get("/api/movies/{movie_id}/samples")
@@ -977,7 +977,8 @@ def list_samples(movie_id: int):
             continue
         size = os.path.getsize(os.path.join(folder, f))
         est = int(size * m["duration"] / 30) if m["duration"] else None
-        out.append({"file": f, "rf": int(mm.group(1)), "size_bytes": size, "est_full_bytes": est})
+        out.append({"file": f, "rf": int(mm.group(1)), "start": int(mm.group(2)) if mm.group(2) else None,
+                    "size_bytes": size, "est_full_bytes": est})
     return out
 
 
@@ -1619,7 +1620,7 @@ def _owner_or_404(conn, kind, owner_id):
 # phantom entries accumulated in one evening, each with artwork downloaded for it.
 # A leading dot makes Jellyfin skip the file; _delete_original renames it to the
 # visible final name once verification passes.
-def _build_job_cmd(conn, kind, owner, job_kind, quality):
+def _build_job_cmd(conn, kind, owner, job_kind, quality, start=None):
     """Returns (cmd_str, out_path) for remux/propedit/encode/sample. `owner` is
     the uniform dict from _owner_info; `kind` is 'movie'|'episode'.
 
@@ -1650,8 +1651,10 @@ def _build_job_cmd(conn, kind, owner, job_kind, quality):
                                                 video_track=vtrack)
         return shlex.join(argv), in_path
     if job_kind == "sample":
-        out_path = os.path.join(folder_path, f".{owner['out_base']}.sample.rf{quality}.mkv")
-        start = int((owner["duration"] or 1200) / 2)  # mid-movie: representative scene
+        out_path = os.path.join(folder_path, f".{owner['out_base']}.sample.rf{quality}"
+                                             + (f".t{int(start)}" if start is not None else "") + ".mkv")
+        if start is None:
+            start = int((owner["duration"] or 1200) / 2)  # mid-movie: representative scene
         hb_argv, _ = commands.build_handbrake_encode(tracks, in_path, out_path,
                                                       quality=quality, sample_start=start)
         # throwaway preview: skip the mkvpropedit metadata pass
@@ -1685,14 +1688,15 @@ def preview_command(movie_id: int, kind: str, quality: int = 22):
 
 # Two lanes, one job running in each: an encode takes a day or more of CPU and must not hold back the remux of a
 # new import, which is disk-bound and done in minutes (Antonio 2026-10-31: compress over months, in idle time).
+# A sample is the same x265 slow encode on 30 s: it waits in the encode lane, never beside a running encode.
 def _lane(job_kind):
-    return "encode" if job_kind == "encode" else "main"
+    return "encode" if job_kind in ("encode", "sample") else "main"
 
 
-_LANE_SQL = {"main": "kind!='encode'", "encode": "kind='encode'"}
+_LANE_SQL = {"main": "kind NOT IN ('encode','sample')", "encode": "kind IN ('encode','sample')"}
 
 
-def _enqueue(conn, kind, owner_id, job_kind, quality):
+def _enqueue(conn, kind, owner_id, job_kind, quality, start=None):
     if job_kind not in ("remux", "propedit", "encode", "sample"):
         raise HTTPException(400, "kind must be remux|propedit|encode|sample")
     owner = _owner_or_404(conn, kind, owner_id)
@@ -1741,7 +1745,7 @@ def _enqueue(conn, kind, owner_id, job_kind, quality):
 
     # global single runner: one job hammers the CPU at a time, rest queue up
     busy = conn.execute(f"SELECT id FROM jobs WHERE status='running' AND {_LANE_SQL[_lane(job_kind)]} LIMIT 1").fetchone()
-    cmd_str, out_path = _build_job_cmd(conn, kind, owner, job_kind, quality)
+    cmd_str, out_path = _build_job_cmd(conn, kind, owner, job_kind, quality, start)
     id_kwargs = {"movie_id": owner_id} if kind == "movie" else {"episode_id": owner_id}
     job_id = jobs.start_job(conn, job_kind, cmd_str, LOG_DIR,
                             cpu_quota=_current_quota(conn), queued=bool(busy), **id_kwargs)
@@ -1756,7 +1760,9 @@ def _enqueue(conn, kind, owner_id, job_kind, quality):
 def launch_job(movie_id: int, body: dict):
     conn = get_db()
     try:
-        return _enqueue(conn, "movie", movie_id, body.get("kind"), int(body.get("quality") or 22))
+        start = body.get("start")
+        return _enqueue(conn, "movie", movie_id, body.get("kind"), int(body.get("quality") or 22),
+                        int(start) if start is not None else None)
     finally:
         conn.close()
 

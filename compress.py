@@ -22,6 +22,9 @@ HOLD = {"The Odyssey (2026)", "Toy Story 5 (2026)"}
 # Failed encodes that say nothing about the film: Rocky IV (2082) died in the 2026-11-04 crash, the other nine had
 # their tmux killed with mm-compress.service's cgroup at second 0 (fixed in c465569). These may be queued again.
 INFRA_FAILED = {2082, 2084, 2085, 2086, 2087, 2088, 2089, 2090, 2091, 2092}
+# Samples go before the next film (Antonio 2026-11-19): every (scene start in s, RF) pair is one 30 s job in the
+# encode lane, same preset as the full encode, one per run. A pair with a job of any status is never queued again.
+SAMPLES = {}   # folder -> {"starts": [s, ...], "rf": [q, ...]}; filled once the scenes are picked
 
 
 def ceiling(height):
@@ -65,18 +68,37 @@ def candidates(conn):
     return sorted(out, key=lambda c: c["bps"] / c["cap"], reverse=True)   # furthest over the ceiling first
 
 
+def next_sample(conn):
+    """-> (movie id, folder, start, rf) of the first pair in SAMPLES that has no job yet, or None."""
+    for folder, spec in SAMPLES.items():
+        m = conn.execute("SELECT id FROM movies WHERE folder=?", (folder,)).fetchone()
+        if not m:
+            continue
+        tried = " ".join(r[0] or "" for r in conn.execute("SELECT cmd FROM jobs WHERE movie_id=? AND kind='sample'", (m[0],)))
+        for s in spec["starts"]:
+            for q in spec["rf"]:
+                if f".sample.rf{q}.t{s}.mkv" not in tried:
+                    return m[0], folder, s, q
+    return None
+
+
 def queue_next(conn):
     # Without the Flatpak build in HANDBRAKE_CLI the job runs Arch's HandBrakeCLI, which strips Dolby Vision: a
     # day and a half of CPU that encode_checks then throws away. mm-compress.service started without
     # .env.systemd on its first run (Rocky IV, job 2081, cancelled at 0.05 %).
     if "flatpak" not in os.environ.get("HANDBRAKE_CLI", ""):
         raise SystemExit("HANDBRAKE_CLI is not the Flatpak HandBrake (load .env.systemd); not queuing")
-    if conn.execute("SELECT 1 FROM jobs WHERE kind='encode' AND status IN ('running','queued')").fetchone():
+    if conn.execute("SELECT 1 FROM jobs WHERE kind IN ('encode','sample') AND status IN ('running','queued')").fetchone():
         return None
+    import app
+    smp = next_sample(conn)
+    if smp:
+        mid, folder, start, q = smp
+        job = app._enqueue(conn, "movie", mid, "sample", q, start)
+        return {"id": mid, "folder": folder, "sample": f"rf{q} t{start}", "job": job.get("job_id")}
     todo = candidates(conn)
     if not todo:
         return None
-    import app
     c = todo[0]
     job = app._enqueue(conn, "movie", c["id"], "encode", QUALITY)
     app._mark_auto_finalize(conn, job.get("job_id"))
@@ -95,6 +117,7 @@ if __name__ == "__main__":
         sys.exit()
     q = queue_next(conn)
     if q:
+        rec = {"sample": q["sample"]} if "sample" in q else {"bps": round(q["bps"]), "cap": q["cap"]}
         open(LOG, "a").write(json.dumps({"time": time.strftime("%F %T"), "status": "ok", "path": q["folder"],
-                                         "bps": round(q["bps"]), "cap": q["cap"], "job": q["job"]}) + "\n")
+                                         **rec, "job": q["job"]}) + "\n")
     print("queued", q["folder"] if q else "nothing")

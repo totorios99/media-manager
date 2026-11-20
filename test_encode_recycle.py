@@ -35,7 +35,9 @@ def main():
     kept = os.path.join(TMP, ".recycle", "Movies", "F (2000)", "F (2000).mkv")
     assert open(kept, "rb").read() == b"o" * 2000, "original not in .recycle"
     assert open(os.path.join(folder, "F (2000).mkv"), "rb").read() == b"n" * 1000, "encode not in place"
-    assert app._lane("encode") == "encode" and app._lane("remux") == app._lane("propedit") == "main"
+    assert app._lane("encode") == app._lane("sample") == "encode" and app._lane("remux") == app._lane("propedit") == "main"
+    assert app.SAMPLE_RE.search(".F.sample.rf20.t3605.mkv").groups() == ("20", "3605")
+    assert app.SAMPLE_RE.search(".F.sample.rf22.mkv").groups() == ("22", None)
     print("test_encode_recycle OK")
 
 

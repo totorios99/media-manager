@@ -163,18 +163,16 @@ el remux y avisa**. La copia caduca a los 7 días.
    Está en HOLD de `compress.py` de forma permanente.
 10. **Entrada manual de series** (`Downloads/manual/shows`, 7afd03f): código y tests listos,
     **sin prueba real**. La primera serie que entre hay que vigilarla de punta a punta.
-11. **Dragon Ball Z, eps 199/251/253** (2026-11-20, en curso). Antonio confirmó latino por
-    oído en el pack `Downloads/dbz-latino-check/multi/` (1080p h264, AAC 44.1 kHz):
-    - 199: pista 6 "Español Latino" va en lugar del castellano de la biblioteca. Desfase
-      medido contra el japonés (multi va detrás de la biblioteca), por tramos de la
-      biblioteca: 0-108.5 s +777 ms, 108.5-707 s +866→845 ms, 707-1352.5 s +763→777 ms,
-      1352.5 s-fin +875 ms. Los cortes 108.5 y 707 caen en silencio. Hay que injertarlo
-      por tramos, no con un solo `--sync`.
-    - 251: pista 4 es latino. La pista 5, etiquetada "Español Latino", es **inglés**.
-    - 253: pista 4 es latino.
-    - 251 y 253 entran completos (video del pack); faltan en la biblioteca.
-    - Después: quitar castellano del 199, avisar a homelab que el pack puede borrarse.
-      LACRA (`.ts` 480p) no se usa.
+11. **Dragon Ball Z, eps 199/251/253: cerrado el 2026-11-20.** Latino confirmado por Antonio
+    de oído (pack `multi`; en el 251 la segunda pista "Español Latino" es inglés).
+    - 199: latino injertado por tramos sobre el video de la biblioteca (desfases 777/855/770/
+      875 ms, cortes en 108.5, 707 y 1352.5 s; AAC 192k con `--sync -23` por el retardo del
+      codificador; residual < 1 ms contra el latino del pack). Castellano quitado; original en
+      `.recycle/Shows/...`. Los últimos 27 s no tienen latino en el pack (silencio).
+    - 251 (S08E32) y 253 (S08E34): episodios completos del pack, video 1080p h264 con bandas
+      (los vecinos son HEVC 1448x1080), pistas copiadas bit a bit.
+    - Sin verificar: la sincronía latino↔video entre idiomas (correlación débil). Se asume la
+      del pack. Si Antonio nota desfase de labios en estos tres, empezar por ahí.
 
 ## Incidente del 2026-09-18: corte de luz
 

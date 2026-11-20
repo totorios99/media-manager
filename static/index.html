@@ -672,7 +672,7 @@ function paintInbox() {
         ${i.status === 'failed' ? `<button class="btn" style="padding:2px 8px;font-size:10px" onclick="inboxRetry(${i.id})">Reintentar</button>` : ''}
       </div>
       ${i.status === 'needs_title' ? `<div style="display:flex;gap:8px;margin-top:6px">
-        <label class="visually-hidden" for="ibq${i.id}">Buscar en TMDB</label>
+        <label class="visually-hidden" for="ibq${i.id}">Buscar título</label>
         <input id="ibq${i.id}" value="${esc(i.title || '')}" style="flex:1" onkeydown="if(event.key==='Enter')inboxSearch(${i.id})">
         <button class="btn" onclick="inboxSearch(${i.id})">Buscar</button></div>
         <div id="ibr${i.id}"></div>` : ''}
@@ -681,16 +681,21 @@ function paintInbox() {
 }
 async function inboxSearch(id) {
   const q = document.getElementById('ibq' + id).value;
-  const results = await api(`/api/tmdb/search?q=${encodeURIComponent(q)}`).catch(e => { oops(e); return []; });
-  document.getElementById('ibr' + id).innerHTML = results.map(r => `
-    <div class="cand" role="button" tabindex="0" onclick="inboxRetry(${id}, ${r.tmdb_id})" onkeydown="if(event.key==='Enter')inboxRetry(${id}, ${r.tmdb_id})">
+  // a show is Sonarr's: its search, pinned by TVDB id; a film is TMDB's
+  const show = (INBOX.find(i => i.id === id) || {}).path?.includes('/manual/shows/');
+  const results = await api(show ? `/api/sonarr/lookup?q=${encodeURIComponent(q)}` : `/api/tmdb/search?q=${encodeURIComponent(q)}`)
+    .catch(e => { oops(e); return []; });
+  document.getElementById('ibr' + id).innerHTML = results.map(r => {
+    const pin = show ? `{tvdb_id:${r.tvdb_id}}` : `{tmdb_id:${r.tmdb_id}}`;
+    return `
+    <div class="cand" role="button" tabindex="0" onclick="inboxRetry(${id}, ${pin})" onkeydown="if(event.key==='Enter')inboxRetry(${id}, ${pin})">
       ${r.poster_path ? `<img src="${posterUrl(r.poster_path)}" alt="" width="40" height="60" loading="lazy">` : ''}
       <span>${esc(r.title)} (${r.year || '?'}) <span class="cl">${esc(r.original_language || '')}</span></span>
-    </div>`).join('') || '<div class="empty" style="padding:14px">NO RESULTS</div>';
+    </div>`; }).join('') || '<div class="empty" style="padding:14px">NO RESULTS</div>';
 }
-async function inboxRetry(id, tmdbId) {
+async function inboxRetry(id, pin) {
   await api(`/api/inbox/${id}/retry`, { method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify(tmdbId ? { tmdb_id: tmdbId } : {}) }).catch(oops);
+    body: JSON.stringify(pin || {}) }).catch(oops);
   await loadMovies(); paintInbox();
 }
 

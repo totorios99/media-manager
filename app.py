@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     path TEXT UNIQUE NOT NULL, size INTEGER, status TEXT DEFAULT 'waiting', reason TEXT,
     tmdb_id INTEGER, title TEXT, year INTEGER, movie_id INTEGER, radarr_cmd INTEGER,
-    last_job INTEGER, imported_at REAL, updated_at TEXT
+    last_job INTEGER, imported_at REAL, updated_at TEXT, tvdb_id INTEGER, episodes TEXT
 );
 """
 
@@ -184,6 +184,8 @@ def _add_missing_columns(conn):
         ("jobs", "auto_finalize", "INTEGER DEFAULT 0"),
         ("tracks", "sdh_flag", "INTEGER DEFAULT 0"),
         ("tracks", "commentary_flag", "INTEGER DEFAULT 0"),
+        ("inbox_items", "tvdb_id", "INTEGER"),          # a show is Sonarr's, pinned by TVDB id
+        ("inbox_items", "episodes", "TEXT"),            # JSON [[season, episode], ...] imported for a show
     ):
         if not conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
@@ -795,20 +797,29 @@ def inbox_list():
 
 @app.post("/api/inbox/{item_id}/retry")
 def inbox_retry(item_id: int, body: dict | None = None):
-    """Back to `waiting`, optionally pinned to a TMDB id (the "Necesita título" fix). inbox.py picks it up on its
-    next pass; nothing heavy runs inside the request."""
-    tmdb_id = (body or {}).get("tmdb_id")
+    """Back to `waiting`, optionally pinned to a TMDB id (film) or TVDB id (show): the "Necesita título" fix.
+    inbox.py picks it up on its next pass; nothing heavy runs inside the request."""
+    body = body or {}
     conn = get_db()
     try:
         n = conn.execute("UPDATE inbox_items SET status='waiting', reason=NULL, tmdb_id=COALESCE(?, tmdb_id), "
-                         "updated_at=? WHERE id=? AND status IN ('needs_title','failed')",
-                         (tmdb_id, _now(), item_id)).rowcount
+                         "tvdb_id=COALESCE(?, tvdb_id), updated_at=? WHERE id=? AND status IN ('needs_title','failed')",
+                         (body.get("tmdb_id"), body.get("tvdb_id"), _now(), item_id)).rowcount
         conn.commit()
         if not n:
             raise HTTPException(409, "only a stuck item can be retried")
         return {"ok": True}
     finally:
         conn.close()
+
+
+@app.get("/api/sonarr/lookup")
+def sonarr_lookup(q: str):
+    """Sonarr's own series search, for a show in the manual inbox that needs its title picked."""
+    import inbox
+    return [{"tvdb_id": r.get("tvdbId"), "title": r.get("title"), "year": r.get("year"),
+             "original_language": (r.get("originalLanguage") or {}).get("name")}
+            for r in (inbox._sonarr("GET", "series/lookup?" + urllib.parse.urlencode({"term": q})) or [])[:8]]
 
 
 @app.post("/api/movies/{movie_id}/suggest")

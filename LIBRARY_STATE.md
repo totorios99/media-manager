@@ -153,6 +153,28 @@ el remux y avisa**. La copia caduca a los 7 días.
 7. **One-Punch Man Season 1 sin subtítulos en español** (12 episodios, solo inglés). Es
    trabajo para Bazarr: falta asignarle perfil a la serie. Season 3 está cerrada; en E01,
    E02 y E06 el español es el subtítulo por defecto pero va segundo en la lista.
+8. **Muestras de La Odisea** (`compress.py` SAMPLES, 91bf12d): 9 muestras de 30 s, escenas
+   2599/3539/7843 s × RF 16/18/20, x265 10-bit slow. Las encola mm-compress solo cuando
+   termine el encode de Rocky IV (job 2095, ~65 h desde el 2026-11-19) y antes de la siguiente
+   película. Antonio compara; objetivo 42-45 Mbps de video en toda la película. Las escenas son
+   picos (~1.3× la media): proyectar a la película completa al presentar.
+9. **Toy Story 5 no se comprime nunca** (Antonio 2026-11-20): conserva su Dolby Vision
+   Profile 7 FEL completo (BL+EL+RPU; confirmado con dovi_tool 2.3.4 en `~/.local/bin`).
+   Está en HOLD de `compress.py` de forma permanente.
+10. **Entrada manual de series** (`Downloads/manual/shows`, 7afd03f): código y tests listos,
+    **sin prueba real**. La primera serie que entre hay que vigilarla de punta a punta.
+11. **Dragon Ball Z, eps 199/251/253** (2026-11-20, en curso). Antonio confirmó latino por
+    oído en el pack `Downloads/dbz-latino-check/multi/` (1080p h264, AAC 44.1 kHz):
+    - 199: pista 6 "Español Latino" va en lugar del castellano de la biblioteca. Desfase
+      medido contra el japonés (multi va detrás de la biblioteca), por tramos de la
+      biblioteca: 0-108.5 s +777 ms, 108.5-707 s +866→845 ms, 707-1352.5 s +763→777 ms,
+      1352.5 s-fin +875 ms. Los cortes 108.5 y 707 caen en silencio. Hay que injertarlo
+      por tramos, no con un solo `--sync`.
+    - 251: pista 4 es latino. La pista 5, etiquetada "Español Latino", es **inglés**.
+    - 253: pista 4 es latino.
+    - 251 y 253 entran completos (video del pack); faltan en la biblioteca.
+    - Después: quitar castellano del 199, avisar a homelab que el pack puede borrarse.
+      LACRA (`.ts` 480p) no se usa.
 
 ## Incidente del 2026-09-18: corte de luz
 

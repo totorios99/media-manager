@@ -319,6 +319,19 @@ def recycle(path):
     return dst
 
 
+def mark_clean(app, eid, path):
+    """The episode now meets the standard, by remux or by propedit alike. Only the remux used to say so, and 46
+    Yellowstone episodes F6 fixed with propedit sat at 'ready' for six weeks: a batch launch from the panel would
+    have remuxed them again against a config from October (2026-11-19)."""
+    c = app.get_db()
+    try:
+        c.execute("UPDATE episodes SET output_file=NULL, status='clean', updated_at=? WHERE id=?", (app._now(), eid))
+        app._reinspect_in_place(c, "episode", eid, path)
+        c.commit()
+    finally:
+        c.close()
+
+
 def main(run, limit, show, ignore_downloads=False, replace=False, match=None):
     src = sqlite3.connect(os.path.join(HERE, "media.db"))
     mem = sqlite3.connect(":memory:")
@@ -368,14 +381,7 @@ def main(run, limit, show, ignore_downloads=False, replace=False, match=None):
         if not err:
             if app is None:
                 import app
-            c = app.get_db()
-            try:
-                if action == "remux":
-                    c.execute("UPDATE episodes SET output_file=NULL, status='clean', updated_at=? WHERE id=?", (app._now(), e["id"]))
-                app._reinspect_in_place(c, "episode", e["id"], path)
-                c.commit()
-            finally:
-                c.close()
+            mark_clean(app, e["id"], path)
         done += 1
         rec = {"id": e["id"], "file": e["file"], "action": action, "why": why, "status": "FAILED" if err else "ok",
                "error": err, "recycled": moved, "secs": round(time.time() - t0)}

@@ -129,7 +129,24 @@ def test_ffmpeg_fallback_makes_the_same_file():
     print("test_ffmpeg_fallback_makes_the_same_file OK")
 
 
+def test_mark_clean_after_propedit_too():
+    import sqlite3, types
+    db = tempfile.mktemp(suffix=".db")
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE episodes (id INTEGER PRIMARY KEY, status TEXT, output_file TEXT, updated_at TEXT)")
+    c.execute("INSERT INTO episodes VALUES (1, 'ready', NULL, NULL)")
+    c.commit()
+    seen = []
+    fake = types.SimpleNamespace(get_db=lambda: sqlite3.connect(db), _now=lambda: "now",
+                                 _reinspect_in_place=lambda conn, kind, eid, path: seen.append((kind, eid, path)))
+    f6.mark_clean(fake, 1, "/x.mkv")
+    assert c.execute("SELECT status, updated_at FROM episodes").fetchone() == ("clean", "now")
+    assert seen == [("episode", 1, "/x.mkv")]
+    print("test_mark_clean_after_propedit_too OK")
+
+
 if __name__ == "__main__":
+    test_mark_clean_after_propedit_too()
     test_remux_in_place_drops_french_and_keeps_the_rest(); test_refused_plan_leaves_the_original_alone(); test_downloads_busy()
     test_recycle_never_overwrites()
     test_end_times_do_not_decide_but_text_and_starts_do()

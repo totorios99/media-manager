@@ -17,7 +17,9 @@ MOVIES = os.environ.get("MEDIA_ROOT", "/srv/storage/Movies")
 CEILING = [(1600, 32e6), (700, 15e6), (0, 8e6)]          # (min height, video bps)
 QUALITY = 22                                             # HandBrake RF, the encode path's default
 MARGIN = 1.10                                            # 15.1 on a 15 Mbps ceiling is not worth a lossy pass
-# Never queued from here (Antonio 2026-11-18): each gets its own bitrate target, at an RF he picks from samples, not RF 22.
+# Never queued from here. The Odyssey (Antonio 2026-11-18): its own bitrate target, at an RF he picks from samples,
+# not RF 22. Toy Story 5 (Antonio 2026-11-20): stays uncompressed for good, to keep its full Dolby Vision P7
+# (BL+EL+RPU); a permanent decision, not a temporary hold.
 HOLD = {"The Odyssey (2026)", "Toy Story 5 (2026)"}
 # Failed encodes that say nothing about the film: Rocky IV (2082) died in the 2026-11-04 crash, the other nine had
 # their tmux killed with mm-compress.service's cgroup at second 0 (fixed in c465569). These may be queued again.
@@ -25,12 +27,8 @@ INFRA_FAILED = {2082, 2084, 2085, 2086, 2087, 2088, 2089, 2090, 2091, 2092}
 # Samples go before the next film (Antonio 2026-11-19): each (folder, scene start in s, RF) is one 30 s job in the
 # encode lane, same preset as the full encode, one per run, in this order. One with a job of any status is never
 # queued again. Scenes: the three 30 s windows with the most bytes between keyframes in the file's Cues index,
-# 10 min apart, past the logos and before the credits. Toy Story 5 goes first with ONE sample: if HandBrake turns
-# its Dolby Vision P7 into P8.1 (EL dropped), the rest of TS5 waits for Antonio.
-_TS5, _ODY = "Toy Story 5 (2026)", "The Odyssey (2026)"
-SAMPLES = ([(_TS5, 3243, 20)]
-           + [(_ODY, s, q) for s in (2599, 3539, 7843) for q in (16, 18, 20)]
-           + [(_TS5, s, q) for s in (3243, 4924, 2104) for q in (16, 18, 20, 22) if (s, q) != (3243, 20)])
+# 10 min apart, past the logos and before the credits. Toy Story 5 has none: it is never compressed (see HOLD).
+SAMPLES = [("The Odyssey (2026)", s, q) for s in (2599, 3539, 7843) for q in (16, 18, 20)]
 
 
 def ceiling(height):

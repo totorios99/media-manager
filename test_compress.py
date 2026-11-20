@@ -33,6 +33,10 @@ def main():
     assert compress.queue_next(c) is None, "one sample at a time"
     c.execute("UPDATE jobs SET status='failed' WHERE kind='sample'")          # a failed pair is not retried
     assert compress.queue_next(c)["sample"] == "rf22 t100"
+    import importlib
+    real = importlib.reload(compress).SAMPLES
+    assert len(real) == 9 and not [x for x in real if x[0] == "Toy Story 5 (2026)"], "TS5 is never sampled (2026-11-20)"
+    assert "Toy Story 5 (2026)" in compress.HOLD
     print("test_compress OK")
 
 

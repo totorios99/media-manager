@@ -153,11 +153,12 @@ el remux y avisa**. La copia caduca a los 7 días.
 7. **One-Punch Man Season 1 sin subtítulos en español** (12 episodios, solo inglés). Es
    trabajo para Bazarr: falta asignarle perfil a la serie. Season 3 está cerrada; en E01,
    E02 y E06 el español es el subtítulo por defecto pero va segundo en la lista.
-8. **Muestras de La Odisea** (`compress.py` SAMPLES, 91bf12d): 9 muestras de 30 s, escenas
-   2599/3539/7843 s × RF 16/18/20, x265 10-bit slow. Las encola mm-compress solo cuando
-   termine el encode de Rocky IV (job 2095, ~65 h desde el 2026-11-19) y antes de la siguiente
-   película. Antonio compara; objetivo 42-45 Mbps de video en toda la película. Las escenas son
-   picos (~1.3× la media): proyectar a la película completa al presentar.
+8. **La Odisea: RF 18** (Antonio 2026-11-23, tras ver las muestras). Las 9 muestras (jobs
+   2097-2105) dieron 3-22 Mbps de video a RF 18 contra 81-85 del original en esas escenas;
+   VMAF RF 16 vs RF 20 difiere < 1 punto (7843: 98.5/97.6; 3539: 87.4/86.6). El objetivo de
+   42-45 Mbps queda descartado: ningún RF probado llega ahí y no hace falta. Encode job 2107
+   (RF 18, auto_finalize) encolado detrás de The Forever Purge (2106); sigue en HOLD para el
+   timer horario.
 9. **Toy Story 5 no se comprime nunca** (Antonio 2026-11-20): conserva su Dolby Vision
    Profile 7 FEL completo (BL+EL+RPU; confirmado con dovi_tool 2.3.4 en `~/.local/bin`).
    Está en HOLD de `compress.py` de forma permanente.

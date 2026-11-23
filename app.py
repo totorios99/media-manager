@@ -2923,6 +2923,7 @@ def _jellyfin_refresh(folder, file_name, title=None, timeout=90):
     notification, only strengthen it."""
     token = _jellyfin_token()
     _jellyfin_refresh.played = False
+    _jellyfin_refresh.has_poster = False
     if not (JELLYFIN_URL and token):
         return True, "sin credenciales de Jellyfin: no verificado"
     path = f"{JELLYFIN_MOVIES}/{folder}/{file_name}"
@@ -2959,6 +2960,11 @@ def _jellyfin_refresh(folder, file_name, title=None, timeout=90):
         if not match:
             return False, f"Jellyfin no lo indexó tras escanear ({JELLYFIN_SCAN_WAIT} s)"
         _jellyfin_refresh.played = bool((match.get("UserData") or {}).get("Played"))
+        # Jellyfin keeps posters in its own metadata dir (SaveLocalMetadata=false,
+        # library mounted read-only), so an empty folder says nothing about the poster.
+        # ponytail: tags as of the search, not after the item refresh below; a poster
+        # fetched only by that refresh still reads as missing once.
+        _jellyfin_refresh.has_poster = bool((match.get("ImageTags") or {}).get("Primary"))
         subprocess.run(["curl", "-s", "-o", "/dev/null", "--max-time", str(timeout),
                         "-X", "POST", *hdr,
                         f"{JELLYFIN_URL}/Items/{match['Id']}/Refresh"
@@ -3104,6 +3110,8 @@ def _announce_ready(conn, kind, owner_id):
     _restore_artwork(kind, owner["folder"])
     pending, notes = _readiness(conn, kind, owner_id, owner)
     seen, why = _jellyfin_refresh(owner["folder"], owner["file"], owner.get("title"))
+    if getattr(_jellyfin_refresh, "has_poster", False) and "sin carátula" in notes:
+        notes.remove("sin carátula")
     if not seen:
         pending.append("indexar en Jellyfin")
     elif why and why != "refrescado":

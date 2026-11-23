@@ -11,7 +11,7 @@ import app  # noqa: E402
 PATH = "/hdd1/Movies/New Film (2026)/New Film (2026).mkv"
 
 
-def run(appears_after):
+def run(appears_after, image_tags=None):
     """appears_after: number of searches that come back empty before the item shows."""
     calls = {"search": 0, "scan": 0, "item_refresh": 0}
 
@@ -26,7 +26,7 @@ def run(appears_after):
         else:
             calls["search"] += 1
             hit = appears_after is not None and calls["search"] > appears_after
-            out = json.dumps({"Items": [{"Id": "abc", "Path": PATH, "UserData": {}}] if hit else []})
+            out = json.dumps({"Items": [{"Id": "abc", "Path": PATH, "UserData": {}, "ImageTags": image_tags or {}}] if hit else []})
         return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
 
     app.subprocess.run, real_run = fake, app.subprocess.run
@@ -49,6 +49,13 @@ def main():
 
     (ok, why), c = run(appears_after=None)       # never appears
     assert not ok and "no lo indexó" in why and c["scan"] == 1 and c["item_refresh"] == 0, (ok, why, c)
+    assert not app._jellyfin_refresh.has_poster
+
+    # poster lives in Jellyfin's metadata dir, not the folder: still counts
+    (ok, why), c = run(appears_after=0, image_tags={"Primary": "x"})
+    assert ok and app._jellyfin_refresh.has_poster, (ok, why, c)
+    (ok, why), c = run(appears_after=0, image_tags={"Logo": "x"})
+    assert not app._jellyfin_refresh.has_poster
     print("test_jellyfin_refresh OK")
 
 

@@ -33,6 +33,15 @@ def main():
     assert compress.queue_next(c) is None, "one sample at a time"
     c.execute("UPDATE jobs SET status='failed' WHERE kind='sample'")          # a failed pair is not retried
     assert compress.queue_next(c)["sample"] == "rf22 t100"
+    import tempfile
+    compress.MOVIES = tempfile.mkdtemp()
+    os.makedirs(os.path.join(compress.MOVIES, "R (1985)"))
+    open(os.path.join(compress.MOVIES, "R (1985)", "R.mkv"), "w").close()
+    compress.video_bps = lambda path: 56.5e6
+    c.execute("INSERT INTO movies VALUES (5, 'R (1985)', 'R.mkv', 2160, 99000000, 'clean')")
+    assert [x["id"] for x in compress.candidates(c)] == [5]
+    c.execute("INSERT INTO jobs (movie_id, kind, status) VALUES (5, 'encode', 'verified')")
+    assert compress.candidates(c) == [], "a film already encoded once is not encoded again"
     import importlib
     real = importlib.reload(compress).SAMPLES
     assert len(real) == 9 and not [x for x in real if x[0] == "Toy Story 5 (2026)"], "TS5 is never sampled (2026-11-20)"

@@ -52,6 +52,8 @@ def poll_with_sessions(answers, log_text=""):
 
 
 def main():
+    d = tempfile.mkdtemp()
+    assert jobs.library_ready(d) and not jobs.library_ready(d, d + "/Movies"), "an unmounted root holds back the queue"
     argv = launched_argv(False)
     tmux = argv.index("tmux")
     assert argv[0] == "systemd-run" and "--scope" in argv[:tmux] and argv[tmux + 1] == "new-session", argv

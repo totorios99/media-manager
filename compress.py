@@ -58,10 +58,14 @@ def candidates(conn):
     failed = {r[0] for r in conn.execute("SELECT movie_id, id FROM jobs WHERE kind='encode' AND status='failed'")
               if r[1] not in INFRA_FAILED}
     active = {r[0] for r in conn.execute("SELECT movie_id FROM jobs WHERE status IN ('running','queued')")}
+    # One pass per film: an RF 22 output can still sit over the ceiling (Rocky IV, 56.5 Mbps after job 2095), and
+    # encoding that output again only loses quality. ponytail: by movie id, so a film Radarr replaces later stays
+    # skipped too; queue that one by hand.
+    encoded = {r[0] for r in conn.execute("SELECT movie_id FROM jobs WHERE kind='encode' AND status IN ('done','verified')")}
     out = []
     for mid, folder, file, height, total in conn.execute(
             "SELECT id, folder, file, height, bitrate FROM movies WHERE status='clean' AND file IS NOT NULL"):
-        if mid in failed or mid in active or folder in HOLD or not file.lower().endswith(".mkv"):
+        if mid in failed or mid in active or mid in encoded or folder in HOLD or not file.lower().endswith(".mkv"):
             continue
         if total and total <= ceiling(height):     # the container total bounds the video: no header to read
             continue

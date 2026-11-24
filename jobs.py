@@ -104,6 +104,13 @@ def _launch(conn, job_id, cmd_str, log_dir, cpu_quota):
     subprocess.run(argv, check=True, env=env)
 
 
+def library_ready(*roots):
+    """False while a library root is missing. At boot on 2026-11-24 the ticker launched a queued encode four
+    minutes before /srv/storage mounted; HandBrake found no file and the job was lost. An unmounted /srv/storage
+    is an empty directory, so its Movies/Shows subfolders are what tells the disk is there."""
+    return all(os.path.isdir(r) for r in roots)
+
+
 def launch_queued(conn, job, log_dir, cpu_quota=None):
     _launch(conn, job["id"], job["cmd"], log_dir, cpu_quota)
 

@@ -490,7 +490,7 @@ def _job_ticker():
                     if not conn.execute(f"SELECT id FROM jobs WHERE status='running' AND {lane_sql} LIMIT 1").fetchone():
                         nxt = conn.execute(f"SELECT * FROM jobs WHERE status='queued' AND {lane_sql} "
                                            "ORDER BY id LIMIT 1").fetchone()
-                        if nxt:
+                        if nxt and jobs.library_ready(MEDIA_ROOT, SHOWS_ROOT):   # queued jobs wait for the disk
                             jobs.launch_queued(conn, dict(nxt), LOG_DIR, cpu_quota=_current_quota(conn))
                 # Quota stays on the old 30s cadence: every application is a
                 # `systemctl set-property` fork per running scope, and the tick

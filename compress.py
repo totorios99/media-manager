@@ -22,8 +22,10 @@ MARGIN = 1.10                                            # 15.1 on a 15 Mbps cei
 # (BL+EL+RPU); a permanent decision, not a temporary hold.
 HOLD = {"The Odyssey (2026)", "Toy Story 5 (2026)"}
 # Failed encodes that say nothing about the film: Rocky IV (2082) died in the 2026-11-04 crash, the other nine had
-# their tmux killed with mm-compress.service's cgroup at second 0 (fixed in c465569). These may be queued again.
-INFRA_FAILED = {2082, 2084, 2085, 2086, 2087, 2088, 2089, 2090, 2091, 2092}
+# their tmux killed with mm-compress.service's cgroup at second 0 (fixed in c465569). The Forever Purge (2106) died
+# at 49 % in the 2026-11-23 22:46 power cut; The Odyssey (2107) launched at boot before /srv/storage was mounted.
+# These may be queued again.
+INFRA_FAILED = {2082, 2084, 2085, 2086, 2087, 2088, 2089, 2090, 2091, 2092, 2106, 2107}
 # Samples go before the next film (Antonio 2026-11-19): each (folder, scene start in s, RF) is one 30 s job in the
 # encode lane, same preset as the full encode, one per run, in this order. One with a job of any status is never
 # queued again. Scenes: the three 30 s windows with the most bytes between keyframes in the file's Cues index,

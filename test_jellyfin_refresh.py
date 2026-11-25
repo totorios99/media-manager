@@ -11,7 +11,7 @@ import app  # noqa: E402
 PATH = "/hdd1/Movies/New Film (2026)/New Film (2026).mkv"
 
 
-def run(appears_after, image_tags=None):
+def run(appears_after, image_tags=None, poster_later=False):
     """appears_after: number of searches that come back empty before the item shows."""
     calls = {"search": 0, "scan": 0, "item_refresh": 0}
 
@@ -23,6 +23,9 @@ def run(appears_after, image_tags=None):
         elif "/Items/abc/Refresh" in url:
             calls["item_refresh"] += 1
             out = ""
+        elif url.endswith("/Items/abc"):
+            calls["item_get"] = calls.get("item_get", 0) + 1
+            out = json.dumps({"ImageTags": {"Primary": "y"} if poster_later else {}})
         else:
             calls["search"] += 1
             hit = appears_after is not None and calls["search"] > appears_after
@@ -55,7 +58,10 @@ def main():
     (ok, why), c = run(appears_after=0, image_tags={"Primary": "x"})
     assert ok and app._jellyfin_refresh.has_poster, (ok, why, c)
     (ok, why), c = run(appears_after=0, image_tags={"Logo": "x"})
-    assert not app._jellyfin_refresh.has_poster
+    assert not app._jellyfin_refresh.has_poster and c["item_get"] == app.POSTER_WAIT // 5, c
+    # a new film gets its poster from the item refresh, seconds later (Spider-Man, Nov 25th, 2026)
+    (ok, why), c = run(appears_after=0, poster_later=True)
+    assert app._jellyfin_refresh.has_poster and c["item_get"] == 1, c
     print("test_jellyfin_refresh OK")
 
 

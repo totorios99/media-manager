@@ -2912,6 +2912,9 @@ JELLYFIN_USER = os.environ.get("JELLYFIN_USER", "")
 JELLYFIN_SCAN_WAIT = int(os.environ.get("MM_JELLYFIN_SCAN_WAIT", "60"))   # seconds
 
 
+POSTER_WAIT = int(os.environ.get("MM_POSTER_WAIT", "60"))   # seconds
+
+
 def _jellyfin_refresh(folder, file_name, title=None, timeout=90):
     """Make Jellyfin re-read the file we just put in place, and say whether it
     now holds it. Returns (ok, detail).
@@ -2962,14 +2965,22 @@ def _jellyfin_refresh(folder, file_name, title=None, timeout=90):
         _jellyfin_refresh.played = bool((match.get("UserData") or {}).get("Played"))
         # Jellyfin keeps posters in its own metadata dir (SaveLocalMetadata=false,
         # library mounted read-only), so an empty folder says nothing about the poster.
-        # ponytail: tags as of the search, not after the item refresh below; a poster
-        # fetched only by that refresh still reads as missing once.
         _jellyfin_refresh.has_poster = bool((match.get("ImageTags") or {}).get("Primary"))
         subprocess.run(["curl", "-s", "-o", "/dev/null", "--max-time", str(timeout),
                         "-X", "POST", *hdr,
                         f"{JELLYFIN_URL}/Items/{match['Id']}/Refresh"
                         "?metadataRefreshMode=Default&imageRefreshMode=FullRefresh"
                         "&replaceAllImages=false"], check=False)
+        # A film new to Jellyfin gets its poster from that refresh, a few seconds later:
+        # Spider-Man: Brand New Day was announced "sin carátula" on Nov 25th, 2026 and had
+        # it minutes after. Wait for it before calling it missing.
+        for _ in range(POSTER_WAIT // 5 if not _jellyfin_refresh.has_poster else 0):
+            time.sleep(5)
+            out = subprocess.run(["curl", "-s", "--max-time", str(timeout), *hdr, f"{base}/{match['Id']}"],
+                                 capture_output=True, text=True).stdout
+            if ((json.loads(out or "{}") or {}).get("ImageTags") or {}).get("Primary"):
+                _jellyfin_refresh.has_poster = True
+                break
         return True, "refrescado"
     except Exception as e:
         return True, f"no se pudo consultar Jellyfin: {e}"
